@@ -22,6 +22,9 @@ import { makeImpulse } from './reverb.js';
 import { SOUNDS, blockSoundName, resolveSound } from './sounds.js';
 import { wireAudioEvents } from './wiring.js';
 
+const MAX_STARTS_PER_FRAME = 6;    // new voices per ~frame (16 ms window; prio > 0 exempt): node creation costs main-
+const FRAME_WINDOW_MS = 16;        // thread time (~0.3-1 ms per voice on a weak CPU), so a burst cannot stall a frame.
+                                   // A time window (not frame()) so it also resets on screens where nothing renders.
 const START_LEAD = 0.005;           // seconds between play() and the first sample (input reaction budget 50 ms)
 const SETTLE = 0.6;              // offline renders start the sound after this (compressor start-up transient)
 const DRY_DAY = 0.8, SEND_DAY = 0.45, DRY_NIGHT = 0.65, SEND_NIGHT = 0.75;
@@ -30,8 +33,10 @@ const DRY_DAY = 0.8, SEND_DAY = 0.45, DRY_NIGHT = 0.65, SEND_NIGHT = 0.75;
  * Build the mixing graph on any BaseAudioContext (live or offline). Returns the named nodes.
  * @param {BaseAudioContext} ctx
  * @param {{master:number, music:number, sfx:number}} gains
+ * @param {{reverb?: boolean}} [opt]  reverb:false skips the music convolver (offline SFX renders: the music bus is
+ *                                    silent there, and the 3.5 s convolution is the most expensive node)
  */
-export function buildGraph(ctx, gains) {
+export function buildGraph(ctx, gains, opt = {}) {
   const g = (v) => { const n = ctx.createGain(); n.gain.value = v; return n; };
   const n = {};
   n.sfxIn = g(1);
@@ -49,8 +54,11 @@ export function buildGraph(ctx, gains) {
   n.duck = g(1);
   n.dry = g(DRY_DAY);
   n.send = g(SEND_DAY);
-  n.convolver = ctx.createConvolver();
-  n.convolver.buffer = makeImpulse(ctx, { seconds: 3.5, rt60: 3.0, damp: 0.65 });
+  const reverb = opt.reverb !== false;
+  if (reverb) {
+    n.convolver = ctx.createConvolver();
+    n.convolver.buffer = makeImpulse(ctx, { seconds: 3.5, rt60: 3.0, damp: 0.65 });
+  }
   n.limiter = ctx.createDynamicsCompressor();
   n.limiter.threshold.value = -6; n.limiter.ratio.value = 20; n.limiter.knee.value = 0;
   n.limiter.attack.value = 0.003; n.limiter.release.value = 0.1;
@@ -63,7 +71,7 @@ export function buildGraph(ctx, gains) {
   n.sfxIn.connect(n.muffle); n.muffle.connect(n.sfxComp); n.sfxComp.connect(n.sfxVol); n.sfxVol.connect(n.master);
   n.musicIn.connect(n.musicVol); n.musicVol.connect(n.duck);
   n.duck.connect(n.dry); n.dry.connect(n.master);
-  n.duck.connect(n.send); n.send.connect(n.convolver); n.convolver.connect(n.master);
+  if (reverb) { n.duck.connect(n.send); n.send.connect(n.convolver); n.convolver.connect(n.master); }
   n.master.connect(n.limiter); n.limiter.connect(n.ceiling); n.ceiling.connect(ctx.destination);
   n.ceiling.connect(n.analyser);
   return n;
@@ -113,6 +121,9 @@ export function createAudioSystem(game) {
   const eye = { x: 0, y: 0, z: 0 };
   const sp = { gain: 0, pan: 0, dist: 0 };
   const unknown = {};
+  const LOG_MAX = 256;
+  const log = [];            // ring of recent plays for diagnostics/tests: {name, t, tick, gain, pan}
+  let logHead = 0;
   let ctx = null;
   let graph = null;
   let music = null;
@@ -122,6 +133,10 @@ export function createAudioSystem(game) {
   let night = false;
   let hiddenSuspended = false;
   let errors = 0;
+  let startsThisFrame = 0;
+  let frameWindowAt = 0;
+  let sfxSilent = false;     // master or sfx bus at 0 (muted): build no voices at all
+  let budgetDropped = 0;
 
   const now = () => (ctx ? ctx.currentTime : performance.now() / 1000);
   const running = () => !!ctx && ctx.state === 'running';
@@ -134,6 +149,7 @@ export function createAudioSystem(game) {
   function applySettings() {
     if (!graph) return;
     const gns = busGains(game.settings);
+    sfxSilent = !(gns.master > 0 && gns.sfx > 0);
     const t = ctx.currentTime;
     // linear ramps (not setTargetAtTime) so 0 really is silence (mute) and there is no zipper noise
     ramp(graph.master.gain, gns.master, t, 0.05);
@@ -218,6 +234,11 @@ export function createAudioSystem(game) {
     const key = resolveSound(name);
     if (!key) { unknown[name] = (unknown[name] || 0) + 1; return null; }
     if (!running() || !graph) return null;
+    if (sfxSilent) return null; // muted / effects volume 0: nothing would be heard, so build nothing
+    const prio = opts.prio || 0;
+    const nowMs = performance.now();
+    if (nowMs - frameWindowAt >= FRAME_WINDOW_MS) { frameWindowAt = nowMs; startsThisFrame = 0; }
+    if (startsThisFrame >= MAX_STARTS_PER_FRAME && prio <= 0) { budgetDropped++; return null; }
     const def = SOUNDS[key];
     let gain = def.vol * (def.trim || 1) * (Number.isFinite(opts.volume) ? Math.max(0, Math.min(2, opts.volume)) : 1);
     let pan = 0;
@@ -229,8 +250,9 @@ export function createAudioSystem(game) {
     }
     if (gain <= 0.0005) return null;
     const t = ctx.currentTime;
-    const adm = table.admit(key, t, { gap: def.gap, prio: opts.prio || 0 });
+    const adm = table.admit(key, t, { gap: def.gap, prio });
     if (!adm.ok) return null;
+    startsThisFrame++;
     if (adm.steal) { killVoice(adm.steal, 0.03); const s = adm.steal; setTimeout(() => disconnect(s), 120); }
     let v;
     try {
@@ -239,6 +261,8 @@ export function createAudioSystem(game) {
       warn(`play ${key}`, err);
       return null;
     }
+    const entry = { name: key, t: Math.round(t * 1000) / 1000, tick: game.tickCount | 0, gain: Math.round(gain * 1000) / 1000, pan: Math.round(pan * 100) / 100 };
+    if (log.length < LOG_MAX) log.push(entry); else { log[logHead] = entry; logHead = (logHead + 1) % LOG_MAX; }
     return table.add(key, t, v.end, { out: v.outNode, panner: v.panner, sources: v.sources });
   }
 
@@ -318,24 +342,34 @@ export function createAudioSystem(game) {
       s.state = ctx ? ctx.state : 'none';
       s.started = table.total;
       s.dropped = table.dropped;
+      s.budgetDropped = budgetDropped;
       s.stolen = table.stolen;
       s.unknown = { ...unknown };
       s.music = music ? music.stats() : { ready: false, enabled: false, playing: false, wanted: wantMusic };
       s.music.wanted = wantMusic;
       s.night = night;
       s.sampleRate = ctx ? ctx.sampleRate : 0;
+      s.muffleHz = graph ? Math.round(graph.muffle.frequency.value) : 0;
+      s.duck = graph ? Math.round(graph.duck.gain.value * 100) / 100 : 1;
+      s.listener = { x: Math.round(listener.x * 10) / 10, y: Math.round(listener.y * 10) / 10, z: Math.round(listener.z * 10) / 10, yaw: Math.round(listener.yaw * 100) / 100 };
       return s;
     },
 
     tick() { if (wiring) wiring.tick(); },
 
     frame() {
-      // listener = camera (falls back to the player's eye)
+      // listener = camera pose (position AND yaw: the third-person front view looks back at the player, so left/right
+      // must follow what is on screen, not the player's facing). Falls back to the player's eye. The player system
+      // is registered before audio, so the camera already holds this frame's pose.
       const p = game.player;
       const cam = game.renderer && game.renderer.camera;
-      if (cam && cam.position && game.meta) { listener.x = cam.position.x; listener.y = cam.position.y; listener.z = cam.position.z; }
-      else if (p && p.getEyePos) { p.getEyePos(eye, true); listener.x = eye.x; listener.y = eye.y; listener.z = eye.z; }
-      if (p && Number.isFinite(p.yaw)) listener.yaw = p.yaw;
+      if (cam && cam.position && game.meta) {
+        listener.x = cam.position.x; listener.y = cam.position.y; listener.z = cam.position.z;
+        listener.yaw = Number.isFinite(cam.rotation.y) ? cam.rotation.y : (p ? p.yaw : 0);
+      } else if (p && p.getEyePos) {
+        p.getEyePos(eye, true); listener.x = eye.x; listener.y = eye.y; listener.z = eye.z;
+        if (Number.isFinite(p.yaw)) listener.yaw = p.yaw;
+      }
       if (!ctx) return;
       const removed = table.prune(ctx.currentTime);
       for (let i = 0; i < removed.length; i++) disconnect(removed[i]);
@@ -356,6 +390,12 @@ export function createAudioSystem(game) {
     /* ---------------- diagnostics / tests (additive API) ---------------- */
     /** The live AudioContext (or null before unlock). */
     get context() { return ctx; },
+    /** Recent plays, oldest first (diagnostics): [{name, t (ctx seconds), tick, gain, pan}]. clear=true empties it. */
+    recent(clear = false) {
+      const out = log.length < LOG_MAX ? log.slice() : log.slice(logHead).concat(log.slice(0, logHead));
+      if (clear) { log.length = 0; logHead = 0; }
+      return out;
+    },
     /** The music player (or null before unlock). */
     get music() { return music; },
     /** All catalogue names. */
@@ -381,7 +421,7 @@ export function createAudioSystem(game) {
       const seconds = (opts.seconds || Math.min(8, pv.end + 0.3)) + at;
       const off = new Off(2, Math.ceil(sr * seconds), sr);
       const gns = busGains({ ...game.settings, ...(opts.settings || {}) });
-      const g = buildGraph(off, gns);
+      const g = buildGraph(off, gns, { reverb: false });
       let gain = def.vol * (def.trim || 1) * (Number.isFinite(opts.volume) ? opts.volume : 1), pan = 0;
       if (def.range > 0 && Number.isFinite(opts.x)) {
         spatial(0, 0, 0, 0, opts.x, opts.y || 0, opts.z || 0, def.range, 3, sp);

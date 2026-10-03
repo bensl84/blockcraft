@@ -516,3 +516,31 @@ test('audio: music starts on world:ready once unlocked, and stops on exit', asyn
   assert.equal(m.enabled, false);
   assert.equal(sys.stats().music.wanted, false);
 });
+
+test('audio: per-frame voice budget (6 starts per 16 ms, prio exempt) and no voices while muted', async () => {
+  const { game, sys } = await liveSystem();
+  await sys.unlock();
+  const names = ['ui.click', 'ui.open', 'ui.close', 'ui.tick', 'item.pop', 'ui.hint', 'ui.success', 'ui.undo', 'ui.whoosh'];
+  const got = names.map((n) => sys.play(n));
+  assert.equal(got.filter(Boolean).length, 6, 'only 6 new voices in one burst');
+  assert.ok(sys.stats().budgetDropped >= 3, 'the rest are counted as budget drops');
+  assert.ok(sys.play('explosion', { prio: 2 }), 'a priority sound still plays');
+  game.settings.muted = true;
+  game.events.emit('settings:changed', { key: 'muted', value: true, settings: game.settings });
+  const t0 = performance.now(); while (performance.now() - t0 < 20) { /* next budget window */ }
+  const before = sys.stats().started;
+  assert.equal(sys.play('ui.error'), null, 'muted -> no voice is built');
+  assert.equal(sys.stats().started, before);
+});
+
+test('audio: listener follows the camera pose (third-person front view mirrors left/right)', async () => {
+  const { game, sys } = await liveSystem();
+  await sys.unlock();
+  game.meta = { mode: 'creative' };
+  game.player.yaw = 0;
+  game.renderer = { camera: { position: { x: 0, y: 5.6, z: -4 }, rotation: { y: Math.PI } } }; // front view
+  sys.frame(game, 0.016, 1);
+  assert.equal(sys.stats().listener.yaw, 3.14);
+  const v = sys.play('cow.idle', { x: 5, y: 5.6, z: 0 }); // east of the player
+  assert.ok(v && v.panner && v.panner.pan.value < -0.3, `east pans left when the camera faces the player (${v && v.panner && v.panner.pan.value})`);
+});

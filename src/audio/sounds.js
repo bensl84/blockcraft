@@ -15,6 +15,17 @@ export const BLOCK_SOUND_TYPES = Object.freeze(['stone', 'wood', 'grass', 'dirt'
 export const MOB_VOICES = Object.freeze(['pig', 'cow', 'sheep', 'chicken', 'wolf', 'cat', 'horse', 'zombie', 'skeleton', 'creeper', 'spider']);
 export const MOB_KINDS = Object.freeze(['idle', 'hurt', 'death', 'step']);
 
+/**
+ * Run a recipe through a gentle low-pass (phase 2, in-world listening pass): the bright noise families (grass,
+ * plants, hisses, fizz) had 80-90 % of their energy above 5 kHz - a thin "tsss" on laptop speakers, and grass
+ * steps are the sound a child hears most. Everything the recipe draws goes through the filter.
+ */
+const soft = (fn, f = 6500) => (v) => {
+  const o = v.out;
+  v.out = lowpass(v, f, 0.6, o);
+  try { fn(v); } finally { v.out = o; }
+};
+
 /* ------------------------------------------------------------------ materials */
 // Each material: {hit, step, place, break} recipes. 'land' = a heavier step plus a body thump.
 const knock = (v, t, f, g, d = 0.08) => {
@@ -44,15 +55,18 @@ const MATERIALS = {
       noise(v, { color: 'pink', dur: 0.2, f: 520, f2: 300, q: 1.8, g: 0.35 });
     },
   },
-  grass: {
-    hit: (v) => crackle(v, { dur: 0.05, n: 3, type: 'highpass', f: 3000, q: 0.7, g: 0.35, len: 0.008 }),
-    step: (v) => { crackle(v, { dur: 0.1, n: 6, type: 'highpass', f: 3200, q: 0.7, g: 0.4, len: 0.01 }); noise(v, { dur: 0.09, f: 2200, q: 0.8, g: 0.18 }); },
-    place: (v) => { crackle(v, { dur: 0.1, n: 7, type: 'highpass', f: 2800, q: 0.7, g: 0.5, len: 0.012 }); noise(v, { color: 'pink', dur: 0.08, type: 'lowpass', f: 900, g: 0.4 }); },
-    break: (v) => {
-      crackle(v, { dur: 0.22, n: 14, type: 'highpass', f: 2600, q: 0.7, g: 0.55, len: 0.012, decay: 0.5 });
+  grass: { // a soft leafy crunch with a little body underneath (not a hiss)
+    hit: soft((v) => { crackle(v, { color: 'pink', dur: 0.05, n: 3, f: rr(v, 1900, 2500), q: 0.8, g: 0.45, len: 0.01 }); noise(v, { color: 'pink', dur: 0.04, type: 'lowpass', f: 900, g: 0.15 }); }),
+    step: soft((v) => {
+      crackle(v, { color: 'pink', dur: 0.1, n: 6, f: rr(v, 1800, 2400), fJit: 0.35, q: 0.8, g: 0.45, len: 0.012 });
+      noise(v, { color: 'pink', dur: 0.08, type: 'lowpass', f: 1100, g: 0.22, a: 0.004 });
+    }, 6000),
+    place: soft((v) => { crackle(v, { color: 'pink', dur: 0.1, n: 7, f: 2200, fJit: 0.35, q: 0.8, g: 0.55, len: 0.012 }); noise(v, { color: 'pink', dur: 0.08, type: 'lowpass', f: 900, g: 0.4 }); }),
+    break: soft((v) => {
+      crackle(v, { color: 'pink', dur: 0.22, n: 14, f: 2100, fJit: 0.4, q: 0.8, g: 0.6, len: 0.012, decay: 0.5 });
       noise(v, { color: 'pink', dur: 0.2, f: 1600, f2: 700, q: 0.7, g: 0.3 });
       noise(v, { color: 'brown', dur: 0.12, type: 'lowpass', f: 500, g: 0.4 });
-    },
+    }, 7000),
   },
   dirt: {
     hit: (v) => crackle(v, { color: 'pink', dur: 0.05, n: 2, f: 1200, q: 1, g: 0.45, len: 0.012 }),
@@ -116,14 +130,14 @@ const MATERIALS = {
     },
   },
   plant: {
-    hit: (v) => crackle(v, { dur: 0.04, n: 2, type: 'highpass', f: 4000, g: 0.25, len: 0.008 }),
-    step: (v) => { crackle(v, { dur: 0.08, n: 4, type: 'highpass', f: 4000, g: 0.3, len: 0.01 }); noise(v, { dur: 0.08, type: 'highpass', f: 3000, g: 0.1 }); },
-    place: (v) => { crackle(v, { dur: 0.1, n: 5, type: 'highpass', f: 3500, g: 0.4, len: 0.012 }); noise(v, { dur: 0.09, f: 2400, q: 0.8, g: 0.2 }); },
-    break: (v) => {
-      crackle(v, { dur: 0.16, n: 8, type: 'highpass', f: 3200, g: 0.45, len: 0.012, decay: 0.5 });
+    hit: soft((v) => crackle(v, { dur: 0.04, n: 2, f: 2800, q: 0.8, g: 0.3, len: 0.008 }), 7000),
+    step: soft((v) => { crackle(v, { color: 'pink', dur: 0.08, n: 4, f: 2600, fJit: 0.35, q: 0.8, g: 0.4, len: 0.01 }); noise(v, { color: 'pink', dur: 0.07, f: 1500, q: 0.7, g: 0.12 }); }, 6500),
+    place: soft((v) => { crackle(v, { dur: 0.1, n: 5, f: 2900, q: 0.8, g: 0.45, len: 0.012 }); noise(v, { color: 'pink', dur: 0.09, f: 2000, q: 0.8, g: 0.2 }); }, 7000),
+    break: soft((v) => {
+      crackle(v, { dur: 0.16, n: 8, f: 2800, q: 0.8, g: 0.5, len: 0.012, decay: 0.5 });
       noise(v, { dur: 0.14, f: 2600, f2: 1400, q: 0.8, g: 0.2 });
       tone(v, { t: 0.01, f: rr(v, 1500, 1900), dur: 0.03, g: 0.12, a: 0.001 }); // the little stem snap
-    },
+    }, 7500),
   },
   liquid: {
     hit: (v) => noise(v, { dur: 0.06, f: 1200, q: 1, g: 0.3 }),
@@ -227,19 +241,19 @@ const VOICES = {
     step: (v) => crackle(v, { dur: 0.08, n: 3, f: 2300, q: 3, g: 0.35, len: 0.01 }),
   },
   spider: { // soft chitter + hiss
-    idle: (v) => { crackle(v, { dur: 0.3, n: 9, type: 'highpass', f: 3500, q: 1, g: 0.3, len: 0.006 }); noise(v, { dur: 0.4, type: 'highpass', f: 4000, g: 0.12, a: 0.08 }); },
-    hurt: (v) => { noise(v, { dur: 0.22, type: 'highpass', f: 3500, g: 0.25, a: 0.01 }); crackle(v, { dur: 0.15, n: 6, type: 'highpass', f: 3000, g: 0.3, len: 0.006 }); },
-    death: (v) => noise(v, { dur: 0.8, type: 'highpass', f: 3000, f2: 1500, g: 0.25, a: 0.02 }),
-    step: (v) => crackle(v, { dur: 0.08, n: 4, type: 'highpass', f: 3500, g: 0.2, len: 0.005 }),
+    idle: soft((v) => { crackle(v, { dur: 0.3, n: 9, type: 'highpass', f: 3500, q: 1, g: 0.3, len: 0.006 }); noise(v, { dur: 0.4, type: 'highpass', f: 4000, g: 0.12, a: 0.08 }); }, 6000),
+    hurt: soft((v) => { noise(v, { dur: 0.22, type: 'highpass', f: 3500, g: 0.25, a: 0.01 }); crackle(v, { dur: 0.15, n: 6, type: 'highpass', f: 3000, g: 0.3, len: 0.006 }); }, 6000),
+    death: soft((v) => noise(v, { dur: 0.8, type: 'highpass', f: 3000, f2: 1500, g: 0.25, a: 0.02 }), 6000),
+    step: soft((v) => crackle(v, { dur: 0.08, n: 4, type: 'highpass', f: 3500, g: 0.2, len: 0.005 }), 6000),
   },
   creeper: { // creepers are almost silent; the fuse hiss is the warning
-    idle: (v) => crackle(v, { dur: 0.15, n: 5, type: 'highpass', f: 3000, g: 0.15, len: 0.01 }),
-    hurt: (v) => { noise(v, { color: 'pink', dur: 0.15, f: 1200, q: 1, g: 0.35, a: 0.005 }); crackle(v, { dur: 0.12, n: 5, type: 'highpass', f: 3000, g: 0.3 }); },
-    death: (v) => poof(v, 0.5),
-    hiss: (v) => { // fuse: a soft rising hiss, ~1.5 s
+    idle: soft((v) => crackle(v, { dur: 0.15, n: 5, type: 'highpass', f: 3000, g: 0.15, len: 0.01 }), 6000),
+    hurt: soft((v) => { noise(v, { color: 'pink', dur: 0.15, f: 1200, q: 1, g: 0.35, a: 0.005 }); crackle(v, { dur: 0.12, n: 5, type: 'highpass', f: 3000, g: 0.3 }); }, 6000),
+    death: soft((v) => poof(v, 0.5), 6000),
+    hiss: soft((v) => { // fuse: a soft rising hiss, ~1.5 s
       noise(v, { dur: 1.5, type: 'highpass', f: 2500, f2: 4500, g: 0.3, a: 1.2 });
       crackle(v, { dur: 1.5, n: 26, type: 'highpass', f: 4000, g: 0.12, len: 0.005 });
-    },
+    }, 6000),
   },
 };
 
@@ -350,11 +364,11 @@ add('entity.pop', (v) => { const f = rr(v, 300, 380); tone(v, { f, f2: f * 2.2, 
 add('entity.poof', (v) => poof(v, 0.5), 0.45, 16, { gap: 0.05 });
 
 // world
-add('tnt.fuse', (v) => { // soft fizz for the whole fuse (v.q.dur seconds, default 4)
+add('tnt.fuse', soft((v) => { // soft fizz for the whole fuse (v.q.dur seconds, default 4)
   const d = Math.max(0.5, Math.min(6, v.q.dur || 4));
   noise(v, { dur: d, type: 'highpass', f: 3000, f2: 3800, g: 0.22, a: 0.08, hold: d - 0.3 });
   crackle(v, { dur: d, n: Math.round(d * 14), type: 'highpass', f: 4500, g: 0.16, len: 0.005 });
-}, 0.5, 16, { gap: 0.05, pj: 0 });
+}, 6500), 0.5, 16, { gap: 0.05, pj: 0 });
 add('explosion', (v) => {
   // Kid-safe: a round soft "whump" (no sharp crack), rumble, then a gentle patter of falling bits.
   const kid = v.q.kid !== false;
@@ -377,9 +391,9 @@ add('bucket.fill', (v) => {
   for (let i = 0; i < 5; i++) { const f = 300 + i * 90; tone(v, { t: i * 0.08, f, f2: f * 1.8, dur: 0.06, g: 0.18 }); }
 }, 0.55, 16, { gap: 0.2 });
 add('bucket.empty', (v) => { noise(v, { dur: 0.45, f: 1500, f2: 400, q: 0.8, g: 0.45, a: 0.01 }); bubbles(v, 0.1, 3, 0.12); }, 0.55, 16, { gap: 0.2 });
-add('fire.ignite', (v) => { noise(v, { color: 'pink', dur: 0.32, f: 600, f2: 2000, q: 1, g: 0.4, a: 0.04 }); crackle(v, { t: 0.05, dur: 0.3, n: 6, type: 'highpass', f: 3000, g: 0.25 }); }, 0.5, 16, { gap: 0.15 });
+add('fire.ignite', soft((v) => { noise(v, { color: 'pink', dur: 0.32, f: 600, f2: 2000, q: 1, g: 0.4, a: 0.04 }); crackle(v, { t: 0.05, dur: 0.3, n: 6, type: 'highpass', f: 3000, g: 0.25 }); }, 7000), 0.5, 16, { gap: 0.15 });
 add('lava.pop', (v) => { tone(v, { f: 220, f2: 90, dur: 0.08, g: 0.45 }); noise(v, { color: 'brown', dur: 0.06, type: 'lowpass', f: 500, g: 0.3 }); }, 0.45, 12, { gap: 0.1 });
-add('shear', (v) => { for (const t of [0, 0.12]) { crackle(v, { t, dur: 0.03, n: 1, type: 'highpass', f: 5000, g: 0.45, len: 0.02 }); tone(v, { t, f: 3800, dur: 0.04, g: 0.12, a: 0.001 }); } }, 0.5, 16, { gap: 0.15 });
+add('shear', soft((v) => { for (const t of [0, 0.12]) { crackle(v, { t, dur: 0.03, n: 1, type: 'highpass', f: 5000, g: 0.45, len: 0.02 }); tone(v, { t, f: 3800, dur: 0.04, g: 0.12, a: 0.001 }); } }, 7500), 0.5, 16, { gap: 0.15 });
 add('bonemeal', (v) => { for (let i = 0; i < 4; i++) bell(v, { t: i * 0.06, f: rr(v, 1800, 3200), dur: 0.3, g: 0.1 }); noise(v, { dur: 0.15, type: 'highpass', f: 6000, g: 0.08, a: 0.02 }); }, 0.45, 16, { gap: 0.1 });
 add('egg.lay', (v) => { tone(v, { f: 600, f2: 250, dur: 0.08, g: 0.45 }); noise(v, { color: 'pink', dur: 0.05, type: 'lowpass', f: 900, g: 0.2 }); }, 0.45, 12, { gap: 0.2 });
 add('water.ambient', (v) => {

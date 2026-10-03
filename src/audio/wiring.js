@@ -35,7 +35,8 @@ export function wireAudioEvents(game, a) {
   const offs = [];
   const on = (name, fn) => offs.push(game.events.on(name, fn));
   const st = {
-    mining: null,          // {x, y, z, id, ticks}
+    mining: null,          // {x, y, z, id, last: tick of the last hit sound}
+    tick: 0,               // own tick counter (fallback when game.tickCount is missing, e.g. unit tests)
     eating: null,          // {ticks, item}
     fuses: new Map(),      // tnt entity id -> voice
     lastMob: new Map(),    // `${id}:${kind}` -> time
@@ -46,6 +47,9 @@ export function wireAudioEvents(game, a) {
   const at = (e, extra) => (e && Number.isFinite(e.x) ? { x: e.x, y: e.y, z: e.z, ...extra } : { ...extra });
   const kidSafe = () => { const m = game.meta; return !m || m.mode === 'creative' || m.difficulty === 'peaceful'; };
   const isMob = (type) => !!MOBS[type];
+  // the game tick number: interaction emits 'block:mining' earlier in the SAME tick as our tick(), so counting from
+  // the event's tick keeps the hit rhythm exactly 4 ticks (a private counter would make the first gap 3)
+  const tickNow = () => (Number.isFinite(game.tickCount) ? game.tickCount : st.tick);
   const mobOnce = (id, kind) => {
     const key = `${id}:${kind}`;
     const now = a.now();
@@ -72,7 +76,7 @@ export function wireAudioEvents(game, a) {
     if (!e) return;
     const m = st.mining;
     if (!m || m.x !== e.x || m.y !== e.y || m.z !== e.z) {
-      st.mining = { x: e.x, y: e.y, z: e.z, id: e.id, ticks: 0 };
+      st.mining = { x: e.x, y: e.y, z: e.z, id: e.id, last: tickNow() };
       const p = pos(e);
       a.playBlock('hit', soundOfBlock(e.id), p.x, p.y, p.z); // immediate feedback (< 50 ms)
     }
@@ -225,10 +229,11 @@ export function wireAudioEvents(game, a) {
     state: st,
     /** 20 TPS (only while playing): repeating mining hits and eating munches. */
     tick() {
+      st.tick++;
       const m = st.mining;
       if (m) {
-        m.ticks++;
-        if (m.ticks % MINING_HIT_TICKS === 0) {
+        if (tickNow() - m.last >= MINING_HIT_TICKS) {
+          m.last = tickNow();
           const id = game.world && game.world.getBlock ? game.world.getBlock(m.x, m.y, m.z) : m.id;
           if (!id) st.mining = null; // the block is gone (e.g. creative instant break without an event)
           else a.playBlock('hit', soundOfBlock(id), m.x + 0.5, m.y + 0.5, m.z + 0.5);

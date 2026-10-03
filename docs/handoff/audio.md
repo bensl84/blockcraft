@@ -4,6 +4,107 @@ Branch `lane/audio` · worktree `C:\Users\BSLeo\AppData\Roaming\Claude\scratch-w
 
 <!-- newest first: date · what changed · commands run + results (copy the PASS/FAIL lines) · remaining · blockers · spec conflicts -->
 
+## 2026-10-03 · PHASE 2 - merged real core, verified in real gameplay
+
+Merge: `git merge main` into `lane/audio` = `5047df5` (clean, no conflicts; no LEAD file touched by this lane).
+No temporary stub fallbacks existed in this lane, so nothing to remove. MOBS is still a stub on main, so
+`audio-mob-voices` stays PENDING (mob voices were verified with real `mob:sound` events at real positions instead).
+
+### Fixes made in phase 2 (all inside src/audio/* and lane tools)
+
+| What a player would notice | Fix |
+|---|---|
+| First mining "tock" came 3 ticks after the first, then every 4 | `wiring.js` counts from the game tick of the `block:mining` event (interaction emits it earlier in the same tick) - now exactly every 4 ticks |
+| Third-person FRONT view: a sound on the screen's left was heard on the right | `audio.js frame()` takes the listener yaw from the camera pose (`renderer.camera.rotation.y`), not the player's facing |
+| Grass footsteps (the sound a child hears most) were a thin "tsss" (83 % of energy above 5 kHz) | grass + plant recipes rebuilt as a soft leafy crunch with body; hisses (spider, creeper, TNT fuse, fire, shears) go through a gentle 6-7.5 kHz low-pass (`soft()` in `sounds.js`). Grass step: centroid 11.0 kHz -> 1.7 kHz, >5 kHz share 83 % -> 6.5 %. Trims re-measured (30 entries in `levels.js`); all 150 sounds still within 4 dB of their family target |
+| Weak-laptop safety | per-frame voice budget: max 6 new voices per 16 ms window (prio > 0 such as explosions exempt); muted / effects volume 0 builds no voices at all |
+| `audio-catalog` took 38-60 s (hit the 60 s scenario timeout once main merged) | sounds render in parallel batches, offline SFX renders skip the music convolver, and audio comes back from the page as base64 PCM instead of a JSON number array: now 2.4-2.8 s |
+
+Diagnostics added (additive API): `audio.recent(clear)` = ring of the last 256 plays `{name, t, tick, gain, pan}`;
+`stats()` also returns `muffleHz`, `duck`, `listener {x,y,z,yaw}`, `budgetDropped`.
+
+New tools: `tools/audio-inworld.mjs` (real-gameplay verification, below) and `tools/audio-spectrum.mjs` (brightness
+scan of the rendered WAVs). New smoke scenarios: `audio-mining-rhythm`, `audio-listener-views`. New unit tests: voice
+budget + muted skip, listener follows the camera pose.
+
+### Verified in-world (real generated world, real Chrome, real keyboard / mouse / touch)
+
+`node build.mjs --dev --out .tmp/build-audio && node tools/audio-inworld.mjs` -> `[audio-inworld] {"PASS":46,"FAIL":0}`;
+screenshots `.tmp/audio-inworld/NN-*.png`, report `.tmp/audio-inworld/report.json`. The screenshots were looked at
+(road, mining, underwater, wading, third-person views, touch place): each scene is what the step claims.
+
+```
+PASS  title: audio locked before any gesture; one real mouse click unlocks audio              (01-title-locked.png)
+PASS  music: world start requests music; first piece 20-40 s away (25.8 s); piano ready; no notes before it (02-world-start.png)
+PASS  steps: every road material heard underfoot (grass dirt stone wood sand gravel snow cloth glass metal) (03/04/05-road-*.png)
+PASS  steps: walking cadence 0.40 s (1.7 blocks at 4.3 m/s); own footsteps centred (pan 0)
+PASS  steps: sprinting (classic R + W) is faster: 0.30 s vs 0.40 s
+PASS  jump: small hop on planks -> block.land.wood, no big-fall; 8-block drop -> player.bigfall + block.land.wood
+PASS  mine: real mouse hold on dirt (survival): 4 hits at ticks 462/466/470/474, one block.break.dirt, nothing after (06/07-mine-*.png)
+PASS  mine: stone by hand: stone hits only; releasing the mouse stops the hits at once (08-mine-stone-cracking.png)
+PASS  creative: one hold = one break sound, zero mining hits; a tap places with one place sound (09/10-creative-*.png)
+PASS  water: falling 6 blocks into a pool = player.splash (no swim, no ground thud); head under -> muffle 867 Hz (11-water-underwater.png)
+PASS  water: muffle lifts on leaving the water (20 kHz); wading in = player.swim, not a splash (12-water-wading.png)
+PASS  pan: cow east of the player: right (+0.85) facing north; left (-0.75) after turning with the arrow key (13-pan-turned-around.png)
+PASS  pan: third-person back view right (+0.67); front view left (-0.67), like the screen (14/15-pan-third-person-*.png)
+PASS  music: night mood on at night; piano plays in-world; ducks to 0.30 under a 5-TNT chain, back to 0.99 (16-explosions.png)
+PASS  explosion chain is voice-limited (4 at once)
+PASS  perf: quiet 0.02 ms/frame of audio work; storm (5 sound events EVERY frame, ~10x real play) 0.2 ms/frame; fps 144 -> 144; 19 voices <= 32; draw calls identical with audio muted (177 = 177)
+PASS  tab hidden -> context suspended; visible -> running
+PASS  no page/console errors; exit to title stops the music
+PASS  touch (hasTouch context): the first finger tap unlocks audio; a finger tap in the world places with block.place.grass (18/19-touch-*.png)
+```
+
+Weak-laptop proxy `node tools/audio-inworld.mjs --swiftshader --only perf` -> `{"PASS":12,"FAIL":0}`: quiet 40 fps,
+storm 38 fps, muted 50 fps (noisy: the machine was shared with other lanes' browsers); audio work 0.02 ms/frame quiet;
+storm main-thread audio cost 0.79 ms/frame (3-4.5 ms/frame before the voice budget).
+
+### Commands run and results (phase 2, final)
+
+`node build.mjs --dev --out .tmp/build-audio` -> `[build] 0.1.0-055ad045-dev ... (1644 KB, dev)`
+
+`npm run test:unit` -> `tests 108 / pass 108 / fail 0`
+
+`node tools/smoke.mjs --tag audio`
+```
+PASS     audio-locked / audio-unlock / audio-events / audio-explosion-peak (kid-default -14.3 live, -15.5 offline)
+PASS     audio-catalog   2771 ms {"offTarget":0}
+PASS     audio-music / audio-volume (muted -120) / audio-positional
+PASS     audio-break-place      (was PENDING)
+PASS     audio-footsteps        (was PENDING) {"steps":3}
+PASS     audio-mining-rhythm    {"gaps":[4,4,4],"breaks":["block.break.dirt"]}
+PASS     audio-listener-views   {"pan":{"0":0.85,"1":0.67,"2":-0.67}}
+PENDING  audio-mob-voices       - stub lanes: mobs
+PENDING  mobs / survival-fall / save-load (other lanes' stubs)
+FAIL     cored-daynight         - CORE-D scenario, flaky; see Cross-lane defects (not caused by audio)
+PASS     page-errors
+[smoke] {"PASS":67,"PENDING":4,"SKIP":2,"FAIL":1}
+```
+`node tools/smoke.mjs --tag audio --touch --scenario audio-unlock,audio-locked,touch-controls,coree-touch` -> audio
+PASS, coree-touch PASS, touch-controls PENDING (touch stub).
+
+### Remaining gaps
+
+1. Mob voices in real gameplay (animals wandering past, hurt/death on real hits) need the MOBS lane. The wiring was
+   exercised with real `mob:sound` events at real world positions, but `audio-mob-voices` is PENDING.
+2. Nobody has listened with ears yet. `.tmp/audio-wav/*.wav` (all 150 sounds) and `music-day.wav` are ready; the parent
+   should listen once, especially footsteps on grass, the pickup pop and the piano.
+3. Title Play button: the (stub) menus do not emit `ui:click`, so pressing Play gives only the soft `ui.close`. The
+   MENUS lane should emit `ui:click` on its buttons (SPEC §6) - no audio change needed.
+4. The mining crack overlay was not visible in the stone-mining screenshot (FX lane is a stub) - not audio.
+5. P2 still open: cave reverb for SFX underground, per-biome ambient beds, distinct door/gate timbres.
+
+### Cross-lane defects
+
+1. **CORE-D `tools/scenarios/cored.mjs` `cored-daynight` is flaky** ("setTime never remeshes"). Repro: run
+   `node tools/smoke.mjs --scenario cored-daynight` three times on a busy machine -> FAIL, FAIL, PASS (`merges` 415 -> 432
+   and 591 -> 692 while `sets` stays the same). It passed in the first full run of this phase. `before` is sampled right
+   after `startWorld`, while the world is still streaming and merging sections, so streaming merges are counted as
+   remeshes. Audio is not involved (it fails in isolated runs where audio was never unlocked). Suggested fix (CORE-D
+   owner): wait until streaming is idle (world backlog 0 / no pending meshes for ~10 frames) before sampling `before`,
+   or assert on `sets` only, or count setTime-caused remeshes with a dedicated counter.
+2. **MENUS (stub): the title Play button emits no `ui:click`** - see gap 3 (matters once MENUS lands; SPEC §6 lists `ui:click`).
+
 ## 2026-10-03 · AUDIO P0 + P1 complete, P2 positional polish in · work commit `df65b0c`
 
 ### What changed

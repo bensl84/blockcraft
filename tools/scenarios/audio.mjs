@@ -20,18 +20,17 @@ async function gesture(t) {
   return t.waitFor(() => window.__game.game.audio.unlocked === true, null, 5000);
 }
 
-/** 16-bit PCM WAV from int16 channel arrays. */
-function wav(path, chans, sr) {
-  const n = chans[0].length, ch = chans.length;
-  const buf = Buffer.alloc(44 + n * ch * 2);
-  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * ch * 2, 4); buf.write('WAVE', 8); buf.write('fmt ', 12);
-  buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(ch, 22); buf.writeUInt32LE(sr, 24);
-  buf.writeUInt32LE(sr * ch * 2, 28); buf.writeUInt16LE(ch * 2, 32); buf.writeUInt16LE(16, 34); buf.write('data', 36);
-  buf.writeUInt32LE(n * ch * 2, 40);
-  let o = 44;
-  for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++) { buf.writeInt16LE(Math.max(-32768, Math.min(32767, chans[c][i])), o); o += 2; }
+/** 16-bit PCM WAV from already-interleaved little-endian int16 PCM (base64 from the page: a JSON array of millions
+ *  of numbers over the devtools protocol was what made audio-catalog slow). */
+function wavPcm(path, b64, ch, sr) {
+  const pcm = Buffer.from(b64, 'base64');
+  const head = Buffer.alloc(44);
+  head.write('RIFF', 0); head.writeUInt32LE(36 + pcm.length, 4); head.write('WAVE', 8); head.write('fmt ', 12);
+  head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(ch, 22); head.writeUInt32LE(sr, 24);
+  head.writeUInt32LE(sr * ch * 2, 28); head.writeUInt16LE(ch * 2, 32); head.writeUInt16LE(16, 34); head.write('data', 36);
+  head.writeUInt32LE(pcm.length, 40);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, buf);
+  writeFileSync(path, Buffer.concat([head, pcm]));
 }
 
 export default [
@@ -136,8 +135,11 @@ export default [
       t.assert(names.length >= 100, `catalogue size ${names.length}`);
       const levels = {};
       const sheet = [];
-      for (const name of names) {
-        const r = await t.eval(async (name) => {
+      // render in parallel batches (each OfflineAudioContext renders on its own thread) to stay well inside the
+      // scenario timeout while the real world is loaded on the title screen
+      const BATCH = 6;
+      for (let b = 0; b < names.length; b += BATCH) {
+        const rs = await t.eval(async (batch) => Promise.all(batch.map(async (name) => {
           const o = await window.__game.game.audio.renderOffline(name, { seed: 5, data: true, sampleRate: 44100 });
           // min/max envelope for the contact sheet (120 columns)
           const d = o.data[0], cols = 120, env = [];
@@ -146,13 +148,22 @@ export default [
             for (let i = Math.floor(c * d.length / cols); i < Math.floor((c + 1) * d.length / cols); i++) { if (d[i] < lo) lo = d[i]; if (d[i] > hi) hi = d[i]; }
             env.push([lo / 32768, hi / 32768]);
           }
-          return { peakDb: o.peakDb, rmsDb: o.rmsDb, seconds: o.seconds, data: o.data, env };
-        }, name);
-        levels[name] = { peakDb: r.peakDb, rmsDb: r.rmsDb, seconds: Math.round(r.seconds * 100) / 100 };
-        sheet.push({ name, env: r.env, peakDb: r.peakDb });
-        wav(join(TMP, 'audio-wav', `${name}.wav`), r.data, 44100);
-        t.assert(r.peakDb > -45, `${name} is audible (peak ${r.peakDb} dBFS)`);
-        t.assert(r.peakDb <= -0.9, `${name} stays under the -1 dBFS ceiling (${r.peakDb})`);
+          // interleaved int16 PCM -> base64 (compact transfer)
+          const ch = o.data.length, n = o.data[0].length, pcm = new Int16Array(n * ch);
+          for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++) pcm[i * ch + c] = Math.max(-32768, Math.min(32767, o.data[c][i]));
+          const bytes = new Uint8Array(pcm.buffer);
+          let bin = '';
+          for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+          return { name, peakDb: o.peakDb, rmsDb: o.rmsDb, seconds: o.seconds, b64: btoa(bin), ch, env };
+        })), names.slice(b, b + BATCH));
+        for (const r of rs) {
+          const name = r.name;
+          levels[name] = { peakDb: r.peakDb, rmsDb: r.rmsDb, seconds: Math.round(r.seconds * 100) / 100 };
+          sheet.push({ name, env: r.env, peakDb: r.peakDb });
+          wavPcm(join(TMP, 'audio-wav', `${name}.wav`), r.b64, r.ch, 44100);
+          t.assert(r.peakDb > -45, `${name} is audible (peak ${r.peakDb} dBFS)`);
+          t.assert(r.peakDb <= -0.9, `${name} stays under the -1 dBFS ceiling (${r.peakDb})`);
+        }
       }
       writeFileSync(join(TMP, 'audio-levels.json'), JSON.stringify(levels, null, 1));
       // loudness balance: each sound within 4 dB of its family target (levels.js); write suggested trims
@@ -196,9 +207,18 @@ export default [
     // P1 music: the piano samples render, a piece is calm (peak well under the ceiling) and the live scheduler plays notes.
     name: 'audio-music', requires: ['audio'],
     async run(t) {
-      const day = await t.eval(async () => window.__game.game.audio.renderMusicOffline({ seconds: 40, seed: 7, data: true }));
+      const day = await t.eval(async () => {
+        const o = await window.__game.game.audio.renderMusicOffline({ seconds: 40, seed: 7, data: true });
+        const ch = o.data.length, n = o.data[0].length, pcm = new Int16Array(n * ch);
+        for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++) pcm[i * ch + c] = Math.max(-32768, Math.min(32767, o.data[c][i]));
+        const bytes = new Uint8Array(pcm.buffer);
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        delete o.data;
+        return { ...o, b64: btoa(bin), ch };
+      });
       const night = await t.eval(async () => window.__game.game.audio.renderMusicOffline({ seconds: 40, seed: 8, night: true, data: false }));
-      wav(join(TMP, 'audio-wav', 'music-day.wav'), day.data, 44100);
+      wavPcm(join(TMP, 'audio-wav', 'music-day.wav'), day.b64, day.ch, 44100);
       t.note('day', { mode: day.mode, bpm: day.bpm, notes: day.notes, peakDb: day.peakDb, rmsDb: day.rmsDb, pieceSeconds: day.pieceSeconds });
       t.note('night', { mode: night.mode, bpm: night.bpm, notes: night.notes, peakDb: night.peakDb });
       t.assert(day.notes >= 10 && day.peakDb > -40, `music is audible (${day.notes} notes, ${day.peakDb} dBFS)`);
@@ -306,6 +326,63 @@ export default [
       t.note('steps', steps);
       t.assert(steps >= 3, `player:step emitted while walking (${steps})`);
       t.assert(s1.started - s0.started >= Math.min(3, steps), 'footstep sounds started');
+    },
+  },
+  {
+    // In-world (phase 2): survival mining by holding attack -> hit sounds exactly every 4 game ticks, one break
+    // sound, nothing after the block is gone. (The first gap used to be 3 ticks.)
+    name: 'audio-mining-rhythm', requires: ['audio', 'input', 'player', 'physics', 'raycast', 'interaction', 'world'],
+    async run(t) {
+      await gesture(t);
+      await t.call('startWorld', { ...FLAT, mode: 'survival' });
+      await t.call('setFlying', false);
+      await t.call('waitTicks', 10);
+      const p = await t.call('pos');
+      const x = Math.floor(p.x), y = Math.floor(p.y), z = Math.floor(p.z);
+      await t.call('setBlock', x, y, z - 2, 'dirt');
+      // kid scheme targets through the free cursor: put it in the screen centre (like a child's held mouse)
+      await t.eval(() => { const i = window.__game.game.input; i.aim.x = 0; i.aim.y = 0; i.aimActive = true; });
+      await t.call('lookAt', x + 0.5, y + 0.5, z - 1.5);
+      await t.eval(() => window.__game.game.audio.recent(true));
+      const b0 = await t.call('eventCount', 'block:broken');
+      await t.eval(() => window.__game.game.input.setVirtual('attack', true));
+      const broke = await t.waitFor((b0) => window.__game.eventCount('block:broken') > b0, b0, 5000);
+      await t.eval(() => window.__game.game.input.setVirtual('attack', false));
+      await t.call('sleep', 500);
+      const log = await t.eval(() => window.__game.game.audio.recent(true));
+      const hits = log.filter((e) => e.name.startsWith('block.hit.')).map((e) => e.tick);
+      const breaks = log.filter((e) => e.name.startsWith('block.break.'));
+      const gaps = hits.slice(1).map((h, i) => h - hits[i]);
+      t.note('hits', { hits, gaps, breaks: breaks.map((e) => e.name) });
+      t.assert(broke, 'dirt broke while holding attack');
+      t.assert(hits.length >= 2 && gaps.every((g) => g === 4), `hit every 4 ticks (${gaps})`);
+      t.assert(breaks.length === 1 && breaks[0].name === 'block.break.dirt', `one dirt break sound (${breaks.map((e) => e.name)})`);
+      t.assert(hits.every((h) => h <= breaks[0].tick), 'no hit after the break');
+    },
+  },
+  {
+    // In-world (phase 2): the listener is the camera - in the third-person FRONT view the camera looks back at the
+    // player, so a sound to the player's east is on the screen's left and must pan left.
+    name: 'audio-listener-views', requires: ['audio', 'input', 'player', 'world'],
+    async run(t) {
+      await gesture(t);
+      await t.call('startWorld', FLAT);
+      await t.call('setLook', 0, -10);
+      const pans = {};
+      for (const view of [0, 1, 2]) {
+        await t.eval((v) => { window.__game.game.player.view = v; }, view);
+        await t.call('sleep', 450); // let a frame move the camera; and the cow.idle min gap pass
+        pans[view] = await t.eval(() => {
+          const G = window.__game, p = G.pos(), a = G.game.audio, n0 = a.stats().started;
+          G.game.events.emit('mob:sound', { id: 4242, type: 'cow', kind: 'idle', x: p.x + 5, y: p.y + 1.6, z: p.z });
+          return a.stats().started > n0 ? a.recent().slice(-1)[0].pan : null;
+        });
+      }
+      await t.eval(() => { window.__game.game.player.view = 0; });
+      t.note('pan', pans);
+      t.assert(pans[0] > 0.3, `first person: east is right (${pans[0]})`);
+      t.assert(pans[1] > 0.3, `third person back: east is right (${pans[1]})`);
+      t.assert(pans[2] < -0.3, `third person front: east is on the screen's left (${pans[2]})`);
     },
   },
   {
