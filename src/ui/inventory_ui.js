@@ -165,6 +165,22 @@ export function createInventoryUISystem(game) {
       s.root.remove();
       if (s.pos && s.be && game.world) game.world.setBlockEntity(s.pos.x, s.pos.y, s.pos.z, s.be);
     }
+    relockSoon();
+  }
+
+  /**
+   * Classic scheme: closing a container screen (E, the close button) grabs the mouse again, like Java, instead of
+   * needing one more click on the world. Only with a fresh user gesture (the browser requires one) and only when
+   * no other screen took over.
+   */
+  function relockSoon() {
+    if (!game.input || game.input.scheme !== 'classic' || !game.input.requestPointerLock) return;
+    const ua = typeof navigator !== 'undefined' ? navigator.userActivation : null;
+    if (ua && !ua.isActive) return;
+    setTimeout(() => {
+      if (game.ui.current || game.state !== 'playing' || game.input.pointerLocked) return;
+      game.input.requestPointerLock();
+    }, 0);
   }
 
   /** Block entity for a chest/furnace screen: existing one at the cell, else a new one stored there. */

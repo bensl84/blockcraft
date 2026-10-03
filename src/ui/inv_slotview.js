@@ -10,8 +10,17 @@ import { el } from '../core/dom.js';
 import { getItem } from '../data/items.js';
 import { clickSlot, dragDistribute, gatherToCursor } from '../inventory/slots.js';
 
-/** Icon size (multiple of 16) for a slot of `slotPx`. */
-export function iconPx(slotPx, fill = 0.9) { return Math.max(16, Math.floor((slotPx * fill) / 16) * 16); }
+/**
+ * Icon size for a slot of `slotPx`. The icon atlas cells are 32 px (iso blocks drawn at 32, flat sprites at 2x),
+ * so multiples of 32 are pixel-exact for every icon; prefer one when it fits (up to 92% of the slot, like the
+ * 16-in-18 look) and is not much smaller than asked, else fall back to a multiple of 16 (exact for flat sprites).
+ */
+export function iconPx(slotPx, fill = 0.9) {
+  const want = slotPx * fill;
+  const by32 = Math.floor((slotPx * 0.92) / 32) * 32;
+  if (by32 >= 32 && by32 >= want * 0.9) return by32;
+  return Math.max(16, Math.floor(want / 16) * 16);
+}
 
 /** Durability fraction left (0..1) or -1 when the stack has no durability bar. */
 export function durabilityLeft(stack) {

@@ -306,7 +306,8 @@ export function buildContainerScreen(ctx) {
     next.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); flip(1); });
 
     function compute() {
-      const stacks = inv.slots.concat(screen.craft.grid);
+      // the held (cursor) stack counts too: a tap returns it to the bag before planning
+      const stacks = inv.slots.concat(screen.craft.grid, inv.cursor ? [inv.cursor] : []);
       const now = [], table = [], seen = new Set();
       for (const e of craftableRecipes(stacks, 3)) {
         if (e.missing > 0 || seen.has(e.recipe.result.item)) continue;
@@ -404,7 +405,8 @@ export function buildContainerScreen(ctx) {
   }
 
   function frame() {
-    if (inv.version !== screen.lastVersion) refresh();
+    const cur = inv.cursor ? inv.cursor.item + '*' + inv.cursor.count : '';
+    if (inv.version !== screen.lastVersion || cur !== screen.lastCursor) { screen.lastCursor = cur; refresh(); }
     if (kind === 'furnace' && be) {
       const p = furnaceProgress(be);
       const sig = `${Math.round(p.burn * 14)}|${Math.round(p.cook * 22)}|${JSON.stringify([be.input, be.fuel, be.output])}`;

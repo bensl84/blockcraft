@@ -4,6 +4,129 @@ Branch `lane/inv` · worktree `C:\Users\BSLeo\AppData\Roaming\Claude\scratch-wor
 
 <!-- newest first: date · what changed · commands run + results (copy the PASS/FAIL lines) · remaining · blockers · spec conflicts -->
 
+## 2026-10-03 · Phase 2: merged the real core, verified in real gameplay
+
+`git merge main` (no conflicts; LEAD files untouched) -> merge commit `c26971e`. INV had no stub fallbacks to remove
+(no `registerStub`, no collision/mob fallbacks in INV files).
+
+### Fixes from in-world play (all in INV files)
+
+| What a child would have seen | Fix |
+|---|---|
+| `inv-blockuse` FAIL after any earlier scenario: the test aimed with `lookAt` + `press('use')`, but the kid scheme keeps aiming at the last mouse hover (the hotbar), so "use" went elsewhere | Scenario rewritten to drive real input: mouse tap on the table (kid survival), tap on a chest with an empty hand (kid creative: opens, not broken), right click with pointer lock (classic) on a furnace, close with the big red button / Esc |
+| 10 air bubbles shown on dry land in every survival world | Bubble icons set `visibility: visible`, which overrides the hidden row. Now `''` (inherit). Smoke `inv-hud` asserts no visible stats icons in creative and no bubbles once the eye leaves the water |
+| Iso block icons drawn at 48 px from 32 px atlas cells (1.5x, lumpy pixel rows) and small in the 72 px hotbar / 87 px picker tiles | `iconPx` prefers multiples of 32 (pixel-exact for every icon): hotbar and picker icons are now 64 px. Inventory slots at GUI 3 (54 px) still use 48 (see CORE-A note below) |
+| "Needs a crafting table" toast covered the top of the recipe book (exactly the crafting-table picture the child needs next) and stayed over the 3x3 table screen after walking to the table | Under a screen the toast sits in the free strip below the panel, and goes away when that screen closes |
+| Recipe book hid recipes while the child was holding the ingredient on the cursor | Book counts the held stack (a tap already returns it to the bag first) and refreshes when the cursor changes |
+| Item name ("Torch") stayed over the hotbar after scrolling to an empty slot | Selecting an empty slot hides the name |
+| A neighbour's stack count could hide under the enlarged yellow selection frame | Counts of non-selected slots draw above the frame |
+| Classic: after closing the inventory with E the mouse was free; one more click on the world was needed (Java grabs it back) | Closing an INV screen in the classic scheme re-requests pointer lock when a user gesture is active and no other screen took over (`relockSoon` in `inventory_ui.js`) |
+| `inv-furnace` flaky in touch runs (about 1 in 2) | Test race, not a game bug: with 1 coal the furnace may light on a real-time tick (eating the coal, Java behaviour) before the assert reads the fuel slot. Test now gives 2 coal |
+
+### In-world verification (`tools/inv-play.mjs`, real terrain seed 12345, real mouse / touchscreen input)
+
+New script `node tools/inv-play.mjs [--touch] [--size WxH] [--only creative,survival,classic]` drives the game like a
+child: taps the backpack, picker tabs/tiles, hotbar, recipe pictures, slots and blocks in the world (screen pixel from
+`worldToNdc`); it only uses the test API for "the child chopped a tree / mined stone" (`give`, item pickups are the MOBS
+lane), time of day and fast-forwarding furnaces. Screenshots: `.tmp/play/inv-*.png` (prefixed `touch-`, `1366-`,
+`1920-`, `1024-` for the other runs). Each screenshot was looked at.
+
+Results (1280x720 mouse, `--touch`, 1366x768, 1920x1080, 1024x640): every run `{"PASS":47,"SKIP":4}`, 0 page errors
+(touch run: the classic block is skipped).
+
+```
+PASS  backpack tap opens the picture picker                      (02-picker-building.png)
+PASS  picker tiles draw real icon canvases  28 icons, sizes 64   (03-picker-<tab>.png, 8 tabs)
+PASS  picked items land in the hotbar                            (04-picker-picked.png)
+PASS  tap outside the picker closes it
+PASS  hotbar + backpack taps never place or break blocks  placed 0->0, broken 0->0   (verification item 8, mouse + touch)
+PASS  tapping a hotbar slot selects it                           (05-hotbar-selected-name.png)
+PASS  tap on the ground places the crafting table                (06-table-placed.png)
+PASS  tap on a crafting table (block in hand) opens the 3x3 screen ...and does not stack a block on top (07)
+PASS  no air bubbles on dry land                                 (10-survival-hud.png)
+PASS  backpack opens the survival inventory                      (11-inventory-with-logs.png)
+PASS  recipe book shows planks with logs in the bag
+PASS  4 taps on planks -> 16 planks                              (12-planks-crafted.png)
+PASS  sticks + crafting table from the 2x2 book
+PASS  pickaxe shows "needs the table" in the 2x2                 (13-needs-table-toast.png)
+PASS  crafting table landed in the hotbar / survival tap places the table / tap opens the 3x3 crafting screen (14)
+PASS  wooden pickaxe from the 3x3 recipe book                    (15)
+PASS  furnace + stone pickaxe from the book                      (16, 17)
+PASS  furnace placed / tap opens the furnace                     (18)
+PASS  furnace lights (furnace_lit) when iron + coal go in        (19-furnace-burning.png: flame + arrow fill)
+PASS  3 iron ingots smelted / take the ingots / ingots end up in the bag after closing (20)
+PASS  lit furnace emits block light  {"sky":15,"block":12}       (21-furnace-glow-night.png, verification item 7)
+PASS  furnace goes back to unlit when the fuel is used up, light gone  furnace_lit -> furnace {"block":0} (22)
+PASS  chest placed / tap opens the chest / chest keeps what we put in  oak_planksx7   (23, 24)
+PASS  holding on the chest breaks it / chest contents are dropped (25; contents reach dropItem, verification item 2 half)
+PASS  40 furnaces burning at once  40 lit                        (26)
+PASS  classic: click locks the pointer / crosshair shown / key 3 selects slot 3 / wheel selects the next slot (30)
+PASS  classic: no item name over an empty slot
+PASS  classic: E opens the inventory / pointer unlocked while open / right click picks up half (31)
+PASS  classic: E closes the inventory / held stack returned to the bag / pointer re-locks / Esc closes
+SKIP  dropped stacks become item entities (pop + magnet)  items lane is still a stub
+SKIP  hearts/hunger move from real damage/hunger  survival lane is still a stub
+SKIP  Q-drop throws the item forward  items lane is still a stub
+SKIP  chest survives save + load  save/menus lanes are still stubs
+```
+
+Phase-1 verification list status: 1 block-use from real taps/clicks PASS (kid creative chest opens, not broken);
+2 container drops PASS up to `dropItem` (entities need MOBS `items`); 3 Q-drop PENDING (MOBS `items`); 4 chest
+save/load PENDING (SAVE + MENUS); 5 real icons PASS (64 px hotbar/picker crisp; 48 px at GUI 3 see CORE-A note);
+6 HUD with real survival values PENDING (SURVIVAL/MOBS; HUD rows verified with set values); 7 `furnace_lit` glow +
+instant swap PASS; 8 HUD taps never reach the world PASS (mouse + touch); 9 touch overlay overlap PENDING (KID/TOUCH
+stubs); 10 spawn eggs in the Animals tab PENDING (MOBS registers entity types; tab currently shows food/dyes/tools only).
+
+Performance with the real world loaded (render distance default, 1280x720, GPU headless Chrome, frame-capped 144):
+creative HUD `fps 143.9 frameMs 6.95 workMs 1.1-1.7 tickMs 0.2 drawCalls ~190`; picker open `drawCalls 183-199,
+dom 241`; survival HUD `workMs 1.5`; 40 burning furnaces `tickMs 0.16-0.18`. INV adds no draw calls (DOM HUD,
+painted only on change) and no measurable tick cost.
+
+### Commands and results (phase 2)
+
+- `node build.mjs --dev --out .tmp/build-inv` -> `(1656 KB, dev)` OK
+- `npm run test:unit` -> `ℹ tests 101` `ℹ pass 101` `ℹ fail 0`
+- `node tools/smoke.mjs --tag inv` (all scenarios) -> `{"PASS":64,"PENDING":5,"SKIP":2,"FAIL":2}`; the 2 FAILs are
+  core (`cored-daynight`, `corec-stream-leak`, both flaky, see below; both PASS re-run in isolation, `cored-daynight`
+  fails about 1 in 2). INV scenarios only: `{"PASS":11,"PENDING":2}` (mouse) and `{"PASS":11,"PENDING":2}` (touch):
+  ```
+  PASS inv-hud  PASS inv-creative-pick  PASS inv-craft-planks  PASS inv-slot-clicks  PASS inv-recipe-book
+  PASS inv-table-3x3  PASS inv-furnace  PASS inv-chest-unload  PASS inv-container-drop  PASS inv-blockuse
+  PENDING inv-chest-persist - stub lanes: save, menus     PENDING inv-q-drop - stub lanes: items
+  ```
+
+### Cross-lane defects (not edited; for the owners)
+
+1. **CORE-D test hygiene - `tools/scenarios/cored.mjs` `cored-entity` (~L384-395)** adds a red-tinted 4-box mob mesh
+   and an `oak_log` block model with `R.addObject` and never removes them. They stay in the renderer for every later
+   world, so every later flat-world screenshot (all `inv-*`, `lead-*`) shows floating red boxes and a log near spawn
+   (`.tmp/smoke-inv-inv-hud-survival.png`). Fix: `R.removeObject(mob); R.removeObject(block)` at the end of the
+   scenario (and, if added objects are meant to be world-scoped, clear them on `world:exit`).
+2. **CORE-D/C flaky `cored-daynight`** "setTime never remeshes": fails about 1 in 2 when other scenarios ran first
+   (`merges 915 -> 917`, `7596 -> 7693`; `sets` unchanged), i.e. background mesh merges still settling when the
+   "before" snapshot is taken. Fix: wait until the mesh/merge queue is idle before the snapshot. `corec-stream-leak`
+   failed once in the full suite (`geometries 128 -> 145`) and passed twice alone - same kind of settle race.
+3. **CORE-E test API, `src/core/testapi.js` `lookAt` / `press('use')`**: in the kid scheme the aim follows the last
+   mouse hover (`input.aimActive` stays true), so `lookAt(...)` + `press('use')` acts on whatever the mouse last
+   hovered (e.g. the hotbar), not the crosshair. Real play is fine (a tap aims). Repro: `inv-hud` (mouse click on the
+   hotbar) then old `inv-blockuse` -> target null. Fix: `lookAt`/`setLook` set `input.aimActive = false` (or aim to
+   0,0), or document that tests must tap.
+4. **SURVIVAL (stub) - new worlds keep the previous player's health/food/air/XP** (`inv-hud` sets health 3 / food 13
+   / xp 3; the next `startWorld` still shows 3.5 hearts). `player.spawn` resets position only. The SURVIVAL lane's
+   new-world path must reset `health/maxHealth/food/saturation/air/xpLevel/xpProgress`.
+5. **CORE-A (cosmetic)**: icon atlas cells are 32 px, so at GUI scale 3 (54 px inventory slots, 48 px icons) iso block
+   icons are scaled 1.5x with uneven pixel rows (zoom of `.tmp/play/inv-02-picker-building.png` before the INV fix).
+   Suggest `icons.element(key, px)` painting iso blocks natively at 48 px (or a 48 px atlas) for that case.
+
+### Remaining gaps
+
+- Waiting on other lanes: item entities from container drops / Q-drop (MOBS `items`), real hearts/hunger/XP (SURVIVAL,
+  MOBS), chest save + load (SAVE, MENUS), touch-overlay overlap with the hotbar (KID/TOUCH), spawn eggs (MOBS).
+- LEAD request 1 (Steve-like default skin palette on the inventory doll) and 2 (XP award for smelting) still open.
+- Kid survival: breaking a chest by hand takes ~4.1 s of holding (Java hardness; CORE-E). Long for a 5-year-old -
+  KID lane may want a kid-mode break-speed boost.
+- Touch: the "hover" white overlay stays on the last tapped slot until the next tap (Java-like on desktop; harmless).
+
 ## 2026-10-03 · INV P0 complete, P1 armour + XP bar done
 
 ### What changed

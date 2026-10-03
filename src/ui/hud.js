@@ -50,6 +50,8 @@ export function createHudSystem(game) {
       game.events.on('mode:changed', () => { ps.survival = null; });
       game.events.on('world:ready', () => { last.layoutDirty = true; last.item = undefined; });
       game.events.on('world:exit', () => { clearTimeout(toastTimer); if (toastEl) toastEl.classList.remove('inv-show'); });
+      // a screen toast ("Needs a crafting table") belongs to that screen: it goes when the screen closes
+      game.events.on('ui:close', () => { if (toastEl && toastEl.classList.contains('inv-toast-low')) { clearTimeout(toastTimer); toastEl.classList.remove('inv-show'); } });
       window.addEventListener('resize', () => { last.layoutDirty = true; });
     },
 
@@ -78,6 +80,7 @@ export function createHudSystem(game) {
       toastEl.textContent = '';
       if (iconItem && getItem(iconItem) && game.icons) toastEl.appendChild(game.icons.element(iconItem, 48));
       if (text) toastEl.appendChild(el('span', { text: String(text) }));
+      toastEl.classList.toggle('inv-toast-low', !!(game.ui && game.ui.current));
       toastEl.classList.add('inv-show');
       clearTimeout(toastTimer);
       toastTimer = setTimeout(() => toastEl && toastEl.classList.remove('inv-show'), 2000);
@@ -203,7 +206,7 @@ export function createHudSystem(game) {
     if (key !== last.item) {
       const first = last.item === undefined;
       last.item = key;
-      if (!first && key) hud.showName(key);
+      if (!first) hud.showName(key); // an empty slot clears the name (showName(null) just hides it)
     }
     if (backpackBtn) backpackBtn.classList.toggle('inv-idle', inv.slots.every((s, i) => i >= HOTBAR_SIZE || !s));
   }
@@ -229,7 +232,7 @@ export function createHudSystem(game) {
     const air = p.air ?? SURVIVAL.MAX_AIR;
     const showAir = !!p.eyeInWater; // SPEC §8.2.5: bubbles only while the eye is in water
     const bubbles = Math.max(0, Math.ceil(((air - 2) * 10) / SURVIVAL.MAX_AIR));
-    rows.air.icons.forEach((sp, i) => { setSprite(sp, 'bubble', g); sp.style.visibility = i < bubbles ? 'visible' : 'hidden'; });
+    rows.air.icons.forEach((sp, i) => { setSprite(sp, 'bubble', g); sp.style.visibility = i < bubbles ? '' : 'hidden'; }); // '' inherits the row's hidden state
     rows.air.wrap.classList.toggle('inv-hidden-row', !showAir);
     const prog = Math.max(0, Math.min(1, p.xpProgress || 0));
     xpFill.style.width = Math.round(prog * 100) + '%';

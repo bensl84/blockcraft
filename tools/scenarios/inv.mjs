@@ -24,6 +24,21 @@ async function clickSid(t, sid, button = 'left', opts = {}) {
   if (opts.shift) await t.page.keyboard.up('Shift');
   await t.call('waitFrames', 1);
 }
+/** Real mouse (or touchscreen) tap on the centre of the visible top/front of block cell c. */
+async function tapBlock(t, c) {
+  const p = await t.call('pos');
+  // aim at the face centre nearest the eye so the ray can't graze a neighbour
+  const ex = p.x, ez = p.z;
+  const tx = c.x + 0.5 + Math.max(-0.45, Math.min(0.45, (ex - (c.x + 0.5)) * 0.2));
+  const tz = c.z + 0.5 + Math.max(-0.45, Math.min(0.45, (ez - (c.z + 0.5)) * 0.2));
+  const n = await t.call('worldToNdc', tx, c.y + 0.6, tz);
+  t.assert(n.onScreen, 'block is on screen');
+  const vp = await t.eval(() => ({ w: innerWidth, h: innerHeight }));
+  const px = ((n.x + 1) / 2) * vp.w, py = ((1 - n.y) / 2) * vp.h;
+  if (t.args.touch) await t.page.touchscreen.tap(px, py);
+  else { await t.page.mouse.move(px, py); await t.page.mouse.down(); await t.call('sleep', 60); await t.page.mouse.up(); }
+  await t.call('waitTicks', 3);
+}
 /** Inventory index of the first stack of `item` (-1 if none). */
 const indexOf = async (t, item) => (await inv(t)).findIndex((s) => s && s.item === item);
 /** A free cell next to the player at feet level on the flat world. */
@@ -59,6 +74,8 @@ export default [
       t.assert(hud.bp >= 64, `backpack button >= 64 px (${hud.bp})`);
       t.assert(hud.icons === 9, 'kid creative hotbar shows 9 icons');
       t.assert(hud.hearts === 'none', 'no hearts in creative');
+      // survival rows hidden in creative, and never a stray air bubble on dry land (children of a hidden row)
+      t.assert(await t.eval(() => [...document.querySelectorAll('#hud .inv-stats .inv-sprite')].every((e) => !e.checkVisibility({ visibilityProperty: true }))), 'no hearts/bubbles visible in creative');
       // keys 1-9 and tapping a slot (pointerdown)
       await t.eval(() => window.__game.game.events.emit('input:action', { action: 'hotbar3', down: true, source: 'test' }));
       t.assert((await t.call('selected')).slot === 2, 'hotbar3 selects slot 3');
@@ -94,6 +111,9 @@ export default [
       t.assert(rows.food.filter((s) => s === 'food_full').length === 6 && rows.food[6] === 'food_half', '13 food = 6.5 shanks');
       t.assert(rows.air === 5, `150 air = 5 bubbles (${rows.air})`);
       t.assert(rows.xp === '3', 'xp level shown');
+      await t.eval(() => { window.__game.game.player.eyeInWater = false; });
+      await t.call('waitFrames', 3);
+      t.assert(await t.eval(() => [...document.querySelectorAll('#hud [data-hud="air"] .inv-sprite')].every((e) => !e.checkVisibility({ visibilityProperty: true }))), 'air bubbles hidden once the eye leaves the water');
       await t.eval(() => { const g = window.__game.game; g.player.health = 3; g.events.emit('player:hurt', { amount: 4, cause: 'test', health: 3 }); });
       await t.call('waitFrames', 3);
       t.assert(await t.eval(() => document.querySelector('#hud [data-hud="hearts"]').classList.contains('inv-low')), 'hearts shake at <= 4 HP');
@@ -328,7 +348,8 @@ export default [
       const c = await nearCell(t);
       t.assert(await t.call('setBlock', c.x, c.y, c.z, 'furnace', 1), 'furnace placed (facing east)');
       await t.call('give', 'sand', 2);
-      await t.call('give', 'coal', 1);
+      // 2 coal: real-time ticks may light the furnace (eating one coal) before the assert below reads the fuel slot
+      await t.call('give', 'coal', 2);
       t.assert(await t.call('openScreen', 'furnace', c) === 'furnace', 'furnace screen opens');
       await clickSid(t, 'p' + await indexOf(t, 'sand'), 'left', { shift: true });
       await clickSid(t, 'p' + await indexOf(t, 'coal'), 'left', { shift: true });
@@ -446,18 +467,44 @@ export default [
     name: 'inv-blockuse',
     requires: ['input', 'player', 'raycast', 'interaction'],
     async run(t) {
+      // Kid survival: a real mouse tap on the crafting table opens the 3x3 screen; the big red close button closes it.
       await t.call('startWorld', SURV);
       const c = await nearCell(t, 0, -2);
       await t.call('setBlock', c.x, c.y, c.z, 'crafting_table');
-      await t.call('lookAt', c.x + 0.5, c.y + 0.5, c.z + 0.5);
-      await t.call('press', 'use');
-      t.assert(await t.waitFor(() => window.__game.uiOpen() === 'crafting', null, 3000), 'using a crafting table opens the 3x3 screen');
-      await t.call('closeUI');
+      await t.call('setLook', 0, -25);
+      await tapBlock(t, c);
+      t.assert(await t.waitFor(() => window.__game.uiOpen() === 'crafting', null, 3000), 'tapping a crafting table opens the 3x3 screen');
+      await t.shot('inv-blockuse-table');
+      const cb = await t.eval(() => { const r = document.querySelector('.inv-close').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+      await t.page.mouse.click(cb.x, cb.y);
+      t.assert(await t.waitFor(() => window.__game.uiOpen() == null, null, 2000), 'red close button closes the screen');
+      // the close tap must not reach the world (no block broken / placed behind the button)
+      t.assert(await t.call('getBlock', c.x, c.y, c.z) === 'crafting_table', 'table still there after closing');
+      // Kid creative: tapping a chest with an empty hand opens it instead of breaking it
+      await t.call('setMode', 'creative');
+      await t.eval(() => window.__game.game.inventory.set(window.__game.game.inventory.selected, null));
       await t.call('setBlock', c.x, c.y, c.z, 'chest');
-      await t.call('lookAt', c.x + 0.5, c.y + 0.5, c.z + 0.5);
-      await t.call('press', 'use');
-      t.assert(await t.waitFor(() => window.__game.uiOpen() === 'chest', null, 3000), 'using a chest opens it');
+      await tapBlock(t, c);
+      t.assert(await t.waitFor(() => window.__game.uiOpen() === 'chest', null, 3000), 'kid creative tap opens a chest');
+      t.assert(await t.call('getBlock', c.x, c.y, c.z) === 'chest', 'the chest was not broken by the tap');
       await t.call('closeUI');
+      // Classic: right click (pointer lock aims at the crosshair) opens a furnace
+      await t.call('setSetting', 'controls', 'classic');
+      try {
+        await t.call('setBlock', c.x, c.y, c.z, 'furnace');
+        await t.call('lookAt', c.x + 0.5, c.y + 0.5, c.z + 0.5);
+        await t.page.mouse.click(640, 360);
+        await t.call('sleep', 300);
+        const locked = await t.eval(() => window.__game.game.input.pointerLocked);
+        if (locked) await t.page.mouse.click(640, 360, { button: 'right' });
+        else await t.call('press', 'use');
+        t.note('classicLocked', locked);
+        t.assert(await t.waitFor(() => window.__game.uiOpen() === 'furnace', null, 3000), 'classic use opens the furnace');
+        await t.page.keyboard.press('Escape');
+        t.assert(await t.waitFor(() => window.__game.uiOpen() == null, null, 2000), 'Esc closes the furnace');
+      } finally {
+        await t.call('setSetting', 'controls', 'kid');
+      }
     },
   },
   {

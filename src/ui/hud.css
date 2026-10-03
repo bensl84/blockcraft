@@ -37,6 +37,8 @@
 }
 .inv-hb-slot .bc-count { font-size: max(16px, calc(var(--hotbar-slot) * 0.3)); right: 4px; bottom: 2px; }
 .inv-hb-slot .bc-durability { height: 4px; }
+/* a neighbour's count stays readable over the enlarged yellow selection frame */
+.inv-hb-slot:not(.inv-selected) .bc-count { z-index: 3; }
 
 .inv-backpack {
   position: absolute; top: 50%; left: calc(100% + 16px); transform: translateY(-50%);
@@ -90,3 +92,6 @@
   opacity: 0; pointer-events: none; transition: opacity 160ms, transform 160ms;
 }
 .inv-toast.inv-show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+/* under a container screen the toast sits in the free strip below the panel (never over the recipe book) */
+.inv-toast.inv-toast-low { top: auto; bottom: 8px; transform: translate(-50%, 0) scale(0.9); }
+.inv-toast.inv-toast-low.inv-show { transform: translate(-50%, 0) scale(1); }
