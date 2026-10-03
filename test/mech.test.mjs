@@ -609,11 +609,8 @@ test('buckets in creative swap in hand too; ice and snow melt near torches (P2)'
   assert.equal(h.get(14, 4, 14), ID.air, 'snow melted');
 });
 
-test('slabs merge into double slabs; snow layers stack; cake loses bites', () => {
+test('snow layers stack (double slabs are CORE-E); cake loses bites', () => {
   const g = makeGame();
-  g.set(0, 4, 0, 'oak_slab', 0);
-  assert.ok(g.mechanics.useAt(0, 4, 0, { item: 'oak_slab', face: FACE.UP }).consumed);
-  assert.equal(g.st(0, 4, 0), 2, 'double slab');
   g.set(1, 4, 0, 'snow', 0);
   g.mechanics.useAt(1, 4, 0, { item: 'snow' });
   g.mechanics.useAt(1, 4, 0, { item: 'snow' });

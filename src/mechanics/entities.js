@@ -10,7 +10,16 @@ import { Entity, registerEntityType } from '../entities/entity.js';
 import { dropItem } from '../entities/item_entity.js';
 import { ENTITY_PHYS } from '../core/constants.js';
 import { ID, blockItem } from '../core/registry.js';
-import { moveBody } from './body.js';
+import { moveAndCollide } from '../player/physics.js';
+
+/** CORE-E collision (per-axis, unloaded columns are solid); a blocked axis stops that velocity. */
+function moveEntity(game, e) {
+  const ovx = e.vx, ovy = e.vy, ovz = e.vz;
+  const r = moveAndCollide(game.world, e, ovx, ovy, ovz);
+  if (r.dx !== ovx) e.vx = 0;
+  if (r.dy !== ovy) e.vy = 0;
+  if (r.dz !== ovz) e.vz = 0;
+}
 
 /** Block model centred on the entity: x/z centred, bottom at y = 0 (or centred when `centre`). */
 function makeBlockObject(game, id, state, centre) {
@@ -70,7 +79,7 @@ export class FallingBlock extends Entity {
     const d = this.data;
     d.time++;
     if (!this.noGravity) this.vy -= ENTITY_PHYS.GRAVITY;
-    moveBody(game.mechanics.getRaw, this, this.vx, this.vy, this.vz);
+    moveEntity(game, this);
     this.vx *= ENTITY_PHYS.DRAG; this.vy *= ENTITY_PHYS.DRAG; this.vz *= ENTITY_PHYS.DRAG;
     if (this.y < -8 || d.time > 600) { this.remove(); return; }
     if (this.onGround) {
@@ -109,7 +118,7 @@ export class PrimedTnt extends Entity {
   tick(game) {
     super.tick(game);
     this.vy -= ENTITY_PHYS.GRAVITY;
-    moveBody(game.mechanics.getRaw, this, this.vx, this.vy, this.vz);
+    moveEntity(game, this);
     this.vx *= ENTITY_PHYS.DRAG; this.vy *= ENTITY_PHYS.DRAG; this.vz *= ENTITY_PHYS.DRAG;
     if (this.onGround) { this.vx *= 0.7; this.vz *= 0.7; }
     if (this.y < -16) { this.remove(); return; }

@@ -1,7 +1,8 @@
 // OWNER LANE: FEATURE-MECH. Use / place hooks (SPEC §7.4 call order, §8.6 "Registrations", core/hooks.js):
 //   blockUse: oak_door, oak_fence_gate, bed, cake, tnt (with flint and steel)
 //   itemUse:  flint_and_steel, bucket, water_bucket, lava_bucket, every hoe, bone_meal
-//   placers:  oak_door, bed, slabs (double slab merge, P1), snow (stacking layers, P1)
+//   placers:  oak_door, bed, snow (stacking layers, P1). Placers return true only when they placed (CORE-E then swings
+//             and uses up the item), false when refused. Double slabs are CORE-E's own (tryMergeSlab).
 // Every handler passes ctx.action to each change it makes (KID undo groups by it) and returns true when it
 // consumed the press.
 
@@ -15,7 +16,6 @@ import { AIR, LAVA, hasSolidTop, isSource, B_WASHABLE } from './rules.js';
 import { rayCells } from './raycells.js';
 
 export const HOES = ['wooden_hoe', 'stone_hoe', 'iron_hoe', 'golden_hoe', 'diamond_hoe'];
-export const SLABS = ['oak_slab', 'cobblestone_slab', 'stone_brick_slab'];
 
 export function registerMechHooks(game, mech) {
   const w = () => game.world;
@@ -31,17 +31,15 @@ export function registerMechHooks(game, mech) {
   /* ------------------------------------------------------------------ doors */
   registerPlacer('oak_door', (ctx) => {
     const { x, y, z } = ctx;
-    if (y < 1 || y > 126) return true;
-    if (!isReplaceable(getRaw(x, y, z) & 0xff) || !isReplaceable(getRaw(x, y + 1, z) & 0xff) || !hasSolidTop(getRaw(x, y - 1, z))) return true;
+    if (y < 1 || y > 126) return false;
+    if (!isReplaceable(getRaw(x, y, z) & 0xff) || !isReplaceable(getRaw(x, y + 1, z) & 0xff) || !hasSolidTop(getRaw(x, y - 1, z))) return false;
     const f = playerFacing();
     const left = FACING_DIRS[(f + 3) & 3];
     const l = getRaw(x + left[0], y, z + left[2]);
     const hinge = (l & 0xff) === ID.oak_door && ((l >>> 8) & 3) === f && !((l >>> 8) & STATE.DOOR_HINGE_RIGHT) ? STATE.DOOR_HINGE_RIGHT : 0;
     const lower = f | hinge;
-    if (!game.interaction.placeBlock(x, y, z, ID.oak_door, lower, { by: 'player', item: ctx.stack ? ctx.stack.item : 'oak_door', action: ctx.action })) return true;
+    if (!game.interaction.placeBlock(x, y, z, ID.oak_door, lower, { by: 'player', item: ctx.stack ? ctx.stack.item : 'oak_door', action: ctx.action })) return false;
     w().setBlock(x, y + 1, z, ID.oak_door, lower | STATE.DOOR_UPPER, { cause: 'cascade', action: ctx.action });
-    consumeOne();
-    swing();
     return true;
   });
 
@@ -84,12 +82,10 @@ export function registerMechHooks(game, mech) {
     const d = FACING_DIRS[f];
     const hx = x + d[0], hz = z + d[2];
     const okCell = (cx, cz) => isReplaceable(getRaw(cx, y, cz) & 0xff) && hasSolidTop(getRaw(cx, y - 1, cz));
-    if (y < 1 || !okCell(x, z) || !okCell(hx, hz)) return true;
+    if (y < 1 || !okCell(x, z) || !okCell(hx, hz)) return false;
     const base = (ctx.state & 0xf0) | f;
-    if (!game.interaction.placeBlock(x, y, z, ID.bed, base, { by: 'player', item: ctx.stack ? ctx.stack.item : 'red_bed', action: ctx.action })) return true;
+    if (!game.interaction.placeBlock(x, y, z, ID.bed, base, { by: 'player', item: ctx.stack ? ctx.stack.item : 'red_bed', action: ctx.action })) return false;
     w().setBlock(hx, y, hz, ID.bed, base | STATE.BED_HEAD, { cause: 'cascade', action: ctx.action });
-    consumeOne();
-    swing();
     return true;
   });
 
@@ -264,46 +260,18 @@ export function registerMechHooks(game, mech) {
     return true;
   });
 
-  /* ------------------------------------------------------------------ slabs (double) and snow layers (P1) */
-  for (const name of SLABS) {
-    registerPlacer(name, (ctx) => {
-      const id = ID[name];
-      const h = ctx.hit;
-      const merge = (x, y, z, st) => {
-        if (!game.interaction.placeBlock(x, y, z, id, (st & ~STATE.SLAB_TOP) | STATE.SLAB_DOUBLE, { by: 'player', item: name, action: ctx.action, force: true })) return false;
-        consumeOne(); swing();
-        return true;
-      };
-      if (h) {
-        const raw = getRaw(h.x, h.y, h.z), st = raw >>> 8;
-        if ((raw & 0xff) === id && !(st & STATE.SLAB_DOUBLE)) {
-          const top = (st & STATE.SLAB_TOP) !== 0;
-          if ((h.face === FACE.UP && !top) || (h.face === FACE.DOWN && top)) return merge(h.x, h.y, h.z, st);
-        }
-      }
-      const craw = getRaw(ctx.x, ctx.y, ctx.z), cst = craw >>> 8;
-      if ((craw & 0xff) === id && !(cst & STATE.SLAB_DOUBLE)) {
-        let newTop;
-        if (ctx.face === FACE.UP) newTop = false;
-        else if (ctx.face === FACE.DOWN) newTop = true;
-        else newTop = h && Number.isFinite(h.py) ? (h.py - Math.floor(h.py)) > 0.5 : false;
-        if (newTop !== ((cst & STATE.SLAB_TOP) !== 0)) return merge(ctx.x, ctx.y, ctx.z, cst);
-        return true; // same half already there: nothing to place
-      }
-      return false;
-    });
-  }
-
+  /* ------------------------------------------------------------------ snow layers (P1) */
+  // Double slabs are CORE-E's (interaction.tryMergeSlab runs before any placer). Snow: tapping a snow layer adds a
+  // layer (up to 8); otherwise the normal placement.
   registerPlacer('snow', (ctx) => {
     const tryStack = (x, y, z) => {
       const raw = getRaw(x, y, z);
       if ((raw & 0xff) !== ID.snow || ((raw >>> 8) & 7) >= 7) return false;
-      if (!game.interaction.placeBlock(x, y, z, ID.snow, ((raw >>> 8) & 7) + 1, { by: 'player', item: 'snow', action: ctx.action, force: true })) return false;
-      consumeOne(); swing();
-      return true;
+      return !!game.interaction.placeBlock(x, y, z, ID.snow, ((raw >>> 8) & 7) + 1, { by: 'player', item: 'snow', action: ctx.action, force: true });
     };
     if (ctx.hit && tryStack(ctx.hit.x, ctx.hit.y, ctx.hit.z)) return true;
-    return tryStack(ctx.x, ctx.y, ctx.z);
+    if (tryStack(ctx.x, ctx.y, ctx.z)) return true;
+    return !!game.interaction.placeBlock(ctx.x, ctx.y, ctx.z, ID.snow, ctx.state || 0, { by: 'player', item: 'snow', action: ctx.action });
   });
 
   /* ------------------------------------------------------------------ test / integration helper */
@@ -332,7 +300,9 @@ export function registerMechHooks(game, mech) {
       const pl = hooks.placers.get(BLOCKS[places.id].name);
       const tid = raw & 0xff;
       const tx = isReplaceable(tid) && tid !== places.id ? x : x + n[0], ty = isReplaceable(tid) && tid !== places.id ? y : y + n[1], tz = isReplaceable(tid) && tid !== places.id ? z : z + n[2];
-      if (pl && pl({ ...ctx, x: tx, y: ty, z: tz, id: places.id, state: places.state, face })) return { consumed: true, by: 'placer', action };
+      // CORE-E contract (interaction.tryPlace): a placer returns true when it placed, and then the caller swings and
+      // uses up one item in survival; false = refused.
+      if (pl && pl({ ...ctx, x: tx, y: ty, z: tz, id: places.id, state: places.state, face })) { consumeOne(); swing(); return { consumed: true, by: 'placer', action }; }
     }
     return { consumed: false, by: null, action };
   };

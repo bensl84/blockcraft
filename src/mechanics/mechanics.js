@@ -6,7 +6,6 @@
 //   rules.js      support / wash / solid-top predicates (pure)
 //   fluids.js     water + lava flow (pure, accessor based)
 //   explosion.js  1352-ray explosion maths, exposure, damage (pure)
-//   body.js       tiny AABB mover for falling blocks and primed TNT
 //   entities.js   falling_block + tnt entity types
 //   uses.js       hooks: doors, gates, beds, cake, TNT, buckets, hoes, bone meal, flint and steel, slabs, snow
 //   painting.js   painting entity + item (P1)
@@ -229,9 +228,19 @@ export function createMechanicsSystem(game) {
   }
 
   /* ------------------------------------------------------------------ random ticks */
+  // Cell picking uses a private PRNG (thousands of draws per tick would otherwise shift every other lane's
+  // game.rand() rolls with the number of loaded columns). It is re-seeded from game.rand whenever game.rand is
+  // replaced (setRandomSeed), so tests stay reproducible. The growth rolls themselves still use game.rand().
+  let rtSeed = 0, rtFrom = null;
+  const rtRand = () => {
+    if (rtFrom !== game.rand) { rtFrom = game.rand; rtSeed = (game.rand() * 0x100000000) >>> 0 || 1; }
+    rtSeed ^= rtSeed << 13; rtSeed >>>= 0; rtSeed ^= rtSeed >>> 17; rtSeed ^= rtSeed << 5; rtSeed >>>= 0;
+    return rtSeed;
+  };
+  let randomTicksOn = true;
   function randomTicks() {
     const w = game.world;
-    if (!w || !w.forEachColumn) return;
+    if (!randomTicksOn || !w || !w.forEachColumn) return;
     const p = game.player;
     const pcx = p ? Math.floor(p.x) >> 4 : 0, pcz = p ? Math.floor(p.z) >> 4 : 0;
     const R = (w.renderDistance || 6) + 1;
@@ -244,7 +253,7 @@ export function createMechanicsSystem(game) {
       for (let sy = 0; sy < 8; sy++) {
         if (!(mask & (1 << sy))) continue;
         for (let k = 0; k < RANDOM_TICKS_PER_SECTION; k++) {
-          const r = (game.rand() * 4096) | 0;
+          const r = rtRand() & 4095;
           const lx = r & 15, lz = (r >> 4) & 15, y = (sy << 4) | ((r >> 8) & 15);
           const raw = col.blocks[colIndex(lx, y, lz)];
           const id = raw & 0xff;
@@ -686,6 +695,8 @@ export function createMechanicsSystem(game) {
      * Kid default (daylightCycle off): always a nap - starry sky for KID.NAP_TICKS, then back to 09:00.
      */
     trySleep,
+    /** Test/debug switch: false pauses random ticks (growth, grass, leaf decay, melting). Not saved. */
+    setRandomTicks(on) { randomTicksOn = !!on; return randomTicksOn; },
     /** Current sleep {nap, ticks, x, y, z} or null. */
     sleeping() { return sleep ? { ...sleep } : null; },
     /** Falling block landing (called by the falling_block entity). */

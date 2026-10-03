@@ -236,6 +236,29 @@ export default [
     },
   },
   {
+    name: 'mech-input-survival-door', requires: ['input', 'interaction', 'raycast', 'player', 'physics'],
+    async run(t) {
+      // survival: one tap places ONE two-high door and uses up exactly one door item (CORE-E consumes after a placer)
+      const p = await start(t, SURV);
+      await t.call('waitTicks', 10);
+      await t.call('setSlot', 0, 'oak_door', 3);
+      await t.call('selectSlot', 0);
+      const x = Math.floor(p.x) + 1, z = Math.floor(p.z) - 2;
+      const aim = await t.call('aimAt', x + 0.5, 4, z + 0.5);
+      await t.call('tapAt', aim.x, aim.y);
+      await t.call('waitTicks', 3);
+      t.assert(await t.call('getBlock', x, 5, z) === 'oak_door', 'door placed');
+      t.assert((await t.call('selected')).count === 2, `one door used (${(await t.call('selected')).count} left)`);
+      // refused under a ceiling: nothing used up
+      await t.call('setBlock', x - 2, 5, z, 'stone');
+      const a2 = await t.call('aimAt', x - 1.5, 4, z + 0.5);
+      await t.call('tapAt', a2.x, a2.y);
+      await t.call('waitTicks', 3);
+      t.assert(await t.call('getBlock', x - 2, 4, z) !== 'oak_door', 'no door under a ceiling');
+      t.assert((await t.call('selected')).count === 2, 'refused door is not used up');
+    },
+  },
+  {
     name: 'mech-input-bucket', requires: ['input', 'interaction', 'raycast', 'player', 'physics'],
     async run(t) {
       const p = await start(t, SURV);
@@ -244,12 +267,14 @@ export default [
       await t.call('setBlock', x, 4, z, 'water');
       await t.call('setSlot', 0, 'bucket', 1);
       await t.call('selectSlot', 0);
+      // look there AND put the kid cursor on it (an earlier scenario may have left the cursor off-centre)
       await t.call('lookAt', x + 0.5, 4.1, z + 0.5);
+      await t.call('aimAt', x + 0.5, 4.1, z + 0.5);
       await t.call('press', 'use');
       await t.call('waitTicks', 3);
       t.assert(await t.call('getBlock', x, 4, z) === 'air', 'bucket picks up the source');
       t.assert((await t.call('selected')).item === 'water_bucket', 'water bucket in hand');
-      await t.call('lookAt', x + 0.5, 3.9, z + 0.5);
+      await t.call('aimAt', x + 0.5, 3.9, z + 0.5);
       await t.call('press', 'use');
       await t.call('waitTicks', 3);
       t.assert(await t.call('getBlock', x, 4, z) === 'water', 'poured back');
