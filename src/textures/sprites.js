@@ -1,0 +1,934 @@
+// OWNER LANE: CORE-A. Original 16x16 item sprites (SPEC §4.5, §5.1 item 9). Pure, no DOM.
+// Pipeline per sprite: paint the hand-drawn grid (shapes with their own light/mid/dark shades), a light
+// top-left bevel, then a dark outline in a darkened shade of the touching colour (outlineShade).
+// Tools and armour are templates recoloured per tier. `dye` and `bed` take the item's `tint`;
+// `spawn_egg` takes `colors` [base, spots].
+
+import { PixelCanvas, shade, mix, rgb } from './toolkit.js';
+
+const W = [255, 255, 255];
+
+/** Tier palettes: a = light edge, b = body, c = shadow. */
+export const MATERIALS = {
+  wooden: { a: '#c9a066', b: '#a0763e', c: '#6a4a22' },
+  stone: { a: '#b4b4b4', b: '#8a8a8a', c: '#5c5c5c' },
+  iron: { a: '#ffffff', b: '#d6d6d6', c: '#9c9c9c' },
+  golden: { a: '#fff7a8', b: '#f6cc32', c: '#b88a10' },
+  diamond: { a: '#d8fffb', b: '#4fe3dc', c: '#1a9690' },
+  leather: { a: '#d0905a', b: '#a8683a', c: '#6e4220' },
+};
+const HANDLE = { h: '#a07440', H: '#5e4020' };
+
+function make(rows, pal, opts = {}) {
+  const pc = new PixelCanvas(16, 16);
+  pc.paintGrid(rows.map((r) => r.padEnd(16, '.')), pal);
+  if (opts.bevel !== 0) pc.bevel(opts.bevel ?? 0.08);
+  if (opts.outline !== false) pc.outlineShade(opts.k ?? 0.38);
+  return pc;
+}
+
+/* ------------------------------------------------------------------ tool templates */
+const TOOL_GRIDS = {
+  pickaxe: [
+    '................',
+    '....abbbbb......',
+    '...abbbbbbbc....',
+    '..abbccccbbbc...',
+    '..bcc....hcbbc..',
+    '........hH.cbc..',
+    '.......hH...cbc.',
+    '......hH....cbc.',
+    '.....hH......cc.',
+    '....hH.......c..',
+    '...hH...........',
+    '..hH............',
+    '.hH.............',
+  ],
+  axe: [
+    '................',
+    '......aab.......',
+    '.....abbbc......',
+    '....abbbbbc.....',
+    '...abbbbbbch....',
+    '...abbbbbchHc...',
+    '...abbbbchHbc...',
+    '...aabbchHbcc...',
+    '....aacchHcc....',
+    '.......hH.c.....',
+    '......hH........',
+    '.....hH.........',
+    '....hH..........',
+    '...hH...........',
+    '..hH............',
+    '.hH.............',
+  ],
+  shovel: [
+    '................',
+    '..........abb...',
+    '.........abbbc..',
+    '........abbbbc..',
+    '........bbbbcc..',
+    '.........bccc...',
+    '........hH......',
+    '.......hH.......',
+    '......hH........',
+    '.....hH.........',
+    '....hH..........',
+    '...hH...........',
+    '..hH............',
+    '.hH.............',
+  ],
+  sword: [
+    '................',
+    '............abb.',
+    '...........abbc.',
+    '..........abbc..',
+    '.........abbc...',
+    '........abbc....',
+    '.......abbc.....',
+    '......abbc......',
+    '..cc.abbc.......',
+    '...ccbbc........',
+    '....ccc.........',
+    '...hHcc.........',
+    '..hH..cc........',
+    '.cc.............',
+    '.cc.............',
+  ],
+  hoe: [
+    '................',
+    '......abbbh.....',
+    '.....abbbbhH....',
+    '.....bcc.hH.....',
+    '.....c..hH......',
+    '.......hH.......',
+    '......hH........',
+    '.....hH.........',
+    '....hH..........',
+    '...hH...........',
+    '..hH............',
+    '.hH.............',
+  ],
+};
+function tool(type, tier) {
+  const m = MATERIALS[tier];
+  if (type === 'hoe') return headOnHandle(type, m);
+  const pal = { ...HANDLE, a: m.a, b: m.b, c: m.c };
+  if (type === 'sword') pal.c = shade(m.c, 0.95);
+  return make(TOOL_GRIDS[type], pal);
+}
+
+/**
+ * Axe and hoe heads are drawn in handle coordinates: s = x - y runs up the diagonal handle (x + y = 15),
+ * p = x + y - 15 is the sideways offset (negative = toward the upper left).
+ */
+function headOnHandle(type, m) {
+  const pc = new PixelCanvas(16, 16);
+  const inHead = (s, p) => {
+    if (type === 'axe') {
+      const W = [0, 2, 2.5, 3, 3.5, 4, 4, 3.5]; // half-width of the blade per sideways step
+      if (p <= -1 && p >= -7) return Math.abs(s - 6) <= W[-p];
+      return p >= 1 && p <= 2 && s >= 5 && s <= 7;
+    }
+    // hoe: blade sticking out to the upper left, with a hooked tip
+    if (s >= 7 && s <= 9 && p >= -7 && p <= 1) return true;
+    return p >= -7 && p <= -5 && s >= 4 && s <= 9;
+  };
+  // handle
+  for (let x = 1; x <= (type === 'axe' ? 11 : 11); x++) { const y = 14 - x; pc.setRGB(x, y, HANDLE.h); pc.setRGB(x + 1, y, HANDLE.H); }
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const s = x - y, p = x + y - 15;
+    if (!inHead(s, p)) continue;
+    const top = !inHead(x - y + 1, x + y - 16) || !inHead(x - y - 1, x + y - 16); // empty above
+    const bottom = !inHead(x - y - 1, x + y - 14) || !inHead(x - y + 1, x + y - 14);
+    pc.setRGB(x, y, top ? m.a : bottom ? m.c : m.b);
+  }
+  // nudge down one pixel so the head keeps room for its outline at the top
+  pc.data.copyWithin(16 * 4, 0, 15 * 16 * 4);
+  pc.data.fill(0, 0, 16 * 4);
+  pc.bevel(0.08);
+  pc.outlineShade(0.38);
+  return pc;
+}
+
+const ARMOR_GRIDS = {
+  helmet: [
+    '................',
+    '................',
+    '................',
+    '....aaaaaaaa....',
+    '...abbbbbbbbc...',
+    '...abbbbbbbbc...',
+    '...ab......bc...',
+    '...ab......bc...',
+    '...bc......cc...',
+  ],
+  chestplate: [
+    '................',
+    '................',
+    '..aaab....abbc..',
+    '..abbbaaaabbbc..',
+    '..abbbbbbbbbbc..',
+    '..bbcabbbbbcbc..',
+    '.....abbbbbc....',
+    '.....abbbbbc....',
+    '.....abbbbbc....',
+    '.....abbbbbc....',
+    '.....abbbbbc....',
+    '.....bccccccc...',
+  ],
+  leggings: [
+    '................',
+    '................',
+    '....aaaaaaaa....',
+    '....abbbbbbc....',
+    '....abbccbbc....',
+    '....abc..abc....',
+    '....abc..abc....',
+    '....abc..abc....',
+    '....abc..abc....',
+    '....abc..abc....',
+    '....abc..abc....',
+    '....bcc..bcc....',
+  ],
+  boots: [
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+    '...ab.....ab....',
+    '...ab.....ab....',
+    '...ab.....ab....',
+    '...abbc...abbc..',
+    '..abbbc..abbbc..',
+    '..cccc...cccc...',
+  ],
+};
+function armor(piece, mat) {
+  const m = MATERIALS[mat];
+  const pc = make(ARMOR_GRIDS[piece], { a: m.a, b: m.b, c: m.c });
+  if (mat === 'diamond' || mat === 'golden' || mat === 'iron') {
+    // a glint
+    const g = { helmet: [5, 4], chestplate: [4, 3], leggings: [5, 3], boots: [4, 7] }[piece];
+    pc.setRGB(g[0], g[1], mix(m.a, W, 0.6));
+  }
+  return pc;
+}
+
+/* ------------------------------------------------------------------ reusable shapes */
+const INGOT = [
+  '................',
+  '................',
+  '................',
+  '................',
+  '.......aaaaaa...',
+  '.....aabbbbbbc..',
+  '...aabbbbbbbcc..',
+  '..abbbbbbbbccc..',
+  '..aaaaaaaabccc..',
+  '..abbbbbbbbcc...',
+  '..bbbbbbbbbc....',
+  '..ccccccccc.....',
+];
+const LUMP = [
+  '................',
+  '................',
+  '................',
+  '.....abb........',
+  '....abbbba......',
+  '...abbcbbbbc....',
+  '..abbbbbabbbc...',
+  '..abbabbbbcbc...',
+  '..bbbbbbbbbbc...',
+  '...bcbbbcbbc....',
+  '....cbbbbcc.....',
+  '.....ccc........',
+];
+const DUST = [
+  '................',
+  '................',
+  '................',
+  '................',
+  '................',
+  '......a.........',
+  '.........a......',
+  '....a..ab..b....',
+  '.......abb......',
+  '.....aabbbb.a...',
+  '...a.abbbbbc....',
+  '....abbbcbbbc...',
+  '...abbbbbbcbbc..',
+  '...bbcbbbbbbcc..',
+  '....ccccccccc...',
+];
+const BUCKET = [
+  '................',
+  '................',
+  '.....kkkkkk.....',
+  '....k......k....',
+  '...k........k...',
+  '..maaaaaaaaaam..',
+  '..mffffffffffm..',
+  '..mbffffffffbm..',
+  '...mbbbbbbbbm...',
+  '...mabbbbbbcm...',
+  '...mabbbbbbcm...',
+  '....mabbbbcm....',
+  '....mabbbbcm....',
+  '.....mmmmmm.....',
+];
+function bucket(fill, fillHi) {
+  const pal = { k: '#5a5a5a', m: '#7a7a7a', a: '#e8e8e8', b: '#c4c4c4', c: '#909090', f: fill || '#4a4a4a' };
+  if (!fill) pal.f = '#3a3a3a';
+  const pc = make(BUCKET, pal, { bevel: 0 });
+  if (fillHi) { pc.setRGB(4, 6, fillHi); pc.setRGB(5, 6, fillHi); pc.setRGB(10, 7, fillHi); }
+  return pc;
+}
+const MEAT = [
+  '................',
+  '................',
+  '................',
+  '......ppppp.....',
+  '....ppPrrrrp....',
+  '...pPrrrrrrrp...',
+  '..pPrrRRRrrrrp..',
+  '..pPrrrrrrrrrp..',
+  '..pPrrrrrRRRrp..',
+  '...pPrrrrrrrrp..',
+  '....pPRRrrrrp...',
+  '.....ppPrrrp....',
+  '........ppp.....',
+];
+const CHOP = [
+  '................',
+  '................',
+  '................',
+  '........ffff....',
+  '......ffmmmmf...',
+  '.....fmmmMmmmf..',
+  '....fmmmmmmmmf..',
+  '...fmmMmmmmmmf..',
+  '..fmmmmmmmmMf...',
+  '..fmmmmmmmmf....',
+  '..wwfmmmmff.....',
+  '.wWw.ffff.......',
+  '.ww.............',
+];
+const DRUM = [
+  '................',
+  '................',
+  '................',
+  '.......mmmm.....',
+  '.....mmMMMMm....',
+  '....mMMmmmMMm...',
+  '....mMmmmmmMm...',
+  '....mMmmmmmMm...',
+  '....mmMmmmMm....',
+  '.....mmMMmm.....',
+  '....wwmmmm......',
+  '...wWw..........',
+  '..wWw...........',
+  '..ww............',
+];
+const GEM = [
+  '................',
+  '................',
+  '................',
+  '.....aaaaaa.....',
+  '....abWbbbbc....',
+  '...abWbbbbbbc...',
+  '..aaaaaaaaaaac..',
+  '...bbbbbbbbbc...',
+  '....bbbbbbbc....',
+  '.....bbbbbc.....',
+  '......bbbc......',
+  '.......bc.......',
+];
+const EMERALD = [
+  '................',
+  '................',
+  '.......ab.......',
+  '......aWbb......',
+  '.....aWbbbc.....',
+  '....abbbbbbc....',
+  '....abbbbbbc....',
+  '....abbbbbbc....',
+  '....abbbbbbc....',
+  '.....bbbbbc.....',
+  '......bbcc......',
+  '.......cc.......',
+];
+const DROP = [
+  '................',
+  '................',
+  '.......a........',
+  '......abb.......',
+  '......abb.......',
+  '.....abbbb......',
+  '....abWbbbc.....',
+  '....aWbbbbc.....',
+  '...abbbbbbbc....',
+  '...abbbbbbbc....',
+  '...bbbbbbbbc....',
+  '....bbbbbbc.....',
+  '.....cccc.......',
+];
+const EGG = [
+  '................',
+  '................',
+  '......aaaa......',
+  '.....abbbbb.....',
+  '....aWbbbbbc....',
+  '....aWbbbbbc....',
+  '...abbbbbbbbc...',
+  '...abbbbbbbbc...',
+  '...abbbbbbbbc...',
+  '...bbbbbbbbbc...',
+  '....bbbbbbbc....',
+  '.....cccccc.....',
+];
+const BALL = [
+  '................',
+  '................',
+  '................',
+  '................',
+  '......aaaa......',
+  '.....aWbbbb.....',
+  '....aWbbbbbc....',
+  '....abbbbbbc....',
+  '....abbbbbbc....',
+  '....bbbbbbbc....',
+  '.....bbbbbc.....',
+  '......cccc......',
+];
+
+/* ------------------------------------------------------------------ the sprite table */
+const MEAT_RAW = { p: '#c84a4a', P: '#e86a6a', r: '#d83a3a', R: '#f4d4c8' };
+const MEAT_COOKED = { p: '#6a3a1a', P: '#8a4e26', r: '#a2622e', R: '#c48a50' };
+
+/** name -> (item, texPixels) => PixelCanvas */
+export const SPRITES = {
+  stick: () => make([
+    '................',
+    '................',
+    '............ab..',
+    '...........abc..',
+    '..........abc...',
+    '.........abc....',
+    '........abc.....',
+    '.......abc......',
+    '......abc.......',
+    '.....abc........',
+    '....abc.........',
+    '...abc..........',
+    '...bc...........',
+  ], { a: '#b88a50', b: '#8a6234', c: '#5e3e1c' }, { bevel: 0 }),
+  coal: () => make(LUMP, { a: '#5a5a5a', b: '#2a2a2a', c: '#141414' }),
+  charcoal: () => make(LUMP, { a: '#6a5444', b: '#3a2c22', c: '#1e1610' }),
+  raw_iron: () => make(LUMP, { a: '#f2d2b8', b: '#cfa080', c: '#8e6448' }),
+  raw_gold: () => make(LUMP, { a: '#fff4a0', b: '#eebc2e', c: '#a8780e' }),
+  iron_ingot: () => make(INGOT, { a: '#ffffff', b: '#d4d4d4', c: '#8e8e8e' }),
+  gold_ingot: () => make(INGOT, { a: '#fff8b0', b: '#f6c930', c: '#b0800c' }),
+  brick: () => make(INGOT, { a: '#d48060', b: '#a8503a', c: '#6e2c1e' }),
+  diamond: () => make(GEM, { a: '#d8fffb', b: '#4fe3dc', c: '#178a86', W: '#ffffff' }),
+  emerald: () => make(EMERALD, { a: '#b8ffd2', b: '#22c860', c: '#0e7a36', W: '#ffffff' }),
+  lapis_lazuli: () => {
+    const pc = make(LUMP, { a: '#6a96ff', b: '#2a56c8', c: '#18348a' });
+    pc.setRGB(6, 6, '#f0d060'); pc.setRGB(9, 8, '#f0d060'); return pc;
+  },
+  redstone: () => make(DUST, { a: '#ff6a5a', b: '#d81c14', c: '#7a0808' }, { bevel: 0 }),
+  glowstone_dust: () => make(DUST, { a: '#fff6b0', b: '#f8c840', c: '#a8701a' }, { bevel: 0 }),
+  gunpowder: () => make(DUST, { a: '#9a9a9a', b: '#5a5a5a', c: '#2e2e2e' }, { bevel: 0 }),
+  sugar: () => make(DUST, { a: '#ffffff', b: '#e6e6ee', c: '#a8a8b8' }, { bevel: 0 }),
+  bone_meal: () => make(DUST, { a: '#ffffff', b: '#e4e0d0', c: '#a8a290' }, { bevel: 0 }),
+  flint: () => make([
+    '................',
+    '................',
+    '................',
+    '.......ab.......',
+    '......abbc......',
+    '.....abWbbc.....',
+    '....abbbbbbc....',
+    '....abbbbbbbc...',
+    '...abbbbbcbbc...',
+    '...bbbcbbbbc....',
+    '....bbbbbcc.....',
+    '.....cccc.......',
+  ], { a: '#7a7a80', b: '#45454c', c: '#26262a', W: '#b0b0b8' }),
+  string: () => make([
+    '................',
+    '................',
+    '..........aa....',
+    '.........a..a...',
+    '.........a..a...',
+    '..........aa....',
+    '.........a......',
+    '........a.......',
+    '.......a........',
+    '.......a........',
+    '........a.......',
+    '...aa....a......',
+    '..a..a...a......',
+    '...aa...a.......',
+    '.....aaa........',
+  ], { a: '#f4f4f4' }, { bevel: 0, k: 0.45 }),
+  feather: () => make([
+    '................',
+    '.............a..',
+    '...........aab..',
+    '.........aabbb..',
+    '........abbbbc..',
+    '.......abbbbc...',
+    '......abbbbc....',
+    '.....abbbbc.....',
+    '....abbbbc......',
+    '....abbbc.......',
+    '...abbcc........',
+    '...bcc..........',
+    '..q.............',
+    '.q..............',
+  ], { a: '#ffffff', b: '#e6e6e6', c: '#b0b0b8', q: '#8a8a8a' }),
+  leather: () => make([
+    '................',
+    '................',
+    '...aa......aa...',
+    '...abbbbbbbbc...',
+    '....abbbbbbc....',
+    '....abbbbbbc....',
+    '...abbbbbbbbc...',
+    '...abbbbbbbbc...',
+    '....abbbbbbc....',
+    '....abbbbbbc....',
+    '...abbcbbcbbc...',
+    '...cc......cc...',
+  ], { a: '#c88a5a', b: '#9a5e34', c: '#6a3a1c' }),
+  bone: () => make([
+    '................',
+    '................',
+    '...........aa...',
+    '..........abba..',
+    '...........bbc..',
+    '..........abc...',
+    '.........abc....',
+    '........abc.....',
+    '.......abc......',
+    '......abc.......',
+    '.....abc........',
+    '....abc.........',
+    '..abb...........',
+    '..abc...........',
+    '...c............',
+  ], { a: '#ffffff', b: '#ebe6d6', c: '#b0a890' }),
+  wheat: () => make([
+    '................',
+    '....g..g..g.....',
+    '...gGg.gGgGg....',
+    '...GgG.GgG.gG...',
+    '...gGg.gGg.Gg...',
+    '....Gs.GgG.sg...',
+    '.....s..s..s....',
+    '......s.s.s.....',
+    '.......sss......',
+    '.......sss......',
+    '......bbbb......',
+    '.......sss......',
+    '......s.s.s.....',
+    '.....s..s..s....',
+  ], { g: '#f0cc5a', G: '#c89a2e', s: '#a89a3a', b: '#8a5a2a' }, { bevel: 0 }),
+  wheat_seeds: () => make([
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+    '.......a........',
+    '......ab...a....',
+    '..........ab....',
+    '....a...........',
+    '....ab...a......',
+    '.........ab.....',
+    '......a.........',
+    '......ab..a.....',
+    '..........ab....',
+  ], { a: '#9ae070', b: '#4a9a2a' }, { bevel: 0 }),
+  clay_ball: () => make(BALL, { a: '#d2d8e2', b: '#a2a8b5', c: '#6e7482', W: '#eef2f8' }),
+  snowball: () => make(BALL, { a: '#ffffff', b: '#eef4fa', c: '#b8c8d8', W: '#ffffff' }),
+  egg: () => make(EGG, { a: '#fffaf0', b: '#ecdcc0', c: '#b8a080', W: '#ffffff' }),
+  paper: () => make([
+    '................',
+    '................',
+    '...aaaaaaaaa....',
+    '...abbbbbbbbc...',
+    '...abllllllbc...',
+    '...abbbbbbbbc...',
+    '...abllllllbc...',
+    '...abbbbbbbbc...',
+    '...ablllllbbc...',
+    '...abbbbbbbbc...',
+    '...abllllllbc...',
+    '...abbbbbbbbc...',
+    '...ccccccccc....',
+  ], { a: '#ffffff', b: '#f2efe6', c: '#c4bfae', l: '#c8c8d8' }, { bevel: 0 }),
+  book: () => make([
+    '................',
+    '................',
+    '....aaaaaaaa....',
+    '...abbbbbbbpp...',
+    '...abggggbbpw...',
+    '...abbbbbbbpw...',
+    '...abbbbbbbpw...',
+    '...abbbbbbbpw...',
+    '...abbbbbbbpw...',
+    '...abbbbbbbpw...',
+    '...abbbbbbbpw...',
+    '...abbbbbbbpw...',
+    '...ccccccccpp...',
+  ], { a: '#a8603a', b: '#8a4224', c: '#5a2810', g: '#e8c050', p: '#d8d0bc', w: '#ffffff' }),
+  bowl: () => make([
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+    '..dddddddddddd..',
+    '..abbbbbbbbbbc..',
+    '...abbbbbbbbc...',
+    '....abbbbbbc....',
+    '.....bbbbcc.....',
+    '......cccc......',
+  ], { a: '#b88a50', b: '#8e6232', c: '#5a3c1a', d: '#4a3018' }),
+  mushroom_stew: () => make([
+    '................',
+    '................',
+    '................',
+    '................',
+    '.....s.sS.s.....',
+    '...sSSssSSsSs...',
+    '..ddsSsSSsSsdd..',
+    '..abbbbbbbbbbc..',
+    '...abbbbbbbbc...',
+    '....abbbbbbc....',
+    '.....bbbbcc.....',
+    '......cccc......',
+  ], { a: '#b88a50', b: '#8e6232', c: '#5a3c1a', d: '#4a3018', s: '#a87850', S: '#cfa070' }),
+
+  /* food */
+  apple: () => appleSprite({ r: '#e2302a', R: '#a81c16', w: '#ff9a8a' }),
+  golden_apple: () => appleSprite({ r: '#f6cc32', R: '#b8860e', w: '#fffbd0' }),
+  bread: () => make([
+    '................',
+    '................',
+    '................',
+    '................',
+    '.....aaaaaa.....',
+    '...aabbbbbbaa...',
+    '..abbwbbwbbwba..',
+    '..abbbwbbwbbwb..',
+    '.abbbbbbbbbbbbc.',
+    '.bbbbbbbbbbbbbc.',
+    '.cbbbbbbbbbbbcc.',
+    '..cccccccccccc..',
+  ], { a: '#f0c070', b: '#cc8c3e', c: '#8a5622', w: '#f8dc9a' }),
+  carrot: () => make([
+    '................',
+    '............g.g.',
+    '..........gggg..',
+    '...........Gg...',
+    '.........oOGg.g.',
+    '........oOoo....',
+    '.......oOood....',
+    '......oOood.....',
+    '.....oOood......',
+    '....oOood.......',
+    '...oOood........',
+    '...oood.........',
+    '..ood...........',
+    '..d.............',
+  ], { o: '#f0861e', O: '#ffb050', d: '#b85a10', g: '#5ab83a', G: '#2e7a1e' }, { bevel: 0 }),
+  potato: () => make(potatoGrid, { a: '#e8c888', b: '#c8a060', c: '#8a6a38', s: '#a07840' }),
+  baked_potato: () => make(potatoGrid, { a: '#f0c060', b: '#c88a34', c: '#7a4a14', s: '#fff0a0' }),
+  porkchop: () => make(CHOP, { f: '#f8d8d0', m: '#f0a0a0', M: '#ffc8c0', w: '#f4f0e8', W: '#ffffff' }),
+  cooked_porkchop: () => make(CHOP, { f: '#d8a060', m: '#b0703a', M: '#d89858', w: '#f4f0e8', W: '#ffffff' }),
+  beef: () => make(MEAT, MEAT_RAW),
+  cooked_beef: () => make(MEAT, MEAT_COOKED),
+  chicken: () => make(DRUM, { m: '#f4c8b0', M: '#ffe2d0', w: '#f4f0e8', W: '#ffffff' }),
+  cooked_chicken: () => make(DRUM, { m: '#c8803e', M: '#e8a85a', w: '#f4f0e8', W: '#ffffff' }),
+  mutton: () => make(MEAT, { p: '#e8b0a8', P: '#f8d8d0', r: '#c8484a', R: '#f4e0d8' }),
+  cooked_mutton: () => make(MEAT, { p: '#8a5a32', P: '#b07a48', r: '#8a4a26', R: '#c48a50' }),
+  rotten_flesh: () => make(MEAT, { p: '#5a6a2a', P: '#7a8a3a', r: '#8a5a3a', R: '#4a5a1a' }),
+  melon_slice: () => make([
+    '................',
+    '................',
+    '................',
+    '................',
+    '..rrrrrrrrrrrr..',
+    '..rRrkRrrRkrRr..',
+    '...rrrrrrrrrr...',
+    '...wRrrkrrRrw...',
+    '....wrrrrrrw....',
+    '....gwrrRrwg....',
+    '.....gwwwwg.....',
+    '......gGGg......',
+  ], { r: '#e8343a', R: '#ff6a6a', k: '#1a1a1a', w: '#e8f0c8', g: '#4a9a2a', G: '#2a6a18' }),
+  pumpkin_pie: () => make([
+    '................',
+    '................',
+    '................',
+    '..........ac....',
+    '........aaoc....',
+    '......aaooOc....',
+    '....aaoowooc....',
+    '..aaoOoooooc....',
+    '.aaaaaaaaaaac...',
+    '.bbbbbbbbbbbc...',
+    '.cbbbbbbbbbbc...',
+    '..cccccccccc....',
+  ], { a: '#f0c47a', b: '#c88a40', c: '#8a5a24', o: '#d8781e', O: '#f09a3a', w: '#fff4e0' }),
+  milk_bucket: () => bucket('#f8f8f8', '#ffffff'),
+  bucket: () => bucket(null),
+  water_bucket: () => bucket('#3a6cdc', '#86b0f6'),
+  lava_bucket: () => bucket('#f27614', '#ffd860'),
+
+  /* tools and gear */
+  shears: () => make([
+    '................',
+    '................',
+    '...........ab...',
+    '..........abc...',
+    '.........abc....',
+    '...ab...abc.....',
+    '...abbbbbc......',
+    '....bbbbc.......',
+    '.....rRRr.......',
+    '....rR..rR......',
+    '...rR....rR.....',
+    '...rR....rR.....',
+    '....rr..rr......',
+  ], { a: '#ffffff', b: '#d0d0d0', c: '#8a8a8a', r: '#b8302a', R: '#e04a3a' }),
+  flint_and_steel: () => make([
+    '................',
+    '................',
+    '..aaaa..........',
+    '.ab..bc.........',
+    '.ab...bc........',
+    '.ab...bc........',
+    '..bc.bc.........',
+    '...bbc..........',
+    '........fff.....',
+    '.......fFfff....',
+    '......fFffffg...',
+    '......fffffgg...',
+    '.......ffggg....',
+    '........ggg.....',
+  ], { a: '#ffffff', b: '#b8b8b8', c: '#7a7a7a', f: '#4a4a52', F: '#9a9aa8', g: '#2a2a30' }),
+  saddle: () => make([
+    '................',
+    '................',
+    '................',
+    '................',
+    '..aa........aa..',
+    '..abb......abc..',
+    '..abbbbbbbbbbc..',
+    '...bbbbbbbbbc...',
+    '...rrrrrrrrrr...',
+    '....cbbbbbbc....',
+    '.......m........',
+    '.......m........',
+    '......sss.......',
+    '......s.s.......',
+  ], { a: '#b06a3a', b: '#7e4422', c: '#4e2810', m: '#3a2410', s: '#c8c8c8', r: '#c8a040' }),
+  carrot_on_a_stick: () => make([
+    '................',
+    '..h.............',
+    '..hH............',
+    '...hH...........',
+    '..s.hH..........',
+    '..s..hH.........',
+    '..s...hH........',
+    '..s....hH.......',
+    '..g.....hH......',
+    '.ggg.....hH.....',
+    '..O.......hH....',
+    '..o........hH...',
+    '..d.........hH..',
+  ], { ...HANDLE, s: '#d8d8d8', g: '#4aa034', O: '#ffb050', o: '#f0861e', d: '#b85a10' }, { bevel: 0 }),
+  lead: () => make([
+    '................',
+    '................',
+    '.....aaaaa......',
+    '....ab...ba.....',
+    '...ab.....ba....',
+    '...ab..aa.ba....',
+    '...ab.ab.bba....',
+    '....ab.bbbb.....',
+    '.....abb........',
+    '......ab........',
+    '.......ab.......',
+    '........ab......',
+    '.........ab.....',
+    '..........kk....',
+  ], { a: '#d8b47a', b: '#9a7440', k: '#5a5a5a' }, { bevel: 0 }),
+  oak_boat: () => make([
+    '................',
+    '................',
+    '................',
+    '................',
+    '..........h.....',
+    '.........h......',
+    '.a......h.....a.',
+    '.ab....h.....ab.',
+    '.abaaaaaaaaaaab.',
+    '.bbbbbbbbbbbbbc.',
+    '..bccccccccccc..',
+    '...cbbbbbbbbc...',
+    '....cccccccc....',
+  ], { a: '#c9a066', b: '#a0763e', c: '#6a4a22', h: '#8a6234' }),
+  painting: () => make([
+    '................',
+    '................',
+    '..ffffffffffff..',
+    '..fsssssssssbf..',
+    '..fssssyysssbf..',
+    '..fsssyyyysssf..',
+    '..fssssyyssssf..',
+    '..fsssssssggsf..',
+    '..fssgggsggggf..',
+    '..fgggGgggGggf..',
+    '..fGggggGgggGf..',
+    '..fbbbbbbbbbbf..',
+    '..ffffffffffff..',
+  ], { f: '#8a5a2a', s: '#7ab8f0', y: '#ffe060', g: '#5aa83a', G: '#3a7a28', b: '#c8a060' }, { bevel: 0 }),
+  bow: () => make([
+    '................',
+    '.......aab......',
+    '.........ab.....',
+    '..........ab.s..',
+    '...........bs...',
+    '...........bs...',
+    '............b...',
+    '...........sb...',
+    '..........s.b...',
+    '.........s..b...',
+    '........s..ab...',
+    '.......s..ab....',
+    '......s.ab......',
+    '.....s.cb.......',
+    '....s...........',
+  ], { a: '#c9a066', b: '#8a6234', c: '#5e3e1c', s: '#e8e8e8' }, { bevel: 0, k: 0.45 }),
+  arrow: () => make([
+    '................',
+    '................',
+    '...........aa...',
+    '..........abaa..',
+    '...........bc...',
+    '..........h.c...',
+    '.........h......',
+    '........h.......',
+    '.......h........',
+    '......h.........',
+    '..f..h..........',
+    '...fh...........',
+    '..ffF...........',
+    '.f..F...........',
+  ], { a: '#e8e8e8', b: '#a0a0a0', c: '#6a6a6a', h: '#a07440', f: '#f4f4f4', F: '#c8c8c8' }, { bevel: 0 }),
+  oak_door: () => make([
+    '................',
+    '....aaaaaaa.....',
+    '....abwwbwbc....',
+    '....abwwbwbc....',
+    '....abbbbbbc....',
+    '....abwwbwbc....',
+    '....abwwbwbc....',
+    '....abbbbbbc....',
+    '....abbbbbbc....',
+    '....abbbbbkc....',
+    '....abbbbbbc....',
+    '....abbbbbbc....',
+    '....abbbbbbc....',
+    '....cccccccc....',
+  ], { a: '#c09a64', b: '#a8814b', c: '#6e5230', w: '#c9e6ef', k: '#3a3a3a' }),
+
+  /* tinted */
+  dye: (it) => {
+    const t = rgb(it.tint || '#888888');
+    return make(DROP, { a: mix(t, W, 0.35), b: t, c: shade(t, 0.6), W: mix(t, W, 0.75) }, { k: t[0] + t[1] + t[2] < 120 ? 0.9 : 0.42 });
+  },
+  bed: (it) => {
+    const t = rgb(it.tint || '#b3312c');
+    const pc = make([
+      '................',
+      '................',
+      '................',
+      '................',
+      '................',
+      '..pp............',
+      '.pPPp.TTTTTTTTT.',
+      '.pPPpTTTTTTTTTTt',
+      '.wwwwTTTTTTTTTTt',
+      '.wwwwttttttttttt',
+      '.ffffffffffffff.',
+      '.l............l.',
+      '.l............l.',
+    ], { p: '#d8d4cc', P: '#ffffff', w: '#efebe3', T: mix(t, W, 0.15), t: shade(t, 0.75), f: '#8a6234', l: '#5e4020' });
+    return pc;
+  },
+  spawn_egg: (it) => {
+    const [base, spot] = (it.colors || ['#888888', '#444444']).map(rgb);
+    const pc = make(EGG, { a: mix(base, W, 0.25), b: base, c: shade(base, 0.65), W: mix(base, W, 0.6) });
+    for (const [x, y] of [[7, 3], [8, 3], [9, 5], [10, 5], [10, 6], [5, 7], [6, 7], [6, 8], [9, 9], [10, 9], [9, 10], [4, 10], [7, 11]]) {
+      if (pc.get(x, y)[3]) pc.setRGB(x, y, spot);
+    }
+    return pc;
+  },
+};
+
+const potatoGrid = [
+  '................',
+  '................',
+  '................',
+  '................',
+  '......aaaa......',
+  '....aabbbbbb....',
+  '...abbsbbbbbc...',
+  '..abbbbbbbsbbc..',
+  '..abbbbbbbbbbc..',
+  '..bbbsbbbbbbcc..',
+  '...bbbbbbsbcc...',
+  '....cccccccc....',
+];
+
+function appleSprite(p) {
+  return make([
+    '................',
+    '........s.......',
+    '........slL.....',
+    '.......sll......',
+    '....rrr.rrrr....',
+    '...rwwrrrrrrR...',
+    '..rwrrrrrrrrRR..',
+    '..rwrrrrrrrrRR..',
+    '..rrrrrrrrrrRR..',
+    '..rrrrrrrrrRRR..',
+    '...rrrrrrrrRR...',
+    '...RrrrrrrRRR...',
+    '....RRR.RRR.....',
+  ], { r: p.r, R: p.R, w: p.w, s: '#6a4a26', l: '#4aa034', L: '#7ad050' });
+}
+
+for (const type of ['pickaxe', 'axe', 'shovel', 'sword', 'hoe']) {
+  for (const tier of ['wooden', 'stone', 'iron', 'golden', 'diamond']) SPRITES[`${tier}_${type}`] = () => tool(type, tier);
+}
+for (const mat of ['leather', 'iron', 'golden', 'diamond']) {
+  for (const piece of ['helmet', 'chestplate', 'leggings', 'boots']) SPRITES[`${mat}_${piece}`] = () => armor(piece, mat);
+}
+
+/** Paint the named sprite for an item (falls back to a grey question block if the name is unknown). */
+export function paintSprite(name, item, texPixels) {
+  const fn = SPRITES[name];
+  if (fn) return fn(item || {}, texPixels);
+  return make(['................', '................', '....aaaaaaa.....', '...abbbbbbbc....', '...abbcccbbc....', '...abbbbcbbc....', '...abbbcbbbc....', '...abbbbbbbc....', '...abbbcbbbc....', '...bccccccc.....'], { a: '#f81cf0', b: '#c010b8', c: '#200020' });
+}
+export function hasSprite(name) { return Object.prototype.hasOwnProperty.call(SPRITES, name); }
