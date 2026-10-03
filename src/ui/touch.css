@@ -1,0 +1,37 @@
+/* OWNER LANE: KID (touch). On-screen controls (SPEC §8.5.1). Sizes and positions come from touch_logic.js
+   (set inline in px); this file only styles them. */
+
+.touch-layer { opacity: var(--touch-opacity, 0.85); }
+.touch-layer.touch-off { display: none; }
+.touch-hidden { display: none !important; }
+
+.touch-btn { position: absolute; box-sizing: border-box; cursor: pointer; -webkit-user-select: none; user-select: none; transition: transform 60ms ease-out, background-color 60ms; }
+.touch-btn .kid-px { display: block; width: 58%; height: 58%; image-rendering: pixelated; pointer-events: none; }
+.touch-btn.bc-pressed { transform: scale(0.92); background: rgba(255, 212, 0, 0.55); }
+
+/* D-pad: capture area (with its 12 px safe ring) holding 4 visual buttons */
+.touch-dpad { position: absolute; pointer-events: auto; touch-action: none; border-radius: 50%; }
+.touch-dpad::before {
+  content: ''; position: absolute; inset: 22%; border-radius: 50%;
+  background: radial-gradient(circle, rgba(0, 0, 0, 0.28) 0%, rgba(0, 0, 0, 0) 70%); pointer-events: none;
+}
+.touch-dpad-btn { pointer-events: none; }
+
+/* joystick */
+.touch-joy { position: absolute; pointer-events: auto; touch-action: none; border-radius: 50%; background: rgba(0, 0, 0, 0.4); border: 2px solid rgba(255, 255, 255, 0.85); box-sizing: border-box; }
+.touch-joy-knob { position: absolute; left: 50%; top: 50%; width: 64px; height: 64px; border-radius: 50%; background: rgba(255, 255, 255, 0.85); border: 3px solid #1d1d1d; box-sizing: border-box; transform: translate(-50%, -50%); pointer-events: none; }
+.touch-joy.bc-pressed .touch-joy-knob { background: #ffd400; }
+
+/* jump: up arrow with grass while walking, a plain up arrow while flying */
+.touch-up-glyph { display: none; width: 58%; height: 58%; }
+.touch-up-glyph .kid-px { width: 100%; height: 100%; }
+.touch-btn.touch-flying > .kid-px { display: none; }
+.touch-btn.touch-flying > .touch-up-glyph { display: block; }
+
+/* stuck rescue: the Up button pulses (SPEC §2.7) */
+.touch-btn.touch-pulse { animation: touch-pulse 0.8s ease-in-out infinite; border-color: #ffd400; }
+@keyframes touch-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 212, 0, 0.8); }
+  50% { transform: scale(1.12); box-shadow: 0 0 0 14px rgba(255, 212, 0, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .touch-btn.touch-pulse { animation-duration: 2s; } }
