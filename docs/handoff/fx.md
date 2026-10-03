@@ -6,7 +6,10 @@ Branch `lane/fx` · worktree `C:\Users\BSLeo\AppData\Roaming\Claude\scratch-work
 
 ## 2026-10-03 · Phase 2: merged the real core, verified in-world, fixed what looked wrong
 
-`git merge main` into `lane/fx` (merge commit `ea295cf`, no conflicts; LEAD files untouched). Everything below was
+`git merge main` into `lane/fx` (merge commits `ea295cf` and `2f79d28` for main's later "classic brightness curve"
+commit; no conflicts; LEAD files untouched). FX's shader light/fog copy (`fxmat.js GLSL_LIGHT`) was updated to the
+new core curve (warm fading block light, `uGamma` = settings.brightness, `uMinLight` 0.05..0.20, eased fog) so
+particles, the hand and dropped items stay exactly as bright as the terrain around them (`grid-w1.png`). Everything below was
 driven in real headless Chrome (RTX 3080 Ti / ANGLE D3D11, plus SwiftShader for the weak-laptop path) with real
 `page.mouse` / `page.keyboard` input plus the test API, and every screenshot was looked at.
 
@@ -82,8 +85,8 @@ node build.mjs --dev --out .tmp/build-fx      -> 1675 KB dev build
 npm run test:unit                             -> tests 104, pass 104, fail 0
 node tools/smoke.mjs --tag fx                 -> {"PASS":66,"PENDING":4,"SKIP":2,"FAIL":1}
    all 11 runnable fx-* PASS; fx-inworld-break PASS (was PENDING); fx-inworld-drops PENDING (items, mobs)
-   FAIL coree-classic-lock (order/timing-dependent CORE-E scenario, see Cross-lane defects; 6/6 PASS in isolation
-   on both this build and main)
+   FAIL coree-classic-lock in 3 of 4 full runs (timing-dependent CORE-E scenario, see Cross-lane defects): 6/6 PASS
+   alone and 2/2 PASS running every scenario up to it, on both this build and main
 node tools/smoke.mjs --tag fxss --swiftshader --scenario boot,world,perf,fx-*  -> {"PASS":15,"PENDING":1}
 ```
 
@@ -99,9 +102,10 @@ node tools/smoke.mjs --tag fxss --swiftshader --scenario boot,world,perf,fx-*  -
    every later scenario's screenshots (`smoke-fx-fx-particles.png`, `-hurt`, `-ring`, `-inworld-ghost` in a full run).
    Suggested fix: `R.removeObject(mob); R.removeObject(block);` + dispose at the end of the scenario (and/or LEAD:
    clear non-system dynamic objects on `world:exit`).
-3. **CORE-E test `coree-classic-lock` is order/timing dependent**: in full runs it failed with "walked to the edge"
-   once and "middle click picks the block into the hotbar ({slot:4, item: red_wool})" once; `mouseLookDeg` varies
-   5..96 between runs. 6/6 PASS in isolation on both this build and `main`. Suggested fix: reset hotbar/selection
+3. **CORE-E test `coree-classic-lock` is timing dependent**: in full runs it failed with "walked to the edge" once
+   and "middle click picks the block into the hotbar" twice (selected slot stayed 0 / 4); `mouseLookDeg` varies
+   5..96 between runs. 6/6 PASS alone and 2/2 PASS when every scenario up to it runs first, on both this build and
+   `main`, so it is not caused by FX (FX scenarios run after it). Suggested fix: reset hotbar/selection
    and wait for pointer-lock + a settled frame before the mouse-look and pick-block steps.
 4. **Hotbar number keys do nothing yet**: `hotbar1..9` actions are handled by the HUD (INV lane, still a stub), so
    `Digit1..9` do not change the selected slot in play. FX's equip-swap animation was verified with
@@ -116,7 +120,7 @@ node tools/smoke.mjs --tag fxss --swiftshader --scenario boot,world,perf,fx-*  -
   the classic chop arc (cosmetic).
 - Fancy clouds can show faint lines where faces overlap near the fade edge (cosmetic).
 - Merge commit `ea295cf` was created by `git merge --no-edit` without the Co-Authored-By trailer (left as is; no
-  history rewriting).
+  history rewriting). `2f79d28` has it.
 
 ## 2026-10-03 · FX lane implemented (P0 + P1 + P2 weather)
 

@@ -18,19 +18,26 @@ import * as THREE from 'three';
 export const GLSL_LIGHT = /* glsl */`
 uniform float uDaylight;
 uniform float uMinLight;
+uniform float uGamma;
 uniform vec3 uFogColor;
 uniform float uFogNear;
 uniform float uFogFar;
+// Same curve as CORE-D's chunk shader (render/shaders.js bcLight): warm block light that warms as it fades, the
+// classic brightness curve (uGamma = settings.brightness) and the cave floor uMinLight.
 vec3 bcLight(float sky, float block) {
   float effSky = max(0.0, sky - (1.0 - uDaylight) * 11.0);
   float skyB = pow(0.8, 15.0 - effSky);
-  float blkB = pow(0.8, 15.0 - block);
-  vec3 l = max(vec3(skyB), blkB * vec3(1.0, 0.92, 0.78));
+  float b = pow(0.8, 15.0 - block);
+  vec3 blk = vec3(b, b * ((b * 0.6 + 0.4) * 0.6 + 0.4), b * (b * b * 0.6 + 0.4));
+  vec3 l = max(vec3(skyB), blk);
+  vec3 inv = 1.0 - l;
+  l = mix(l, 1.0 - inv * inv * inv * inv, uGamma);
   return max(l, vec3(uMinLight));
 }
+// CORE-D's eased fog ramp (1 - (1 - f)^2) on the view distance.
 vec3 bcFog(vec3 c, float dist) {
   float f = clamp((dist - uFogNear) / max(0.001, uFogFar - uFogNear), 0.0, 1.0);
-  return mix(c, uFogColor, f);
+  return mix(c, uFogColor, 1.0 - (1.0 - f) * (1.0 - f));
 }
 `;
 
@@ -47,7 +54,8 @@ export function sharedUniforms(renderer) {
   const pick = (k, v) => (u[k] && typeof u[k] === 'object' && 'value' in u[k] ? u[k] : { value: v });
   return {
     uDaylight: pick('uDaylight', 1),
-    uMinLight: pick('uMinLight', 0.2),
+    uMinLight: pick('uMinLight', 0.155),
+    uGamma: pick('uGamma', 0.7),
     uFogColor: pick('uFogColor', new THREE.Color(0.72, 0.83, 1)),
     uFogNear: pick('uFogNear', 48),
     uFogFar: pick('uFogFar', 88),
