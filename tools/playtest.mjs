@@ -163,8 +163,10 @@ async function main() {
       await shot('title');
     });
 
+    let sessionStart = Date.now();
     await step('play', async () => {
       const t0 = Date.now();
+      sessionStart = t0;
       const btn = await page.$('[data-action="play"]');
       const box = await btn.boundingBox();
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
@@ -700,14 +702,35 @@ async function main() {
     });
 
     await step('wander', async () => {
-      // the remaining time is free walking with auto-jump and some looking around
+      // free play until the session (from the Play click) has lasted 2 minutes: walk with auto-jump, turn,
+      // jump, and now and then fly up, cruise and land again
       await key('KeyH');
       await waitTicks(3);
       await api('setLook', 135, -5);
-      for (let i = 0; i < 4; i++) {
-        await holdKeys(['ArrowUp'], 2500);
-        await holdKeys(['ArrowLeft'], 500);
+      let cycle = 0;
+      const p0 = await api('pos');
+      let maxDist = 0;
+      while (Date.now() - sessionStart < 120000) {
+        if (cycle % 3 === 2) {
+          await key('KeyF');
+          await holdKeys(['Space'], 900);
+          await holdKeys(['ArrowUp'], 2500);
+          await holdKeys(['KeyC'], 900);
+          await key('KeyF');
+          await sleep(600);
+        } else {
+          await holdKeys(['ArrowUp'], 2500);
+          await key('Space', 80);
+        }
+        await holdKeys([cycle % 2 ? 'ArrowRight' : 'ArrowLeft'], 400 + (cycle % 4) * 150);
+        const q = await api('pos');
+        maxDist = Math.max(maxDist, Math.hypot(q.x - p0.x, q.z - p0.z));
+        cycle++;
       }
+      report.perf.sessionSeconds = Math.round((Date.now() - sessionStart) / 1000);
+      report.perf.wander = { cycles: cycle, maxDistanceFromHome: +maxDist.toFixed(1) };
+      check(maxDist > 15, 'free walking and flying covers ground', report.perf.wander);
+      await hideCursor();
       await waitFrames(5);
       await shot('wander');
     });
