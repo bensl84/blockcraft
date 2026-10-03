@@ -42,6 +42,14 @@ export function onPress(game, node, fn, opts = {}) {
     if (e.detail === 0 || !e.isTrusted) game.events.emit('ui:click', {});
     fire(e);
   });
+  if (node.tagName !== 'BUTTON') {
+    node.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      game.events.emit('ui:click', {});
+      fire(e);
+    });
+  }
   if (opts.label) node.setAttribute('aria-label', opts.label);
   return node;
 }

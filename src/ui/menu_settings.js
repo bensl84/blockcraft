@@ -50,11 +50,12 @@ export function registerSettingsScreen(ctx) {
     open(o = {}) {
       opts = o;
       tab = o.tab || (o.from === 'pause' && game.meta ? 'world' : 'controls');
-      node = el('div', { class: 'bc-screen bc-dim bc-settings', 'data-screen': 'settings' });
+      node = el('div', { class: `bc-screen bc-settings ${game.meta ? 'bc-dim' : 'bc-mscreen'}`, 'data-screen': 'settings' });
       build();
+      if (!game.meta) ctx.attachBackdrop(node);
       ctx.show(node);
     },
-    close() { if (node) node.remove(); node = null; syncers = []; },
+    close() { ctx.hide(node); node = null; syncers = []; },
     get tab() { return tab; },
     setTab(t) { tab = t; build(); },
   };
@@ -76,7 +77,9 @@ export function registerSettingsScreen(ctx) {
     if (!node) return;
     if (tab === 'world' && !game.meta) tab = 'controls';
     syncers = [];
+    const keepBg = node.querySelector('.bc-menu-panorama');
     node.textContent = '';
+    if (keepBg) node.appendChild(keepBg);
     const tabBar = el('div', { class: 'bc-set-tabs', role: 'tablist' }, tabs().map(([k, label, icon]) => {
       const b = el('button', { class: `bc-btn bc-set-tab${k === tab ? ' bc-selected' : ''}`, type: 'button', role: 'tab', 'data-tab': k, 'aria-selected': String(k === tab) }, [iconImg(icon, 24), el('span', { text: label })]);
       return onPress(game, b, () => { tab = k; build(); });

@@ -11,13 +11,10 @@ import { el, uiLayer } from '../core/dom.js';
 import { Z } from '../core/constants.js';
 import { ICON_NAMES, Panorama, drawLogo, iconImg, iconURL, tileURL } from './menu_art.js';
 import { iconButton, onPress } from './menu_widgets.js';
-import { newWorldOptions } from './menu_logic.js';
+import { MODE_CHOICES, PRESET_CHOICES, newWorldOptions } from './menu_logic.js';
 import { cancelParentGate, isParentGateOpen, openParentGate } from './parentgate.js';
 import { pictureURL, registerNewWorldScreen, registerWorldsScreen } from './menu_worlds.js';
 import { registerSettingsScreen } from './menu_settings.js';
-
-/** Screens that show the parallax scenery. */
-const BACKDROP_SCREENS = new Set(['title', 'worlds', 'newWorld']);
 
 /** @returns {object} Menus system (game.menus) */
 export function createMenusSystem(game) {
@@ -103,7 +100,7 @@ export function createMenusSystem(game) {
       game.events.on('input:pointerLock', (e) => {
         if (e && e.locked === false && game.settings.controls === 'classic' && game.state === 'playing' && !game.ui.current && !isParentGateOpen()) game.ui.open('pause');
       });
-      window.addEventListener('resize', () => { if (panorama && BACKDROP_SCREENS.has(game.ui.current)) panorama.resize(window.innerWidth, window.innerHeight); });
+      window.addEventListener('resize', () => { if (panorama && panorama.canvas.isConnected) panorama.resize(window.innerWidth, window.innerHeight); });
       window.addEventListener('keydown', (e) => {
         if (game.ui.current !== 'title' || isParentGateOpen() || e.repeat) return;
         if (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space') { e.preventDefault(); ctx.gesture(); menus.play(); }
@@ -112,7 +109,7 @@ export function createMenusSystem(game) {
 
     frame(g, dt) {
       time += dt;
-      if (panorama && BACKDROP_SCREENS.has(game.ui.current) && panorama.canvas.isConnected) panorama.draw(time);
+      if (panorama && panorama.canvas.isConnected) panorama.draw(time);
       if (hintEl) {
         const show = game.settings.controls === 'classic' && game.state === 'playing' && !game.ui.current && !(game.input && game.input.pointerLocked) && !menus.loadingVisible;
         hintEl.classList.toggle('bc-hidden', !show);
@@ -188,6 +185,7 @@ export function createMenusSystem(game) {
         ]);
         ctx.attachBackdrop(node);
         ctx.show(node);
+        warmPictures();
         // the last world's picture on the worlds button (P1 thumbnails)
         game.save.listWorlds().then((list) => {
           if (!node || !node.isConnected || !list.length) return;
@@ -198,6 +196,21 @@ export function createMenusSystem(game) {
       },
       close() { ctx.hide(node); node = null; },
     });
+  }
+
+  /** Draw the new-world pictures in small idle slices after the title shows, so the + screen opens instantly. */
+  let warmed = false;
+  function warmPictures() {
+    if (warmed) return;
+    warmed = true;
+    const jobs = [...PRESET_CHOICES.map((p) => ['preset', p.key]), ...MODE_CHOICES.map((m) => ['mode', m.key])];
+    const step = () => {
+      const j = jobs.shift();
+      if (!j) return;
+      try { pictureURL(j[0], j[1]); } catch { /* ignore */ }
+      setTimeout(step, 30);
+    };
+    setTimeout(step, 400);
   }
 
   /* ---------------------------------------------------------------- pause */

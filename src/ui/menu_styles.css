@@ -265,6 +265,11 @@
   .bc-btn.bc-nw-go { min-width: 200px; min-height: 100px; }
   .bc-btn.bc-pause-resume, .bc-btn.bc-death-respawn { min-width: 220px; min-height: 124px; }
 }
+@media (max-width: 480px) {
+  .bc-nw-card { width: calc((100vw - 48px - 24px) / 3); padding: 4px; }
+  .bc-nw-label { display: none; }
+  .bc-nw-row { gap: 12px; }
+}
 @media (max-height: 520px) {
   .bc-mtitle { gap: 10px; }
   .bc-logo-img { width: min(70vw, 560px); }

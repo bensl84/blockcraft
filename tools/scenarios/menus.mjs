@@ -410,6 +410,25 @@ export default [
     },
   },
   {
+    // touchscreen: taps act on touch *end* (a real user gesture for fullscreen/audio); cards and Play work by tap
+    name: 'menus-touch',
+    requires: ['menus', 'save'],
+    touchOnly: true,
+    async run(t) {
+      await toTitle(t, null);
+      const tap = async (sel) => { const c = await centre(t, sel); await t.page.touchscreen.tap(c.x, c.y); };
+      await tap('[data-screen=title] [data-action=worlds]');
+      t.assert(await t.call('waitFor', "api.uiOpen() === 'worlds'", 3000), 'tap opens worlds');
+      await tap('[data-screen=worlds] [data-action=new-world]');
+      t.assert(await t.call('waitFor', "api.uiOpen() === 'newWorld'", 3000), 'tap on + opens new world');
+      await tap('[data-choice=preset][data-value=snowy]');
+      t.assert(await t.eval(() => document.querySelector('[data-choice=preset][data-value=snowy]').classList.contains('bc-selected')), 'tap selects a picture');
+      await tap('[data-action=create-world]');
+      t.assert(await t.call('waitFor', "api.state() === 'playing' && api.worldReady", 15000), 'tap Play starts the world');
+      t.assert((await t.call('meta')).preset === 'snowy', 'snowy preset');
+    },
+  },
+  {
     // needs the real player (serialize position/inventory) and world: PENDING until CORE lanes merge
     name: 'menus-reload-persist',
     requires: ['menus', 'save', 'world', 'player', 'physics'],

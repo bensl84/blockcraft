@@ -84,7 +84,7 @@ export function registerWorldsScreen(ctx) {
         render();
       }).catch((err) => game.reportError(err, 'menus listWorlds'));
     },
-    close() { if (node) node.remove(); node = null; state = null; },
+    close() { ctx.hide(node); node = null; state = null; },
     /** (re)draw for the current size */
     render: () => render(),
     get state() { return state; },
@@ -206,7 +206,7 @@ export function registerNewWorldScreen(ctx) {
       ctx.show(node);
       sync();
     },
-    close() { if (node) node.remove(); node = null; },
+    close() { ctx.hide(node); node = null; },
     get selection() { return sel ? { ...sel } : null; },
   };
   game.ui.register('newWorld', screen);
