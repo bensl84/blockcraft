@@ -15,6 +15,22 @@ async function debugViewOn(t, opts = {}) {
   return t.eval((opts) => {
     const g = window.__game.game, r = g.renderer, w = g.world;
     if (!r || !r.scene || !r.createBlockModel) return -1;
+    if (!r.stub) {
+      // Integration: the real CORE-D renderer draws the same meshes with the real shader, so screenshots show the
+      // game itself. Only count the quads here; a night view sets the clock instead of a debug daylight factor.
+      let quads = 0;
+      const pcx = Math.floor(g.player.x) >> 4, pcz = Math.floor(g.player.z) >> 4, R = opts.radius ?? 3;
+      w.forEachColumn((c) => {
+        if (Math.abs(c.cx - pcx) > R || Math.abs(c.cz - pcz) > R || c.state < 3) return;
+        for (let sy = 0; sy < 8; sy++) {
+          const m = g.__corecMesh(c.cx, sy, c.cz);
+          if (!m) continue;
+          for (const pass of ['opaque', 'cutout', 'translucent']) if (m[pass]) quads += m[pass].quads;
+        }
+      });
+      if (opts.daylight === 0) { g.__corecPrevTime = g.time.dayTime; g.time.setTime(18000); }
+      return quads;
+    }
     // three.js classes reached through instances the renderer owns
     const probe = r.createBlockModel(1, 0);
     const BoxGeometry = probe.geometry.constructor;
@@ -77,6 +93,7 @@ async function debugViewOn(t, opts = {}) {
 async function debugViewOff(t) {
   await t.eval(() => {
     const g = window.__game.game;
+    if (g.__corecPrevTime !== undefined) { const t0 = g.__corecPrevTime; g.__corecPrevTime = undefined; g.time.setTime(t0); }
     const grp = g.__corecDebug;
     if (!grp) return;
     g.renderer.removeObject(grp);
