@@ -568,3 +568,33 @@ test('serialize/restore keeps mob state (tamed wolf, coloured sheared sheep, bab
   assert.ok(byType('pig').some((e) => e.data.saddled), 'saddle');
   assert.equal(b.baby && w.data.tamed && s.data.sheared && p.data.saddled, true);
 });
+
+test('perf: 24 animals + 20 items tick in well under 1 ms (SPEC §12 "mob tick <= 1 ms total")', () => {
+  const g = makeGame({ seed: 17 });
+  const types = ['pig', 'cow', 'sheep', 'chicken', 'wolf', 'horse'];
+  for (let i = 0; i < 24; i++) g.mobs.spawnMob(types[i % types.length], -20 + (i % 6) * 6.5, 4, -15 + Math.floor(i / 6) * 7.5);
+  for (let i = 0; i < 20; i++) dropItem(g, { item: 'dirt', count: 1 }, 30 + i, 5, 30);
+  g.step(100);
+  const t0 = performance.now();
+  g.step(1000);
+  const ms = (performance.now() - t0) / 1000;
+  assert.ok(ms < 1, `avg ${ms.toFixed(3)} ms per tick`);
+  assert.deepEqual(g.errors, []);
+  console.log(`# mob tick: ${ms.toFixed(3)} ms per tick for 24 animals + 20 items`);
+});
+
+test('leads (P2): leash an animal, it follows the player, a long pull snaps the lead', () => {
+  const g = makeGame({ mode: 'survival', difficulty: 'easy', seed: 19, rules: { hostileMobs: false } });
+  const cow = g.mobs.spawnMob('cow', 2.5, 4, 0.5);
+  g.inventory.set(0, { item: 'lead', count: 1 });
+  assert.ok(g.mobs.useOn(cow.id).ok);
+  assert.equal(cow.data.leashed, 'player');
+  assert.equal(g.inventory.count('lead'), 0, 'lead used');
+  g.player.x = 10.5;
+  g.step(120);
+  assert.ok(Math.hypot(cow.x - 10.5, cow.z - 0.5) < 5, `follows on the lead (${cow.x.toFixed(1)})`);
+  g.player.x = 40.5;
+  g.step(5);
+  assert.equal(cow.data.leashed, undefined, 'snapped');
+  assert.ok(g.entities.ofType('item').some((e) => e.data.stack.item === 'lead'), 'lead dropped');
+});

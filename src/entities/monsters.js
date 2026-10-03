@@ -152,7 +152,7 @@ export class Creeper extends Monster {
     const g = this.game, power = this.def.explosionPower || 3;
     const x = this.x, y = this.y + this.height / 2, z = this.z;
     this.persistent = false;
-    this.remove();               // gone before the blast: no loot, no 'dead' tip-over
+    g.entities.remove(this, 'explode');   // gone before the blast: no loot, no tip-over, no poof (the blast is the effect)
     const breakBlocks = !!(g.meta && g.meta.rules.mobGriefing);
     if (g.mechanics && !isStub('mechanics')) g.mechanics.explode(x, y, z, power, { source: 'creeper', breakBlocks });
     else {
@@ -224,12 +224,12 @@ export class Arrow extends Entity {
   tick(game) {
     this.age++;
     if (this.inGround) {
-      if (++this.life > 1200) this.remove();
+      if (++this.life > 1200) game.entities.remove(this, 'despawn');
       if (this.fromPlayer && this.age > 10 && !game.isCreative()) {
         const p = game.player;
         if (Math.hypot(p.x - this.x, p.y + 0.9 - this.y, p.z - this.z) < 1.3 && game.inventory && game.inventory.add({ item: 'arrow', count: 1 }) === 0) {
           game.events.emit('item:pickup', { item: 'arrow', count: 1 });
-          this.remove();
+          game.entities.remove(this, 'pickup');
         }
       }
       return;
@@ -251,16 +251,15 @@ export class Arrow extends Entity {
       const entT = hit ? hit.dist : Infinity, plT = pt === null ? Infinity : pt;
       if (plT < entT && plT < blockT) {
         if (game.survival) game.survival.damage(this.damage, 'arrow', { entity: this.shooter || this });
-        this.remove(); return;
+        game.entities.remove(this, 'hit'); return;
       }
       if (hit && entT < blockT) {
         hit.entity.hurt(this.damage, { type: this.fromPlayer ? 'player' : 'mob', player: this.fromPlayer, entity: this.shooter || this });
-        this.remove(); return;
+        game.entities.remove(this, 'hit'); return;
       }
       if (blockT !== Infinity) {
         this.x += dx * blockT; this.y += dy * blockT; this.z += dz * blockT;
         this.inGround = true; this.vx = this.vy = this.vz = 0;
-        game.events.emit('sound', { name: 'arrow.hit', x: this.x, y: this.y, z: this.z });
         return;
       }
     }
@@ -311,6 +310,5 @@ export function fireArrow(game, shooter, x, y, z, dx, dy, dz, speed, inaccuracy,
   const j = () => (game.rand() - 0.5) * 0.0075 * inaccuracy * 2;
   const vx = (dx / len + j()) * speed, vy = (dy / len + j()) * speed, vz = (dz / len + j()) * speed;
   const e = game.entities.spawn('arrow', x, y, z, { vx, vy, vz, shooter, damage, fromPlayer, reason: 'shot' });
-  if (e) game.events.emit('sound', { name: 'bow.shoot', x, y, z });
   return e;
 }

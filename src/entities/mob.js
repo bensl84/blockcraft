@@ -20,7 +20,7 @@ import {
   canJumpObstacle, feedBaby, findStandY, fleeTarget, isSafeStep, mobAirAccel, mobGroundAccel,
   pickWanderTarget, randInt, turnToward, wrapAngle, yawToward,
 } from './mob_ai.js';
-import { applyPose, createMobMesh, setMobLight, setMobTint, setMobSkin } from './mob_render.js';
+import { applyPose, createMobMesh, createSimpleMesh, setMobLight, setMobTint, setMobSkin } from './mob_render.js';
 import { dropItem } from './item_entity.js';
 
 const HEAD_LIMIT = 50 * Math.PI / 180;
@@ -29,7 +29,7 @@ const tmpBox = {};
 
 /** Keys copied from spawn opts / saved data into entity.data. */
 const DATA_KEYS = ['baby', 'grow', 'color', 'sheared', 'tamed', 'owner', 'sitting', 'saddled', 'coat', 'speed', 'jump', 'hp', 'temper',
-  'love', 'cooldown', 'wild', 'eggTimer', 'rainbow', 'dyes', 'variant', 'name'];
+  'love', 'cooldown', 'wild', 'eggTimer', 'rainbow', 'dyes', 'variant', 'name', 'leashed'];
 
 export class Mob extends Entity {
   /**
@@ -52,16 +52,17 @@ export class Mob extends Entity {
     this.speedAttr = Array.isArray(this.def.speed) ? (this.data.speed || this.def.speed[0]) : (this.def.speed || 0.25);
     this.maxHealth = this.baseMaxHealth();
     this.health = this.maxHealth;
-    this.yaw = opts.yaw !== undefined ? opts.yaw : game && game.rand ? game.rand() * Math.PI * 2 : 0;
+    this.yaw = opts.yaw !== undefined ? opts.yaw : this.rng() * Math.PI * 2;
     this.prevYaw = this.yaw;
     this.updateSize();
     // AI state (not saved)
     this.target = null;            // {x, y, z} navigation goal
     this.speedMod = 1;
     this.stopDist = 0.5;
-    this.wanderCooldown = 20 + Math.floor((game && game.rand ? game.rand() : 0.5) * 100);
+    this.wanderCooldown = 20 + Math.floor(this.rng() * 100);
     this.panicTicks = 0;
     this.lookTicks = 0; this.lookAt = null; this.lookYaw = 0; this.nextLook = 20;
+    this.nextIdleSound = 60 + Math.floor(this.rng() * 300);
     this.jumpNext = false; this.jumpAttempts = 0; this.freeTicks = 0;
     this.stuckTicks = 0; this.lastProgress = 0;
     this.mateId = 0; this.mateTicks = 0;
@@ -124,7 +125,7 @@ export class Mob extends Entity {
     this.waterFrac = fl.water; this.inWater = fl.water > 0; this.inLava = !!fl.lava; this.eyeInWater = !!fl.eyeInWater;
     this.tickEnvironment();
     if (this.deathTime > 0 || this.removed) return;
-    this.forward = 0; this.wantYaw = this.yaw; this.speedMod = 1;
+    this.forward = 0; this.wantYaw = this.yaw; this.speedMod = 1; this.riddenAccel = false;
     const rider = this.rider();
     if (rider) this.controlRidden(rider); else this.think();
     this.steer();
@@ -144,8 +145,13 @@ export class Mob extends Entity {
     if (this.panicTicks > 0) this.panicTicks--;
     if (this.eating > 0) this.eating--;
     if (this.fireTicks > 0) this.fireTicks--;
+    if (--this.nextIdleSound <= 0) {
+      this.nextIdleSound = 120 + Math.floor(this.rand() * 280);
+      if (this.distToPlayer() < 16 && !this.data.sitting) this.sound('idle');
+    }
   }
-  onGrownUp() { this.y += 0; }
+  /** Subclass hook when a baby becomes an adult. */
+  onGrownUp() {}
 
   /** Lava, fire, cactus, drowning-free: animals only suffer them when they can die. */
   tickEnvironment() {
@@ -172,6 +178,7 @@ export class Mob extends Entity {
   think() {
     if (this.eating > 0) { this.target = null; return; }
     if (this.panicTicks > 0) { this.thinkPanic(); return; }
+    if (this.data.leashed && this.thinkLeash()) return;
     if (this.thinkSpecial()) return;
     if (this.data.love > 0 && !this.baby && this.thinkMate()) return;
     if (this.thinkTempt()) return;
@@ -333,6 +340,7 @@ export class Mob extends Entity {
     if (this.jumpNext && this.onGround) { this.vy = this.jumpVelocity(); this.jumpNext = false; }
     if ((this.inWater && this.waterFrac > 0.4) || this.inLava) this.vy += 0.04;   // float (SPEC §2.6)
     if (this.climbs && this.collidedH && this.forward > 0) this.vy = 0.2;          // spiders climb walls
+    this.pushApart();
     const vx = this.vx, vy = this.vy, vz = this.vz;
     const applied = moveEntity(w, this, vx, vy, vz);
     if (Math.abs(applied.dx - vx) > 1e-7) this.vx = 0;
@@ -357,6 +365,24 @@ export class Mob extends Entity {
     if (this.vy < -3.92) this.vy = -3.92;
   }
   jumpVelocity() { return 0.42; }
+
+  /** Mobs gently push each other apart when their boxes overlap (Java Entity.push), so herds don't stack. */
+  pushApart() {
+    if (this.deathTime > 0 || this.rider()) return;
+    const hw = this.width / 2;
+    this.game.entities.forEach((o) => {
+      if (o === this || !o.def || o.removed || o.deathTime > 0) return;
+      const ow = o.width / 2;
+      if (Math.abs(o.x - this.x) >= hw + ow || Math.abs(o.z - this.z) >= hw + ow) return;
+      if (o.y >= this.y + this.height || this.y >= o.y + o.height) return;
+      let dx = this.x - o.x, dz = this.z - o.z;
+      let d = Math.max(Math.abs(dx), Math.abs(dz));
+      if (d < 0.01) { dx = (this.id & 1) ? 0.01 : -0.01; dz = 0; d = 0.01; }
+      d = Math.sqrt(d);
+      const k = Math.min(1, 1 / d) * 0.05 / d;
+      this.vx += dx * k; this.vz += dz * k;
+    });
+  }
 
   /** Fall damage for mobs that can be hurt (never in kid worlds; chickens never). */
   onLand(dist) {
@@ -484,8 +510,7 @@ export class Mob extends Entity {
     this.physics();
     if (this.deathTime >= 20) {
       this.dropLoot();
-      this.particles('poof', 8, this.height / 2);
-      this.remove();
+      this.remove();   // entity:remove reason 'dead' -> FX poof + AUDIO
     }
   }
 
@@ -524,6 +549,7 @@ export class Mob extends Entity {
       this.consumeHeld();
       return true;
     }
+    if (this.interactLeash(ctx)) return true;
     if (this.interactSpecial(ctx)) return true;
     if (item && this.def.breed && this.def.breed.includes(item)) return this.feed(ctx);
     return false;
@@ -618,6 +644,7 @@ export class Mob extends Entity {
       this.lastLight = game.world.getLight(Math.floor(this.x), Math.floor(this.y + this.eyeHeight), Math.floor(this.z));
       setMobLight(o, this.lastLight >> 4, this.lastLight & 15);
     }
+    if (this.data.leashed || this.rope) this.renderRope(game, alpha);
     const t = this.tintNow(alpha);
     if (t) setMobTint(o, t[0], t[1], t[2], t[3]); else setMobTint(o, 0, 0, 0, 0);
   }
@@ -632,7 +659,56 @@ export class Mob extends Entity {
     if (this.object3d.material) this.object3d.material.dispose();   // clone only; geometry + texture are shared
     this.object3d = null;
   }
-  dispose(game) { this.disposeMesh(game); }
+  dispose(game) { this.disposeMesh(game); this.disposeRope(game); }
+
+  /* ------------------------------------------------------------------ leads (P2) */
+  /** Lead on an animal: tap with a lead to leash it to the player, tap again (any item) to let go. */
+  interactLeash(ctx) {
+    const item = ctx.stack ? ctx.stack.item : null;
+    if (this.category !== 'creature') return false;
+    if (this.data.leashed) { this.unleash(true); return true; }
+    if (item !== 'lead') return false;
+    this.data.leashed = 'player';
+    this.consumeHeld(); this.touch();
+    this.sound('idle');
+    return true;
+  }
+  unleash(dropLead) {
+    delete this.data.leashed;
+    if (dropLead && !this.game.isCreative()) dropItem(this.game, { item: 'lead', count: 1 }, this.x, this.y + this.height, this.z);
+  }
+  /** Leashed: trot after the player; a long rope pulls; too long snaps (drops the lead). */
+  thinkLeash() {
+    const p = this.game.player;
+    if (!p || p.dead) return false;
+    const d = this.distToPlayer();
+    if (d > 16) { this.unleash(true); return false; }
+    if (d > 10) {
+      const k = 0.04 * (d - 10) / d;
+      this.vx += (p.x - this.x) * k; this.vz += (p.z - this.z) * k;
+      if (p.y > this.y + 1 && this.onGround) this.jumpNext = true;
+    }
+    if (d > 4) { this.target = { x: p.x, y: p.y, z: p.z }; this.stopDist = 3; this.speedMod = 1.3; this.lookAt = p; return true; }
+    return false;
+  }
+  renderRope(game, alpha) {
+    const p = game.player;
+    if (!this.data.leashed || !p || this.deathTime > 0) { this.disposeRope(game); return; }
+    if (!this.rope) { this.rope = createSimpleMesh(game, 0.05, 0.05, 1, 0x8a6a3a, 0); game.renderer.addObject(this.rope); }
+    const hx = p.renderX ?? p.x, hy = (p.renderY ?? p.y) + 1.1, hz = p.renderZ ?? p.z;
+    const mx = lerp(this.prevX, this.x, alpha), my = lerp(this.prevY, this.y, alpha) + this.height * 0.8, mz = lerp(this.prevZ, this.z, alpha);
+    const dx = hx - mx, dy = hy - my, dz = hz - mz, len = Math.hypot(dx, dy, dz) || 0.01;
+    this.rope.position.set((hx + mx) / 2, (hy + my) / 2, (hz + mz) / 2);
+    this.rope.rotation.set(-Math.atan2(dy, Math.hypot(dx, dz)), Math.atan2(dx, dz), 0, 'YXZ');
+    this.rope.scale.set(1, 1, len);
+    if (this.lastLight !== undefined) setMobLight(this.rope, this.lastLight >> 4, this.lastLight & 15);
+  }
+  disposeRope(game) {
+    if (!this.rope) return;
+    if (game.renderer) game.renderer.removeObject(this.rope);
+    if (this.rope.material) this.rope.material.dispose();
+    this.rope = null;
+  }
 }
 
 /** Standard registration helper: registerEntityType(type, mobType(Class)). */

@@ -8,7 +8,7 @@
 import { MOBS } from '../data/mobs.js';
 import { getItem } from '../data/items.js';
 import { registerEntityType } from './entity.js';
-import { registerEntityInteract, registerItemUse, hooks } from '../core/hooks.js';
+import { registerEntityInteract, registerItemUse, registerPreUse, hooks } from '../core/hooks.js';
 import { mobTypeDef } from './mob.js';
 import { ANIMAL_CLASSES } from './animals.js';
 import { Arrow, MONSTER_CLASSES, fireArrow } from './monsters.js';
@@ -108,6 +108,13 @@ export function createMobsSystem(game) {
       for (const type of Object.keys(MOBS)) if (CLASSES[type]) registerItemUse(type + '_spawn_egg', spawnEgg(type));
       registerItemUse('oak_boat', useBoat);
       registerItemUse('bow', useBow);
+      // tapping the animal (or boat) you ride gets you off (touch has no Down button while not flying)
+      registerPreUse((ctx) => {
+        const p = game.player, te = game.interaction && game.interaction.targetEntity;
+        if (!p || !p.riding || !te || !te.entity || te.entity.id !== p.riding) return false;
+        if (te.entity.dismount) te.entity.dismount();
+        return true;
+      });
       game.events.on('world:columnLoaded', (e) => { try { spawner.onColumnLoaded(e); } catch (err) { game.reportError(err, 'mobs columnLoaded'); } });
       game.events.on('world:exit', () => spawner.clear());
       const purge = () => { if (!spawner.hostileAllowed()) spawner.despawnMonsters(true); };

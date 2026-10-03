@@ -12,9 +12,10 @@ import { checkRainbow, findStandY, rainbowColor, randInt, rollSheepColor, wrapAn
 import { dropItem } from './item_entity.js';
 
 /* ------------------------------------------------------------------ riding helpers */
-function wantsDismount(game) {
+/** Rider wants off: descend (kid C/Z, touch down) or sneak (classic Shift); `jump` too unless the mount jumps. */
+export function wantsDismount(game, jumpToo = true) {
   const inp = game.input;
-  return !!inp && (inp.isDown('descend') || inp.isDown('sneak'));
+  return !!inp && (inp.isDown('descend') || inp.isDown('sneak') || (jumpToo && inp.isDown('jump')));
 }
 
 /* ------------------------------------------------------------------ pig */
@@ -365,7 +366,7 @@ export class Horse extends Mob {
   controlRidden(rider) {
     const g = this.game, d = this.data;
     this.riddenAccel = false;
-    if (wantsDismount(g)) { this.dismount(); this.think(); return; }
+    if (wantsDismount(g, false)) { this.dismount(); this.think(); return; }
     if (!d.tamed) {
       // taming by riding (SPEC §2.6): every 30 ticks either it accepts the rider or bucks (+5 temper)
       this.think();

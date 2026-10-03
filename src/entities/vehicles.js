@@ -46,7 +46,7 @@ export class Boat extends Entity {
     let forward = 0;
     if (rider) {
       const inp = game.input;
-      if (inp && (inp.isDown('descend') || inp.isDown('sneak'))) this.dismount();
+      if (inp && (inp.isDown('descend') || inp.isDown('sneak') || inp.isDown('jump'))) this.dismount();
       else {
         this.yaw += wrapAngle(rider.yaw - this.yaw) * 0.15;
         forward = inp ? inp.move.forward : 0;
@@ -113,7 +113,6 @@ export class Boat extends Entity {
     const g = this.game;
     if (this.rider()) this.dismount();
     if (!g.isCreative()) dropItem(g, { item: 'oak_boat', count: 1 }, this.x, this.y + 0.4, this.z);
-    g.events.emit('sound', { name: 'wood.break', x: this.x, y: this.y, z: this.z });
     this.remove();
     return true;
   }
