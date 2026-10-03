@@ -187,7 +187,14 @@ export default [
       await t.call('waitFrames', 3);
       let s = await fxStats(t);
       t.assert(s.crack === 6, `crack overlay shows stage 6 (got ${s.crack})`);
-      // ghost: kid scheme + a target (set directly while interaction is a stub)
+      // ghost: kid scheme + a target (set directly while interaction is a stub; fx-inworld-break covers the real path)
+      if (!t.stubs.includes('interaction')) {
+        await t.eval(([x, z]) => window.__game.game.events.emit('block:miningStop', { x, y: 3, z }), [bx, bz]);
+        await t.call('waitFrames', 2);
+        t.assert((await fxStats(t)).crack === -1, 'crack hides on block:miningStop');
+        await clearScenery(t);
+        return;
+      }
       await t.eval(([x, z]) => {
         const g = window.__game.game;
         g.input.aimActive = true;
@@ -369,20 +376,67 @@ export default [
       await t.call('waitFrames', 3);
       const tg = await t.call('target');
       t.assert(tg, 'a block is targeted');
-      await t.eval(() => window.__game.game.input.setVirtual('attack', true));
+      await t.eval(() => { const i = window.__game.game.input; i.aim.x = 0; i.aim.y = 0; i.aimActive = true; i.setVirtual('attack', true); });
       await t.call('waitTicks', 8);
-      const s = await fxStats(t);
+      let s = await fxStats(t);
       t.assert(s.crack >= 0, `crack overlay while mining (stage ${s.crack})`);
       await t.shot('fx-inworld-crack');
-      await t.call('waitTicks', 12);
+      const ok = await t.waitFor(() => window.__game.game.fx.stats().particles > 10, null, 3000);
       await t.eval(() => window.__game.game.input.setVirtual('attack', false));
-      await t.call('waitTicks', 2);
+      t.assert(ok, 'breaking the block bursts particles');
       await t.shot('fx-inworld-break');
+      await t.call('runTicks', 60);
+      t.assert((await fxStats(t)).particles < 10, 'particles settle and expire');
+      // kid ghost block on the real cursor target
       await t.call('setMode', 'creative');
+      await t.call('selectSlot', 1);
+      const p = await t.call('pos');
+      const bx = Math.floor(p.x), bz = Math.floor(p.z) - 2;
       await t.call('setLook', 0, -40);
-      await t.call('aimAt', 0.5, 4, -2.5);
+      const aim = await t.call('aimAt', bx + 0.5, 4, bz + 0.5);
+      t.note('aim', aim);
       await t.call('waitFrames', 3);
+      s = await fxStats(t);
+      t.assert(s.ghost && s.ghost.x === bx && s.ghost.y === 4 && s.ghost.z === bz, `ghost on the cell a tap would fill (${JSON.stringify(s.ghost)})`);
       await t.shot('fx-inworld-ghost');
+      // the sky over real terrain, and a third-person look (player lane camera)
+      await t.call('setTime', 12500);
+      await t.call('setLook', 270, 10);
+      await t.call('waitFrames', 5);
+      await t.shot('fx-inworld-sunset');
+      await t.call('setTime', 3000);
+      await t.call('press', 'toggleView');
+      await t.call('waitFrames', 10);
+      if ((await t.call('pos')).view === 1) {
+        t.assert((await fxStats(t)).playerModel, 'third-person body visible after V');
+        await t.shot('fx-inworld-thirdperson');
+        await t.call('press', 'toggleView');
+        await t.call('waitFrames', 3);
+        await t.call('press', 'toggleView');
+      }
+    },
+  },
+  {
+    // Dropped items are FX item meshes (MOBS item entity calls fx.makeItemMesh) and do not leak geometry.
+    name: 'fx-inworld-drops',
+    requires: ['renderer', 'world', 'interaction', 'items', 'mobs'],
+    async run(t) {
+      await t.call('startWorld', { ...FLAT, mode: 'survival', difficulty: 'easy' });
+      const p = await t.call('pos');
+      const x = Math.floor(p.x) + 2, z = Math.floor(p.z) - 2;
+      await t.call('setBlock', x, 4, z, 'oak_planks');
+      await t.eval(([x, z]) => window.__game.game.interaction.breakBlock(x, 4, z, { by: 'test', drops: true }), [x, z]);
+      await t.call('waitTicks', 5);
+      const info = await t.eval(() => {
+        const ents = window.__game.game.entities.ofType('item');
+        const o = ents[0] && ents[0].object3d;
+        return { n: ents.length, key: o && o.userData ? o.userData.itemKey : null, stats: window.__game.game.fx.stats() };
+      });
+      t.note('drops', info);
+      t.assert(info.n >= 1 && info.key === 'oak_planks', 'the dropped item uses the FX item mesh');
+      await t.call('setLook', 0, -30);
+      await t.call('waitFrames', 5);
+      await t.shot('fx-inworld-drop');
     },
   },
 ];

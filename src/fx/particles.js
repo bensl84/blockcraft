@@ -17,7 +17,7 @@ export const MAX_PARTICLES = 2000;
 export const PARTICLE_VIEW_DIST = 48;
 
 const SIDE_FACES = [0, 1, 4, 5];
-const F_FULLBRIGHT = 1, F_COLLIDE = 2, F_SHRINK = 4, F_WATER = 8, F_ANIM_REV = 16, F_ANIM_LOOP = 32, F_FADE = 64;
+const F_FULLBRIGHT = 1, F_COLLIDE = 2, F_SHRINK = 4, F_WATER = 8, F_ANIM_REV = 16, F_ANIM_LOOP = 32;
 
 /** Every particle kind FX understands (SPEC §8.7 plus 'item' crumbs and 'drip'). */
 export const PARTICLE_KINDS = Object.freeze(['block', 'smoke', 'explosion', 'heart', 'sparkle', 'splash', 'bubble',
@@ -250,9 +250,9 @@ export class ParticleSim {
       const i = this._alloc(bx + fx + (R() - 0.5) * 0.2, by + fy * hMax, bz + fz + (R() - 0.5) * 0.2, null);
       if (i < 0) return this.count - n0;
       n++;
-      this.vx[i] = (fx - 0.5) * 0.3 + (R() - 0.5) * 0.06;
-      this.vy[i] = (fy - 0.5) * 0.2 + 0.1 + R() * 0.08;
-      this.vz[i] = (fz - 0.5) * 0.3 + (R() - 0.5) * 0.06;
+      this.vx[i] = (fx - 0.5) * 0.25 + (R() - 0.5) * 0.06;
+      this.vy[i] = (fy - 0.5) * 0.15 + 0.08 + R() * 0.06;
+      this.vz[i] = (fz - 0.5) * 0.25 + (R() - 0.5) * 0.06;
       this.grav[i] = 0.04; this.drag[i] = 0.98;
       this.life[i] = 10 + Math.floor(R() * 28);
       this.size[i] = 0.1 + R() * 0.09;

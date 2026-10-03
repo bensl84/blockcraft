@@ -12,8 +12,7 @@
 // New events: 'fx:weather' {rain, snow} when the target rain strength changes.
 
 
-import { B_LIQUID, B_SHAPE, SHAPE, blockDef, getSelectionBoxes } from '../core/registry.js';
-import { ID } from '../core/registry.js';
+import { B_LIQUID, ID, blockDef, getSelectionBoxes } from '../core/registry.js';
 import { MOBS } from '../data/mobs.js';
 import { mulberry32 } from '../core/math.js';
 import { getTexturePixels } from '../textures/textures.js';
@@ -43,7 +42,6 @@ export function createFxSystem(game) {
   let prevInWater = false;
   const viewer = { x: 0, y: 0, z: 0 };
   const tmpEye = { x: 0, y: 0, z: 0 }, tmpDir = { x: 0, y: 0, z: 0 };
-  const texPixelCache = new Map();
 
   const fx = {
     name: 'fx',
@@ -203,7 +201,6 @@ export function createFxSystem(game) {
   function texPixels(layer) {
     const ts = game.textures;
     if (!ts || !ts.data) return null;
-    if (texPixelCache.get('src') !== ts) { texPixelCache.clear(); texPixelCache.set('src', ts); }
     const S = ts.size || 16;
     return ts.data.subarray(layer * S * S * 4, (layer + 1) * S * S * 4);
   }
@@ -359,7 +356,18 @@ export function createFxSystem(game) {
     const ents = game.entities;
     if (!ents || !ents.forEach) return;
     if (game.tickCount % 5 === 0) {
-      ents.forEach((e) => { if (MOBS[e.type]) { let a = mobPos.get(e.id); if (!a) { a = [0, 0, 0]; mobPos.set(e.id, a); } a[0] = e.x; a[1] = e.y; a[2] = e.z; } });
+      const hearts = game.tickCount % 10 === 0;
+      ents.forEach((e) => {
+        if (!MOBS[e.type]) return;
+        let a = mobPos.get(e.id);
+        if (!a) { a = [0, 0, 0]; mobPos.set(e.id, a); }
+        a[0] = e.x; a[1] = e.y; a[2] = e.z;
+        // love mode: a heart every 10 ticks (MOBS keeps the counter in entity.data; any of these names works)
+        const d = e.data;
+        if (hearts && d && e.deathTime === 0 && ((d.love | 0) > 0 || (d.loveTicks | 0) > 0 || (d.inLove | 0) > 0)) {
+          sim.spawn('heart', e.x, e.y + (e.height || 1) + 0.25, e.z, { count: 1, spread: 0.35 }, game.world);
+        }
+      });
     }
     for (const [id, n] of tntTracked) {
       const e = ents.get(id);

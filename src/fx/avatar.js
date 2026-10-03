@@ -268,8 +268,9 @@ export class PlayerAvatar {
     const moved = Math.hypot(x - this.lastX, z - this.lastZ);
     this.lastX = x; this.lastZ = z;
     const speed = dt > 0 ? Math.min(1.5, moved / dt / 4.3) : 0;
-    this.limbAmount += ((p.flying ? speed * 0.3 : speed) - this.limbAmount) * Math.min(1, dt * 10);
-    this.limbSwing += moved * 2.2;
+    const target = p.flying ? speed * 0.2 : Math.min(1, speed) * 0.62;
+    this.limbAmount += (target - this.limbAmount) * Math.min(1, dt * 10);
+    this.limbSwing += Math.min(moved, 1) * 4;
     // body yaw follows the head; turns fully while walking, otherwise stays within 50 degrees
     const d = angleDiff(this.bodyYaw, p.yaw);
     if (speed > 0.05) this.bodyYaw += d * Math.min(1, dt * 8);
