@@ -166,9 +166,11 @@ export default [
         const api = window.__game, R = api.game.renderer;
         api.setSetting('controls', controls);
         R.setHighlight(null);
-        const a = R.capturePixels(320, 180);
+        // full canvas resolution: a 1 px classic line is easily skipped by a nearest-neighbour downscale
+        const cw = R.three.domElement.width, chh = R.three.domElement.height;
+        const a = R.capturePixels(cw, chh);
         R.setHighlight({ x, y: 3, z, boxes: [[0, 0, 0, 1, 1, 1]] });
-        const b = R.capturePixels(320, 180);
+        const b = R.capturePixels(cw, chh);
         let changed = 0, white = 0, dark = 0;
         for (let i = 0; i < a.data.length; i += 4) {
           const d = Math.abs(a.data[i] - b.data[i]) + Math.abs(a.data[i + 1] - b.data[i + 1]) + Math.abs(a.data[i + 2] - b.data[i + 2]);
@@ -396,6 +398,7 @@ export default [
         R.addObject(block);
         R.capturePixels(8, 8);
         const withBlock = R.getStats().drawCalls;
+        g.__coredEntityTest = [mob, block];
         return { shares, own, before, after, withBlock, keep: true };
       });
       t.note('entity', r);
@@ -404,6 +407,13 @@ export default [
       t.assert(r.withBlock - r.after === 1, 'a block model is one draw call');
       await t.call('waitFrames', 3);
       await t.shot('cored-entity');
+      // integration: take the test objects out again (the renderer never clears dynamic objects on world exit -
+      // their owner does), so later scenarios do not see a red test mob and a floating log
+      await t.eval(() => {
+        const g = window.__game.game;
+        for (const o of g.__coredEntityTest || []) { g.renderer.removeObject(o); o.geometry.dispose(); o.material.dispose(); }
+        g.__coredEntityTest = null;
+      });
     },
   },
   {

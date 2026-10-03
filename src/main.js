@@ -312,6 +312,8 @@ async function startWorld(opts = {}) {
     game.player.spawnPoint = { ...meta.spawn };
     game.player.spawn(sp.x, sp.y, sp.z, 0, 0);
     if (meta.mode === 'creative') game.inventory.fillHotbar(KID_CREATIVE_HOTBAR);
+    // a new world starts on the first hotbar slot (inventory.clear() keeps the previous world's selection)
+    game.inventory.selectSlot(0);
   }
   if (game.settings.renderDistance > 0) game.world.setRenderDistance(game.settings.renderDistance);
   if (game.renderer.setRenderDistance) game.renderer.setRenderDistance(game.world.renderDistance);
