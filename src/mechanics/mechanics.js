@@ -330,6 +330,11 @@ export function createMechanicsSystem(game) {
   let leafStamp = 0;
   const leafQueue = new Int32Array(LEAF_D * LEAF_D * LEAF_D * 4);
   function logNear(x, y, z, max) {
+    // Never decay next to a column that is not in memory (its logs are unknown).
+    const w = game.world;
+    for (const [ox, oz] of [[-max, -max], [max, -max], [-max, max], [max, max]]) {
+      if (w.getColumn && !w.getColumn((x + ox) >> 4, (z + oz) >> 4)) return true;
+    }
     leafStamp = (leafStamp + 1) >>> 0 || 1;
     let head = 0, tail = 0;
     const idx = (dx, dy, dz) => (dx + 4) + LEAF_D * ((dz + 4) + LEAF_D * (dy + 4));
