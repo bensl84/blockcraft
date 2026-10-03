@@ -113,6 +113,16 @@ export function applyPose(mesh, type, e, t) {
   }
 }
 
+/**
+ * Packed light (sky << 4 | block) for an entity: the brighter of the cells at its eye and at its feet, per channel.
+ * A head poking into a leaf block, a slab or a wall cell (stored light 0) would otherwise turn the mob black.
+ */
+export function entityLight(world, x, yFeet, yEye, z) {
+  const fx = Math.floor(x), fz = Math.floor(z);
+  const a = world.getLight(fx, Math.floor(yEye), fz), b = world.getLight(fx, Math.floor(yFeet + 0.1), fz);
+  return (Math.max(a >> 4, b >> 4) << 4) | Math.max(a & 15, b & 15);
+}
+
 /** Light + tint uniforms (0..15 light, tint rgba). */
 export function setMobLight(mesh, sky, block) {
   const u = mesh.material.uniforms;

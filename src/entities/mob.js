@@ -19,7 +19,7 @@ import {
   canJumpObstacle, feedBaby, findStandY, fleeTarget, isSafeStep, mobAirAccel, mobGroundAccel,
   pickWanderTarget, randInt, turnToward, wrapAngle, yawToward,
 } from './mob_ai.js';
-import { applyPose, createMobMesh, createSimpleMesh, setMobLight, setMobTint, setMobSkin } from './mob_render.js';
+import { applyPose, createMobMesh, createSimpleMesh, entityLight, setMobLight, setMobTint, setMobSkin } from './mob_render.js';
 import { dropItem } from './item_entity.js';
 
 const HEAD_LIMIT = 50 * Math.PI / 180;
@@ -656,9 +656,9 @@ export class Mob extends Entity {
     view.baby = this.baby;
     this.fillPose(view, alpha);
     applyPose(o, this.type, view, this.age + alpha);
-    // light at the eye + tint
+    // light (eye / feet) + tint
     if (game.frameCount % 4 === (this.id & 3) || this.lastLight === undefined) {
-      this.lastLight = game.world.getLight(Math.floor(this.x), Math.floor(this.y + this.eyeHeight), Math.floor(this.z));
+      this.lastLight = entityLight(game.world, this.x, this.y, this.y + this.eyeHeight, this.z);
       setMobLight(o, this.lastLight >> 4, this.lastLight & 15);
     }
     if (this.data.leashed || this.rope) this.renderRope(game, alpha);

@@ -8,7 +8,7 @@ import { STATE } from '../data/blocks.js';
 import { lerp } from '../core/math.js';
 import { moveEntity } from './collide.js';
 import { addXp, findStandY, wrapAngle } from './mob_ai.js';
-import { applyPose, createMobMesh, createSimpleMesh, setMobLight } from './mob_render.js';
+import { applyPose, createMobMesh, createSimpleMesh, entityLight, setMobLight } from './mob_render.js';
 import { dropItem } from './item_entity.js';
 
 /** Top y of the water surface in the column at (x, z) around y (null when no water there). */
@@ -125,7 +125,7 @@ export class Boat extends Entity {
     this.view.paddle = lerp(this.prevPaddle, this.paddle, alpha);
     applyPose(o, 'boat', this.view, this.age + alpha);
     if ((game.frameCount + this.id) % 4 === 0) {
-      const l = game.world.getLight(Math.floor(this.x), Math.floor(this.y + 0.5), Math.floor(this.z));
+      const l = entityLight(game.world, this.x, this.y, this.y + 0.5, this.z);
       setMobLight(o, l >> 4, l & 15);
     }
   }

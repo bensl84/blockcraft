@@ -4,6 +4,91 @@ Branch `lane/mobs` · worktree `C:\Users\BSLeo\AppData\Roaming\Claude\scratch-wo
 
 <!-- newest first: date · what changed · commands run + results (copy the PASS/FAIL lines) · remaining · blockers · spec conflicts -->
 
+## 2026-10-03 · Phase 2: merged the real core, in-world verification
+
+### What changed
+
+- `git merge main` into `lane/mobs` (merge commit `3e7dc7e`, no conflicts).
+- **Stub fallbacks removed** (the real core provides them): `src/entities/collide.js` is now a thin wrapper over CORE-E `physics.moveAndCollide / fluidState / boxCollides` (the local fallback collider is gone; the unit test "entity collision" now pins the real physics from the entity side); `mob_render.js` lost `patchStubMaterial` / `ensureUniforms` (CORE-D's `entitymat.js` clone already gives every clone its own `uParts` / light / tint); `mobs.js` no longer checks `isStub('raycast')`; `mob.js` / `vehicles.js` no longer check `isStub('player')`. Only the MECH-stub fallback in the creeper explosion remains (MECH is still a stub).
+- **Riding fixes found in play**:
+  - The real player ticks *before* entities and copies the seat, so the rider sat one tick behind the mount (the pig slid ahead of the camera). `syncRider()` now runs for the real player after the mount moved (prevX/Y/Z untouched, so the camera interpolates like the mount). Measured offset 0.000.
+  - Seats lowered to Java-like seated heights (pig y+0.25, horse y+0.6, boat y-0.3): before, nothing of the animal or the boat was visible from the saddle. Now the horse's ears and mane, the pig's head and the boat hull frame the view.
+  - A ridden animal no longer turns its head round to look at its own rider (the horse showed the side of its face).
+  - Tapping the horse you sit on while holding a saddle (or horse food) now uses the item instead of getting you off (`acceptsWhileRidden`): after taming-by-riding the child is still on the horse, and before this the saddle tap threw her off.
+- **Aim ray**: spawn eggs in the air, boat placement and the bow use CORE-E's `interaction.getAimRay` (the kid free cursor), not the look direction.
+- **Determinism**: mobs created by chunk-generation population take *all* their creation rolls (AI stream seed, sheep colour, egg timer, horse stats, baby zombie) from the per-column generator (`opts.rand` -> `Mob.spawnRand`), so streaming columns never draw `game.rand()`. This fixed an intermittent `lead-testapi` FAIL ("setRandomSeed makes game.rand reproducible") seen in one full run. Unit-tested (0 draws while 169 fresh columns populate).
+- **Mob light**: the brighter of the eye cell and the feet cell per channel (`entityLight`), so a head inside a leaf / slab / wall cell no longer turns a mob black.
+- `tools/scenarios/mobs.mjs`: `eventCount` is cumulative for the page session, so scenarios now compare against a baseline (`evBase`); with the child-input scenarios running first, the `-direct` twins failed on absolute counts. `mobs-gallery` counts entity draw calls as (all) - (entities hidden), since terrain now draws too.
+- New in-world playtest `tools/mobs-play.mjs` (+ `tools/mobs-play-lib.mjs`): real `page.mouse` clicks / holds on the animal's pixels (kid scheme: tap = use, hold = hit), real keyboard (W, Space, C, Shift), real `page.touchscreen` taps, plus `window.__game` for setup and checks. Sections: `gallery taps kidhit survival spawning cave terrain touch perf`.
+
+### Commands run and results (2026-10-03, this worktree)
+
+`node build.mjs --dev --out .tmp/build-mobs` -> `0.1.0-b9e7884b-dev ... (1710 KB, dev)`
+
+`npm run test:unit` -> `tests 107 · pass 107 · fail 0` (`# mob tick: 0.187 ms per tick for 24 animals + 20 items`)
+
+`node tools/smoke.mjs --tag mobs` (real Chrome, file://, stub lanes left: audio crafting font furnace fx gate hud invui kid mechanics menus music save touch)
+
+```
+PASS mobs · PASS coree-entities · PASS perf · PASS lead-* (6) · PASS page-errors
+PASS mobs-gallery {"drawCalls":{"total":94,"entities":19}}   <- exactly one draw call per mob
+PASS mobs-breeding · mobs-pickup · mobs-wolf-tame · mobs-kid-no-death   <- the 4 formerly PENDING child-input scenarios, now through real interaction/input/player/physics
+PASS mobs-no-pileup {"maxCreatures":24,"chunkgenSpawnsAfterEachRound":[31,31,31]}
+PASS mobs-step-up · mobs-breeding-direct · mobs-pickup-direct · mobs-wolf-tame-direct · mobs-kid-no-death-direct
+PASS mobs-sheep · mobs-survival · mobs-monsters · mobs-ride · mobs-persist
+FAIL survival-fall  - assert: 10-block fall costs 7 HP (health 17)   <- LEAD scenario defect, see Cross-lane defects 1
+PENDING save-load (save) · SKIP touch-controls, coree-touch (need --touch)
+[smoke] {"PASS":73,"FAIL":1,"PENDING":1,"SKIP":2}
+```
+
+`node tools/smoke.mjs --swiftshader --tag mobsss --scenario mobs-gallery,mobs-no-pileup,mobs-monsters,mobs-ride,mobs-breeding,mobs-kid-no-death` -> 7 PASS (gallery: 19 entity draws).
+
+`node tools/mobs-play.mjs` -> `[mobs-play] 68 PASS, 0 FAIL`; `node tools/mobs-play.mjs --touch touch` -> `5 PASS, 0 FAIL`; `node tools/mobs-play.mjs --swiftshader perf` -> 4 PASS.
+
+### Verified in the real world (screenshots in `.tmp/mobs-play/`, all looked at)
+
+| # | Handoff item | Result | Evidence |
+|---|---|---|---|
+| 1 | Real physics: fence pen holds 6 animals for 3000 ticks | PASS (max 3.68 from centre, 0 escaped) | `terrain-fence-pen.png` |
+| 1 | Pig follows a carrot up a slab onto a 1-block platform; steps a 1-block ledge (`mobs-step-up`) | PASS | `terrain-slab-step.png` |
+| 1 | Cow in 3-deep water floats up (real `fluidState`) and climbs out within 60 s | PASS | `terrain-cow-swims.png` |
+| 1 | Pushed pig slides on ice | PASS (1.99 blocks in 20 ticks) | - |
+| 2 | Real mouse taps (kid scheme): wheat on two cows -> love -> baby | PASS | `taps-cows-in-love.png`, `taps-baby-cow.png` |
+| 2 | Bones tame a wolf (4 taps, seed 99), it sits, empty-hand tap stands it up, it follows the child who walked away (W held) | PASS | `taps-wolf-tamed-sitting.png`, `taps-wolf-follows.png` |
+| 2 | Shears tap -> wool item, walking over it picks it up; red + yellow + blue dye -> rainbow sheep | PASS | `taps-sheep-sheared-wool.png`, `taps-rainbow-sheep.png` |
+| 2 | Saddle + tap to ride a pig, carrot on a stick steers (15.75 blocks in 60 ticks), C gets off, tapping the ridden pig gets off | PASS | `taps-riding-pig*.png` |
+| 2 | Horse tamed by getting on it, saddled while sitting on it, W rides (13.4 blocks), Space jumps (4.07, jump stat 0.4-1.0) | PASS | `taps-riding-horse*.png` |
+| 2 | Lead tap ties a cow, it follows | PASS | `taps-lead.png` (rope visible) |
+| 2 | Spawn egg on the ground and into the sky | PASS (2 chickens) | `taps-spawn-egg-chickens.png` |
+| 2 | Hold-to-hit a pig in a kid world: hop + squeak, never hurt (12 holds, health 10), no death | PASS | `kidhit-pig-hop.png` |
+| 2 | Touchscreen: finger taps feed cows, mount a pig, tap the ridden pig to get off | PASS | `touch-after-ride.png` |
+| 3 | Real renderer: one draw call per mob (gallery 19/19, 18 mobs -> 16 draws when 2 are off screen), night darkens through `uDaylight`, torch light reaches mobs (`uLightBlock` 13), closed room = 0 light, torch 3 blocks away = 11 | PASS | `gallery-day.png`, `gallery-night.png`, `gallery-night-torches.png`, `cave-dark-cow.png`, `cave-torch-cow.png` |
+| 3 | Babies (big heads), saddles, collars, sitting wolf/cat, sheared sheep, hurt red flash, walk cycle, monsters | PASS by eye | `gallery-babies.png`, `gallery-closeup-*.png`, `side-farm.png`, `side-walk.png`, `side-hurt.png`, `zombie-close.png` |
+| 4 | Real player: rider exactly on the seat (0.000 offset), C / Space / classic Shift dismount, boat placed on water by a tap (floats at 3.78), tap the boat to get in, W paddles (5.8), bow tap hits a zombie 8 blocks away and uses one arrow | PASS | `taps-boat-on-water.png`, `taps-in-boat*.png` |
+| 4 | Fall damage end-to-end: real 10-block fall = 7, hay = 2; drowning with real `eyeInWater` (air out after 15 s, then damage); lava with real `inLava`; one tap with bread eats it; death -> respawn full, inventory kept | PASS | `survival-underwater.png`, `survival-death.png`, `survival-respawned.png` |
+| 5 | Natural spawns with real worldgen: pig/cow/wolf/chicken/sheep, all on sky-lit grass; monsters at night 24+ blocks away, never in block light; in the morning undead ignite only at sky light 15 | PASS | `a1-nearest-animal.png` |
+| 8 | Performance, default world R 8 (RTX 3080 Ti): 24 animals cost +14 draw calls (on-screen mobs only), entities + mobs tick 0.10-0.14 ms; fps 143.9 with and without (vsync-capped). SwiftShader: 31.1 fps with 24 animals vs 31.5 without, mob tick 0.19 ms | PASS | - |
+
+### Not verifiable yet (other lanes still stubs)
+
+- **FX** (stub): no hearts / sparkle / smoke particles, no death poof; dropped items render as the stub grey cube (`taps-sheep-sheared-wool.png`). The item entity already feeds `uLightSky/uLightBlock` when FX's real `makeItemMesh` returns an entity material.
+- **AUDIO** (stub): mob voices from `mob:sound`, pickup pop.
+- **SAVE / MENUS** (stubs): saving `meta.systems.entities / mobs / survival` through IndexedDB. `mobs-persist` proves the serialize -> startWorld round trip.
+- **HUD** (stub): number keys do not select hotbar slots yet (the playtest selects via the API as well); hearts / hunger bar not drawn.
+
+### Cross-lane defects
+
+1. **LEAD `tools/smoke.mjs` scenario `survival-fall` (FAIL, health 17).** It teleports 10 blocks up and reads health 60 ticks later. Fall damage is correct (`player:hurt {amount: 7, cause: 'fall'}` on landing, verified in `tools/mobs-play.mjs survival`), but SPEC §2.3 regeneration ("hunger 20 with saturation > 0: heal 1 every 10 ticks") heals 3-4 HP in the ~40 ticks after the landing. Fix: assert on the `player:hurt` event (cause `fall`, amount 7), or read health on `player:land`, or set `player.saturation = 0` before the fall.
+2. **LEAD `src/core/testapi.js` `eventCount`** is cumulative for the whole page session (`events.counts` is never reset on `startWorld`), so any scenario asserting an absolute count depends on which scenarios ran before it. Suggest documenting it in the testapi comment or adding `eventCount(name, {sinceWorld: true})` / resetting counts on `world:start`. This lane now uses baselines.
+3. **LEAD `tools/scenarios/lead.mjs` `lead-testapi`** (repeat of phase-1 request 1): seed + draw are two separate page calls, so any tick in between that draws `game.rand()` (MOBS passive top-up every 400 ticks, monster cycle, MECH random ticks later) can still make it flaky. Do `setRandomSeed` and the draws inside ONE `t.eval`. (This lane removed the burst of draws from chunk-gen spawning that made it fail once.)
+4. **CORE-E `src/player/interaction.js` `attackStep` (kid experience)**: a kid hold that *started on an animal* turns into block breaking once the animal hops away (knockback + panic), and in kid creative blocks break instantly, so holding on a pig digs holes: 11 blocks broken by 12 holds in `tools/mobs-play.mjs kidhit` (`kidhit-pig-hop.png` shows the hole). Suggested fix: remember that the current attack hold began on an entity and do not start mining until the hold is released (Java needs a fresh click to start mining too).
+
+### Remaining gaps (this lane)
+
+- Leads cannot be tied to fence posts (P2, not started); slimes / more animals not started.
+- Horse jump is always full strength while Space is held (no charge bar; HUD-side in Java).
+- Natural spawning gives no guarantee of animals in sight of the world spawn (seed 12345: nearest cows 14 blocks away); fine for Java parity, a kid preset could seed a group near spawn if the parent wants it.
+
 ## 2026-10-03 · MOBS lane: entities, mobs, items, survival (P0 + P1 + leads from P2)
 
 ### What changed

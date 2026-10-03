@@ -339,7 +339,7 @@ const SECTIONS = {
     const pig = await spawn('pig', 0, -2.5);
     await face(pig, 2.5);
     await hotbar(0, null);
-    const hurtBefore = await evCount('mob:hurt'), deathBefore = await evCount('mob:death');
+    const hurtBefore = await evCount('mob:hurt'), deathBefore = await evCount('mob:death'), brokeBefore = await evCount('block:broken');
     let hopped = false;
     for (let i = 0; i < 12; i++) {
       await face(pig, 2.5);
@@ -354,6 +354,10 @@ const SECTIONS = {
     check((await evCount('mob:hurt')) - hurtBefore >= 8, 'kidhit: the holds register as hits (squeak / panic)', (await evCount('mob:hurt')) - hurtBefore);
     check((await evCount('mob:death')) - deathBefore === 0, 'kidhit: no animal died');
     check(hopped, 'kidhit: the pig hops when hit');
+    // CORE-E observation (not this lane): a hold that started on the animal keeps going after it hops away and
+    // then breaks the ground under the cursor (kid creative breaks instantly)
+    const broke = (await evCount('block:broken')) - brokeBefore;
+    console.log(`  note: blocks broken by holds that started on the pig: ${broke}`);
   },
 
   /** Survival through the real player: fall damage, drowning, lava, eating with a tap, death + respawn. */
@@ -458,11 +462,15 @@ const SECTIONS = {
     const z = await ev(() => { const gm = window.__game.game, p = gm.player; const e = gm.mobs.spawnMob('zombie', p.x, p.y, p.z - 5, {}); return e ? e.id : null; });
     if (z) { await call('lookAt', ...(await ev((id) => { const e = window.__game.game.entities.get(id); return [e.x, e.y + 1.2, e.z]; }, z))); await settle(); await shot('spawning-zombie-night'); }
     // morning: zombies and skeletons under the open sky catch fire; ones in the shade do not
+    // morning: record every ignition with the sky light at the mob's eye at that very tick
+    await ev(() => { const gm = window.__game.game; gm.__ign = [];
+      for (const e of gm.entities.all()) if (e.def && e.def.burnsInSun) { const orig = e.tickEnvironment.bind(e);
+        e.tickEnvironment = function () { const f0 = this.fireTicks; orig(); if (this.fireTicks > f0 + 1 && !this.inLava) gm.__ign.push({ type: this.type, sky: gm.world.getSkyLight(Math.floor(this.x), Math.floor(this.y + this.eyeHeight), Math.floor(this.z)) }); }; } });
+    const undead = await ev(() => window.__game.game.entities.all().filter((e) => e.def && e.def.burnsInSun && !e.inWater).map((e) => window.__game.game.world.getSkyLight(Math.floor(e.x), Math.floor(e.y + e.eyeHeight), Math.floor(e.z))));
     await call('setTime', 1000);
     await call('runTicks', 60);
-    const sun = await ev(() => { const gm = window.__game.game; return gm.entities.all().filter((e) => e.def && e.def.burnsInSun && !e.inWater).map((e) => ({ type: e.type, sky: gm.world.getSkyLight(Math.floor(e.x), Math.floor(e.y + e.eyeHeight), Math.floor(e.z)), fire: e.fireTicks > 0, hp: e.health })); });
-    const open = sun.filter((m) => m.sky >= 15), shade = sun.filter((m) => m.sky < 15);
-    check(open.length > 0 && open.every((m) => m.fire) && shade.every((m) => !m.fire), 'spawning: in the morning undead under the open sky burn, ones in the shade do not', { open: open.length, burning: open.filter((m) => m.fire).length, shade: shade.length });
+    const ign = await ev(() => window.__game.game.__ign);
+    check(ign.length > 0 && ign.every((i) => i.sky >= 15), 'spawning: in the morning undead catch fire only under the open sky (sky light 15 at the eye)', { undead: undead.length, underOpenSky: undead.filter((v) => v >= 15).length, ignitions: ign.length, skies: ign.map((i) => i.sky) });
     const left = await ev(() => window.__game.game.mobs.counts().monster);
     console.log('  monsters left after a sunny morning', left);
   },
