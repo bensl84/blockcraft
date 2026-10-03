@@ -198,8 +198,10 @@ export function registerNewWorldScreen(ctx) {
           el('div', { class: 'bc-mtop-spacer' }),
         ]),
         el('div', { class: 'bc-nw-body' }, [
-          el('div', { class: 'bc-nw-row', 'data-row': 'preset' }, presetCards),
-          el('div', { class: 'bc-nw-row bc-nw-modes', 'data-row': 'mode' }, modeCards),
+          el('div', { class: 'bc-nw-cards' }, [
+            el('div', { class: 'bc-nw-row', 'data-row': 'preset' }, presetCards),
+            el('div', { class: 'bc-nw-row bc-nw-modes', 'data-row': 'mode' }, modeCards),
+          ]),
           el('div', { class: 'bc-nw-go-wrap' }, [go]),
         ]),
       );

@@ -4,6 +4,107 @@ Branch `lane/menus` · worktree `C:\Users\BSLeo\AppData\Roaming\Claude\scratch-w
 
 <!-- newest first: date · what changed · commands run + results (copy the PASS/FAIL lines) · remaining · blockers · spec conflicts -->
 
+## 2026-10-03 · MENUS phase 2: merged the real CORE, verified in real gameplay
+
+### What changed
+
+- `git merge main` into `lane/menus` (merge commit `0e97072`): no conflicts. MENUS had no stub fallbacks of its own, so nothing to remove.
+- `src/save/storage.js`: world thumbnails hide the block selection outline during the (synchronous) capture and restore it right after. Before: every pause/exit picture had the white kid outline box in the middle.
+- `src/ui/menu_worlds.js` + `menu_styles.css`: new-world cards follow the window height too; on short wide windows (<= 640 px tall, >= 3:2) the big Play sits to the right of the cards; at <= 420 px tall the top bar and cards shrink and the labels hide. Before: at 1366x600 (a small laptop browser window) Play was cut off at the bottom and the selected card covered the "+" badge; at 812x375 Play was off screen.
+- `menu_styles.css`: settings tabs become a 2-wide icon grid when the window is <= 480 px tall (landscape phone). Before: the Helpers/Saves/Tips tabs were below the screen edge.
+- `menu_settings.js`: "Menu size" renamed "Hotbar and inventory size" with the hint "The big menu buttons always stay big." (`guiScale` drives the HUD/inventory only; the kid menus keep fixed big sizes on purpose.)
+- `tools/scenarios/menus.mjs` `menus-sizes`: also checks 1366x600 and 812x375, flags anything off the top/bottom edge, and screenshots title/worlds/newWorld/pause/settings/death at every size.
+- New `tools/menus-inworld.mjs`: in-world verification driver (real `page.mouse`/keyboard, real CDP touch with `--touch`, real page reload with IndexedDB, screenshots + `results.json` in `.tmp/inworld*/`). Usage: `node build.mjs --dev --out .tmp/build-menus && node tools/menus-inworld.mjs [--touch] [--swiftshader] [--w 1366 --h 600]`.
+
+### Verified in real gameplay (real core, `tools/menus-inworld.mjs`)
+
+Stub lanes at the time: audio crafting furnace fx hud invui items kid mechanics mobs music survival touch.
+
+```
+PASS boot to title {"ms":418}
+PASS Play press -> loading screen -> playing {"loadMs":380,"progress":30,"clicks":1}
+PASS load time < 4 s (dev GPU) {"loadMs":307..380}                  (SwiftShader: 307 ms at R4)
+PASS fps playing (menus closed) {"fps":144,"drawCalls":225,"R":8}   (SwiftShader: 35 fps, 78 draw calls, R4)
+PASS child taps place blocks in the real world {"placedEvents":2}
+PASS Esc opens pause and the world stops {"state":"paused"}
+PASS pause saves with a rendered thumbnail {"thumbLen":16091}
+PASS Resume closes pause, back to playing
+PASS Save & Title returns to the title; worlds button shows the world picture
+PASS worlds card shows the saved world (data:image/jpeg thumbnail)
+PASS new Snowy Survival Normal world from real taps {"preset":"snowy","mode":"survival","difficulty":"normal"}
+PASS death screen (PENDING real fall damage: survival is a stub)    -> player:death emitted by the script
+PASS Respawn button closes the death screen (survival stub)
+PASS settings reach the real lanes {"before":{"R":8,"tris":577487},"after":{"R":5,"tris":387909},"toggles":{"fancyLeaves":false,"smoothLighting":false,"showFps":true,"clouds":false}}
+PASS classic: losing pointer lock opens pause {"lockedByClick":true}
+PASS classic: Resume inside the relock cooldown shows a non-blocking hint, then locks {"during":{"hint":true,"pe":"none"},"after":{"locked":true}}
+PASS classic: Resume relocks
+PASS reload persists blocks, inventory, slot, position, time {"gold":"gold_block","diamonds":7,"slot":3,"time":9000}
+PASS autosave keeps edits in columns that streamed out; Play resumes the last world where it was left {"glass":"glass","pending":0,"farX":375.5}
+PASS menus add no frame cost over the world {"world":{"p50":7},"pause":{"p50":6.9},"drawCalls":{"world":244,"pause":242}}   (SwiftShader p50 27.9 vs 27.8 ms)
+PASS no page errors
+[inworld] 21/21 PASS   (also 20/20 with --swiftshader and with --w 1366 --h 600, run before the cooldown step was added)
+```
+
+Touch (`--touch`, laptop touchscreen 1280x720, real CDP touch events):
+```
+PASS touch: finger tap on Play starts the world {"pointerType":"touch"}
+PASS touch: tapping the world builds
+PASS touch: a short hold does not pass; a 3 s finger hold + sum opens settings
+PASS touch: Resume with a finger
+PASS touch: new Flat Survival Easy world from finger taps
+PASS no page errors
+[inworld] 6/6 PASS
+```
+
+Screenshots looked at (worktree `.tmp/`): `inworld/01-title-first-run.png`, `02-loading.png`, `03-playing-first.png`, `04-built.png`, `05-pause.png`, `06-title-after-exit.png` (worlds button with the real picture), `07-worlds.png`, `08-newworld-picked.png`, `09-survival-snowy.png`, `10-death.png`, `12/13-settings-video*.png`, `14-world-after-settings.png` (fast leaves visible), `15-classic-pause.png`, `16-classic-resume-cooldown.png` (mouse hint), `19-worlds-after-reload.png`, `thumbnail.png` (no outline after the fix); `inworld-touch/01..07`; `inworld-1366x600/*`; `nw-1366x600.png`, `nw-812x375.png`, `nw-667x375.png`; `smoke-menus-menus-{title,worlds,newworld,pause,settings,death}-{1280x720,1366x600,375x667,812x375}.png`.
+
+Perf: title/worlds/new-world screens cost ~0.3 ms script per frame at 144 Hz (about 12 % of one core, mostly the game loop and CSS animations, not the panorama). The pause screen over the real world adds no frame time and no draw calls (RTX and SwiftShader).
+
+### Commands run and results
+
+`node build.mjs --dev --out .tmp/build-menus` -> builds (1697 KB dev).
+
+`npm run test:unit` -> `tests 100 · pass 100 · fail 0`.
+
+`node tools/smoke.mjs --tag menus`
+```
+PENDING  mobs           - stub lanes: mobs
+PENDING  survival-fall  - stub lanes: survival
+SKIP     touch-controls · coree-touch · menus-touch  - need --touch
+FAIL     coree-classic-lock  - assert: still playing   (CORE-E test expectation, see Cross-lane defects #1)
+PASS     menus-title · menus-flow · menus-autosave · menus-gate · menus-sizes {"problems":[]} · menus-newworld · menus-edit-worlds
+PASS     menus-settings · menus-death · menus-loading · menus-classic-pause · menus-backups · menus-export-import
+PASS     menus-reload-persist · menus-thumbnail · save-load · lead-* · all other core* scenarios · page-errors
+[smoke] {"PASS":71,"PENDING":2,"SKIP":3,"FAIL":1}
+```
+`--touch --scenario menus-touch,touch-controls,coree-touch` -> menus-touch PASS, coree-touch PASS, touch-controls PENDING (touch stub).
+`--http --scenario boot,menus-flow,menus-autosave,menus-backups,menus-export-import,menus-reload-persist,save-load,menus-thumbnail` -> 9/9 PASS.
+`--swiftshader --scenario menus-title,menus-flow,menus-sizes,menus-thumbnail,menus-reload-persist` -> 6/6 PASS.
+
+### Status of the phase-1 "needs in-world verification" list
+
+1. Thumbnails: PASS (outline removed from the picture).
+2. Reload persistence: PASS for blocks, inventory, selected slot, position, time. Animals: PENDING (mobs lane is a stub). No DataCloneError with the real systems.
+3. Autosave while streaming: PASS (edit in a column that streamed out is written, `pendingSave` drains to 0, edit is back after reload).
+4. Classic scheme: PASS (unlock -> pause, Resume relocks, the hint during the cooldown is `pointer-events: none`).
+5. KID fullscreen / AUDIO unlock / click sound: PENDING (kid and audio lanes are stubs). `ui:click` is emitted once per press.
+6. Death with real survival: PENDING (survival stub; the death screen and Respawn work from `player:death`).
+7. Settings reactions: PASS for render distance, fancy leaves, smooth lighting, clouds, control scheme. Show FPS / GUI scale / volumes: PENDING (hud and audio stubs).
+8. Loading: PASS, 0.3-0.4 s on the RTX, 0.3 s on SwiftShader (R4), well under 4 s.
+9. Touch + trackpad: PASS with emulated touch (CDP) and mouse; real hardware not available here.
+
+### Cross-lane defects
+
+1. **CORE-E test `coree-classic-lock` fails once real MENUS is merged** (`tools/scenarios/coree.mjs` ~line 309: `t.assert(await t.call('state') === 'playing', 'still playing')`). The scenario calls `document.exitPointerLock()` while playing in the classic scheme; SPEC §8.4 ("Classic scheme: on `input:pointerLock {locked: false}` while playing with no screen open, open `pause`") and CORE-E's own handoff say MENUS then opens `pause`, so `game.state` is `'paused'`. Repro: `node tools/smoke.mjs --tag menus --scenario coree-classic-lock` on `lane/menus`. Suggested fix (CORE-E or LEAD): accept the pause, e.g. `const st = await t.call('state'); t.assert(st === 'playing' || (st === 'paused' && await t.call('uiOpen') === 'pause'), ...)`, then `await t.call('closeUI')` before the `finally`.
+2. (Suggestion, LEAD/CORE-D, not a bug) While a `pausesGame` screen is open the world image is frozen, but the renderer still draws every frame (SwiftShader: 33 full-cost frames a second behind the pause screen; on the title it still renders the empty sky). Skipping world renders while paused (redraw only on resize or a settings change) would save laptop battery and heat.
+3. (Suggestion, CORE-D) `renderer.captureThumbnail` could hide the selection outline itself; MENUS now does it around the call (`setHighlight(null)` / restore).
+
+### Remaining gaps
+
+- Waiting on stub lanes: survival (real fall death), mobs (animals in saves), kid (fullscreen + keyboard lock from Play), audio (unlock, click sound, volumes), hud (Show FPS, GUI scale, the touch pause button), touch.
+- Real touchscreen and Windows trackpad hardware not available here (emulated touch and mouse only).
+- After a finger tap the last pressed button keeps the CSS `:hover` look (LEAD `.bc-btn:hover` in `src/styles.css`); harmless, left as is.
+
 ## 2026-10-03 · MENUS lane P0 + P1 + P2 implemented (SPEC §8.4)
 
 ### What changed

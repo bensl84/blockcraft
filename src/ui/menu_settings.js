@@ -166,7 +166,7 @@ export function registerSettingsScreen(ctx) {
       row('Waving plants and water', keep(toggle(game, 'waving', S('waving'), setS('waving')))),
       row('Smooth lighting', keep(toggle(game, 'smoothLighting', S('smoothLighting'), setS('smoothLighting')))),
       row('View bobbing', keep(toggle(game, 'viewBobbing', S('viewBobbing'), setS('viewBobbing')))),
-      row('Menu size', keep(choice(game, 'guiScale', [0, 2, 3, 4, 5, 6].map((v) => ({ value: v, label: v ? String(v) : 'Auto' })), S('guiScale'), setS('guiScale')))),
+      row('Hotbar and inventory size', keep(choice(game, 'guiScale', [0, 2, 3, 4, 5, 6].map((v) => ({ value: v, label: v ? String(v) : 'Auto' })), S('guiScale'), setS('guiScale'))), 'The big menu buttons always stay big.'),
       row('Sharpness limit', keep(choice(game, 'pixelRatioCap', [0, 0.75, 1, 1.5, 2].map((v) => ({ value: v, label: v ? `${v}x` : 'Auto' })), S('pixelRatioCap'), setS('pixelRatioCap'))), 'Lower is faster on weak laptops.'),
       row('Show FPS', keep(toggle(game, 'showFps', S('showFps'), setS('showFps')))),
     );

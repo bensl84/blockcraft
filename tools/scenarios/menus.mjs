@@ -175,7 +175,8 @@ export default [
     name: 'menus-sizes',
     requires: ['menus', 'gate'],
     async run(t) {
-      const sizes = [[1280, 720], [375, 667]];
+      // laptop, short laptop browser window, phone portrait, phone landscape
+      const sizes = [[1280, 720], [1366, 600], [375, 667], [812, 375]];
       const bad = [];
       // enough worlds for several pages of cards
       for (let i = (await t.call('listWorlds')).length; i < 8; i++) { await t.call('startWorld', { ...FLAT, seed: 100 + i }); await t.call('exitToTitle'); }
@@ -187,31 +188,34 @@ export default [
           for (const e of await targets(t)) {
             if (Math.min(e.w, e.h) < 47.5) bad.push(`${w}px ${name}: ${e.sel} ${Math.round(e.w)}x${Math.round(e.h)}`);
             if (!e.scroll && (e.x < -1 || e.right > w + 1)) bad.push(`${w}px ${name}: ${e.sel} off screen (${Math.round(e.x)}..${Math.round(e.right)})`);
+            if (!e.scroll && (e.y < -1 || e.bottom > h + 1)) bad.push(`${w}x${h} ${name}: ${e.sel} off screen (y ${Math.round(e.y)}..${Math.round(e.bottom)})`);
           }
         };
         await toTitle(t);
         const play = await centre(t, '[data-screen=title] [data-action=play]');
         if (play.box.width < 200 || play.box.height < 120) bad.push(`${w}px Play ${Math.round(play.box.width)}x${Math.round(play.box.height)}`);
         await check('title');
-        await t.shot(`menus-title-${w}`);
+        await t.shot(`menus-title-${w}x${h}`);
         await t.call('openScreen', 'worlds');
         await t.waitFor(() => document.querySelector('[data-screen=worlds]')?.dataset.loaded === '1', null, 3000);
         await check('worlds');
-        await t.shot(`menus-worlds-${w}`);
+        await t.shot(`menus-worlds-${w}x${h}`);
         await t.call('openScreen', 'newWorld');
         await check('newWorld');
-        await t.shot(`menus-newworld-${w}`);
+        await t.shot(`menus-newworld-${w}x${h}`);
         await t.eval(() => { window.__game.game.menus.gate(); });
         await check('gate');
         await t.page.keyboard.press('Escape');
         await t.call('startWorld', FLAT);
         await t.call('openScreen', 'pause');
         await check('pause');
+        await t.shot(`menus-pause-${w}x${h}`);
         await t.call('openScreen', 'settings', { from: 'pause' });
         await check('settings');
-        await t.shot(`menus-settings-${w}`);
+        await t.shot(`menus-settings-${w}x${h}`);
         await t.call('openScreen', 'death');
         await check('death');
+        await t.shot(`menus-death-${w}x${h}`);
         await t.call('closeUI');
         await t.call('exitToTitle');
       }
