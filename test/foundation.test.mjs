@@ -302,7 +302,9 @@ test('CONTRACT world: modified columns survive save + unload + reload; batches r
   assert.equal(n, 3);
   assert.equal(seen.length, 3);
   assert.ok(seen.every((e) => e.action === 42 && e.cause === 'test'));
-  assert.equal(w.getSkyLight(5, 6, 5), 0, 'relit at endBatch');
+  // L-shaped roof at y 10: (5,6,5) is one step from open sky, so real lighting gives 14 (SPEC §5.3.4)
+  assert.equal(w.getSkyLight(5, 6, 5), 14, 'relit at endBatch (one step from open sky under the roof)');
+  assert.equal(w.getSkyLight(5, 11, 5), 15, 'open sky above the roof');
   assert.equal(w.inBatch(), false);
   assert.equal(w.getRaw(5, 10, 5), packBlock(ID.stone, 0));
   w.close();

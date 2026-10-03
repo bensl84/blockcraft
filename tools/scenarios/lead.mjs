@@ -138,7 +138,7 @@ export default [
       t.note('batch', r);
       t.assert(r.n === 9 && r.events === 9, 'one block:changed per cell');
       t.assert(r.actions, 'opts.action is passed through to block:changed');
-      t.assert(r.sky === 0, 'light is correct after endBatch (roof shades the cell below)');
+      t.assert(r.sky === 13, `light is correct after endBatch (3x3 roof: centre is 2 steps from open sky, 15 - 2 = 13; got ${r.sky})`);
       t.assert(r.inBatch === false, 'batch closed');
     },
   },
