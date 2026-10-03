@@ -4,10 +4,8 @@
 //   - one CanvasTexture per skin variant (shared), material from renderer.createEntityMaterial({map, parts})
 //     cloned per entity, posed every frame by writing the `uParts` matrices -> one draw call per mob,
 //   - uLightSky / uLightBlock from world.getLight at the eye, hurt / flash tint through uTint.
-//
-// Stub tolerance: while CORE-D's renderer is a stub, createEntityMaterial returns a MeshBasicMaterial that
-// ignores uParts/uTint. patchStubMaterial() then injects the same part transform + tint with onBeforeCompile so
-// the walk cycle and hurt flash can be checked in screenshots today. It is never applied to the real material.
+//   - the renderer's entity material clone() gives each clone its own uParts / light / tint uniforms and shares
+//     the skin texture and global uniforms (src/render/entitymat.js).
 
 import * as THREE from 'three';
 import { MODELS, PX, buildModelArrays, poseModel } from './mob_models.js';
@@ -60,53 +58,9 @@ function baseMaterial(game, type, variant) {
   return m;
 }
 
-/** Fresh uniforms for a stub material clone (MeshBasicMaterial.clone drops our custom uniforms object). */
-function ensureUniforms(mat, parts) {
-  if (!mat.uniforms) mat.uniforms = {};
-  const u = mat.uniforms;
-  if (!u.uLightSky) u.uLightSky = { value: 15 };
-  if (!u.uLightBlock) u.uLightBlock = { value: 0 };
-  if (!u.uTint) u.uTint = { value: new THREE.Vector4(0, 0, 0, 0) };
-  if (!u.uParts || !Array.isArray(u.uParts.value) || u.uParts.value.length < parts) {
-    u.uParts = { value: Array.from({ length: parts }, () => new THREE.Matrix4()) };
-  }
-}
-
-/**
- * Stub renderer only: make a MeshBasicMaterial honour aPart/uParts and uTint. Harmless no-op for the real
- * renderer's ShaderMaterial (which implements both natively, SPEC §5.5.5).
- */
-export function patchStubMaterial(mat, parts) {
-  if (!mat || mat.isShaderMaterial || !(mat.userData && mat.userData.stub)) return mat;
-  ensureUniforms(mat, parts);
-  mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uParts = mat.uniforms.uParts;
-    shader.uniforms.uTint = mat.uniforms.uTint;
-    shader.uniforms.uLightSky = mat.uniforms.uLightSky;
-    shader.vertexShader = `attribute float aPart;\nuniform mat4 uParts[${parts}];\n` + shader.vertexShader.replace(
-      '#include <begin_vertex>', '#include <begin_vertex>\ntransformed = (uParts[int(aPart + 0.5)] * vec4(transformed, 1.0)).xyz;');
-    shader.fragmentShader = 'uniform vec4 uTint;\nuniform float uLightSky;\n' + shader.fragmentShader.replace(
-      '#include <dithering_fragment>', '#include <dithering_fragment>\ngl_FragColor.rgb *= max(0.25, pow(0.8, 15.0 - uLightSky));\ngl_FragColor.rgb = mix(gl_FragColor.rgb, uTint.rgb, uTint.a);');
-  };
-  mat.customProgramCacheKey = () => 'bc-mob-parts-' + parts;
-  mat.needsUpdate = true;
-  return mat;
-}
-
 /** Per-entity material (clone of the shared base for this skin). */
 export function createMobMaterial(game, type, variant = {}) {
-  const parts = MODELS[type].parts.length;
-  const base = baseMaterial(game, type, variant);
-  const m = base.clone();
-  if (!m.uniforms || m.uniforms === base.uniforms) m.uniforms = {};
-  ensureUniforms(m, parts);
-  // three's cloneUniforms() only slices arrays: the uParts Matrix4 objects would be shared by every clone
-  const bp = base.uniforms && base.uniforms.uParts && base.uniforms.uParts.value;
-  if (bp && m.uniforms.uParts.value.some((x, i) => x === bp[i])) m.uniforms.uParts.value = m.uniforms.uParts.value.map((x) => x.clone());
-  const bt = base.uniforms && base.uniforms.uTint && base.uniforms.uTint.value;
-  if (bt && m.uniforms.uTint.value === bt) m.uniforms.uTint.value = bt.clone();
-  patchStubMaterial(m, parts);
-  return m;
+  return baseMaterial(game, type, variant).clone();
 }
 
 /** Swap the skin of an existing mob mesh (sheep dye / rainbow, wolf collar). Disposes only the old clone. */
@@ -183,9 +137,7 @@ export function createSimpleMesh(game, sx, sy, sz, color, oy = 0) {
     g.userData.shared = true;
     geoCache.set(key, g);
   }
-  const m = game.renderer.createEntityMaterial({ color, parts: 1 });
-  patchStubMaterial(m, 1);
-  return new THREE.Mesh(g, m);
+  return new THREE.Mesh(g, game.renderer.createEntityMaterial({ color, parts: 1 }));
 }
 
 /** Debug/test: sizes of the shared caches (they must stay bounded however many mobs come and go). */

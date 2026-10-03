@@ -14,7 +14,6 @@ import { Entity } from './entity.js';
 import { MOBS, SPAWN } from '../data/mobs.js';
 import { B_SLIP, ID } from '../core/registry.js';
 import { clamp, lerp, mulberry32 } from '../core/math.js';
-import { isStub } from '../core/stubs.js';
 import { entityFluid, moveEntity } from './collide.js';
 import {
   canJumpObstacle, feedBaby, findStandY, fleeTarget, isSafeStep, mobAirAccel, mobGroundAccel,
@@ -596,12 +595,16 @@ export class Mob extends Entity {
     const y = findStandY(this.getRaw, x, this.y, z, 2) ?? this.y;
     if (p.teleport) p.teleport(x, y, z, 'dismount');
   }
-  /** Stub player only (CORE-E copies the seat itself once real, SPEC §7.5): keep the rider on the seat. */
+  /**
+   * Keep the rider on the seat AFTER the mount moved this tick. The player system ticks before entities and
+   * copies the seat itself (SPEC §7.5), which alone leaves the rider one tick behind the mount (the animal
+   * visibly slides ahead of the camera at a gallop). prevX/Y/Z stay as the player set them, so the camera
+   * interpolates exactly like the mount does.
+   */
   syncRider() {
     const p = this.game.player;
-    if (!p || p.riding !== this.id || !isStub('player')) return;
+    if (!p || p.riding !== this.id) return;
     const s = this.getSeat();
-    p.prevX = p.x; p.prevY = p.y; p.prevZ = p.z;
     p.x = s.x; p.y = s.y; p.z = s.z;
     p.vx = p.vy = p.vz = 0; p.fallDistance = 0;
   }

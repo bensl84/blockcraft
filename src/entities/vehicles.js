@@ -6,7 +6,6 @@ import { Entity } from './entity.js';
 import { B_LIQUID } from '../core/registry.js';
 import { STATE } from '../data/blocks.js';
 import { lerp } from '../core/math.js';
-import { isStub } from '../core/stubs.js';
 import { moveEntity } from './collide.js';
 import { addXp, findStandY, wrapAngle } from './mob_ai.js';
 import { applyPose, createMobMesh, createSimpleMesh, setMobLight } from './mob_render.js';
@@ -81,9 +80,8 @@ export class Boat extends Entity {
   }
   syncRider() {
     const p = this.game.player;
-    if (!p || p.riding !== this.id || !isStub('player')) return;
+    if (!p || p.riding !== this.id) return;   // see Mob.syncRider: rider follows the seat after the boat moved
     const s = this.getSeat();
-    p.prevX = p.x; p.prevY = p.y; p.prevZ = p.z;
     p.x = s.x; p.y = s.y; p.z = s.z; p.vx = p.vy = p.vz = 0; p.fallDistance = 0;
   }
   mount() {

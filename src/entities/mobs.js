@@ -18,7 +18,6 @@ import { createSpawner } from './spawning.js';
 import { splitXp } from './mob_ai.js';
 import { renderCacheStats } from './mob_render.js';
 import { raycast } from '../player/raycast.js';
-import { isStub } from '../core/stubs.js';
 import { lookDir } from '../core/math.js';
 
 const CLASSES = { ...ANIMAL_CLASSES, ...MONSTER_CLASSES };
@@ -36,6 +35,17 @@ export function registerMobEntityTypes() {
 export function createMobsSystem(game) {
   const spawner = createSpawner(game);
 
+  /**
+   * The ray the player aims with: interaction's cursor ray (the kid free cursor or screen centre), else the look
+   * direction. -> {ox, oy, oz, dx, dy, dz}
+   */
+  function aimRay() {
+    const ix = game.interaction, out = {};
+    if (ix && ix.getAimRay) { ix.getAimRay(out, false); if (Number.isFinite(out.dx)) return out; }
+    const p = game.player, e = p.getEyePos({}), d = lookDir(p.yaw, p.pitch);
+    return { ox: e.x, oy: e.y, oz: e.z, dx: d.x, dy: d.y, dz: d.z };
+  }
+
   /** Spawn-egg / boat target position: on the face the player aims at, or 2.5 blocks in front in the air. */
   function placementPoint(ctx) {
     const h = ctx.hit;
@@ -43,8 +53,8 @@ export function createMobsSystem(game) {
       if (h.ny === 1 || h.face === 2) return { x: h.x + 0.5, y: h.y + 1, z: h.z + 0.5 };
       return { x: h.x + h.nx + 0.5, y: h.y + h.ny, z: h.z + h.nz + 0.5 };
     }
-    const p = game.player, e = p.getEyePos({}), d = lookDir(p.yaw, p.pitch);
-    return { x: e.x + d.x * 2.5, y: e.y + d.y * 2.5 - 0.5, z: e.z + d.z * 2.5 };
+    const r = aimRay();
+    return { x: r.ox + r.dx * 2.5, y: r.oy + r.dy * 2.5 - 0.5, z: r.oz + r.dz * 2.5 };
   }
 
   function spawnEgg(type) {
@@ -64,9 +74,9 @@ export function createMobsSystem(game) {
   function useBoat(ctx) {
     const p = game.player, w = game.world;
     let pt = null;
-    if (!isStub('raycast')) {
-      const e = p.getEyePos({}, true), d = p.getLookDir({});
-      const hit = raycast(w, e.x, e.y, e.z, d.x, d.y, d.z, game.interaction ? game.interaction.reach() : 5, { fluids: true });
+    {
+      const r = aimRay();
+      const hit = raycast(w, r.ox, r.oy, r.oz, r.dx, r.dy, r.dz, game.interaction ? game.interaction.reach() : 5, { fluids: true });
       if (hit) {
         const s = waterSurface(w, hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
         pt = s !== null ? { x: hit.x + 0.5, y: s - 0.1, z: hit.z + 0.5 } : { x: hit.x + hit.nx + 0.5, y: hit.y + hit.ny + (hit.ny === 1 ? 0 : 0), z: hit.z + hit.nz + 0.5 };
@@ -90,8 +100,8 @@ export function createMobsSystem(game) {
     if (!creative && (!inv || inv.count('arrow') <= 0)) return false;
     if ((sys.bowCooldown || 0) > game.tickCount) return true;
     sys.bowCooldown = game.tickCount + 10;
-    const e = p.getEyePos({}), d = p.getLookDir({});
-    fireArrow(game, p, e.x + d.x * 0.4, e.y - 0.1 + d.y * 0.4, e.z + d.z * 0.4, d.x, d.y, d.z, 3.0, 1, 6, true);
+    const r = aimRay();
+    fireArrow(game, p, r.ox + r.dx * 0.4, r.oy - 0.1 + r.dy * 0.4, r.oz + r.dz * 0.4, r.dx, r.dy, r.dz, 3.0, 1, 6, true);
     if (!creative) { inv.removeItem('arrow', 1); inv.damageSelected(1); }
     if (p.swing) p.swing();
     return true;

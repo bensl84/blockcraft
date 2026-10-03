@@ -1,6 +1,6 @@
 // OWNER LANE: FEATURE-MOBS. Unit tests for the AI helpers, damage maths, models/skins, and whole-mob behaviour
-// simulated against a small fake world (Node, no browser). While CORE-E's physics is a stub, entities use the
-// local fallback collider in src/entities/collide.js, so these tests also pin that fallback.
+// simulated against a small fake world (Node, no browser). Entities move with CORE-E's real physics
+// (src/entities/collide.js wraps player/physics.js), so these tests also pin the entity side of that contract.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -23,7 +23,7 @@ import {
 } from '../src/survival/damage.js';
 import { MODELS, buildModelArrays, faceRects, packModel, poseModel } from '../src/entities/mob_models.js';
 import { paintSkin } from '../src/entities/mob_skins.js';
-import { localMoveAndCollide } from '../src/entities/collide.js';
+import { moveEntity } from '../src/entities/collide.js';
 import { columnKey, decodeKeys, encodeKeys } from '../src/entities/spawning.js';
 import { dropItem } from '../src/entities/item_entity.js';
 
@@ -240,21 +240,21 @@ test('skins: deterministic, every box face fully painted, sheep colours differ',
   assert.notDeepEqual(paintSkin('wolf', { tamed: true }).data, paintSkin('wolf', { tamed: false }).data, 'collar');
 });
 
-/* ------------------------------------------------------------------ fallback collider */
+/* ------------------------------------------------------------------ entity collision (real physics) */
 
-test('fallback collider: lands on the ground, steps up 0.5, blocked by walls, stays out of unloaded columns', () => {
+test('entity collision: lands on the ground, steps up 0.5, blocked by walls, stays out of unloaded columns', () => {
   const w = makeWorld(1);
   const body = { x: 0.5, y: 10, z: 0.5, width: 0.9, height: 0.9, stepHeight: 0.6, onGround: false };
-  for (let i = 0; i < 40; i++) localMoveAndCollide(w, body, 0, -0.5, 0);
+  for (let i = 0; i < 40; i++) moveEntity(w, body, 0, -0.5, 0);
   near(body.y, 4, 1e-6, 'feet on the grass'); assert.ok(body.onGround);
   w.fill(2, 4, 0, 2, 4, 0, 'oak_slab');
-  for (let i = 0; i < 20; i++) localMoveAndCollide(w, body, 0.1, -0.1, 0);
+  for (let i = 0; i < 20; i++) moveEntity(w, body, 0.1, -0.1, 0);
   assert.ok(body.y > 4.4, `stepped onto the slab (y ${body.y})`);
   w.fill(6, 4, 0, 6, 6, 0, 'stone');
-  for (let i = 0; i < 60; i++) localMoveAndCollide(w, body, 0.1, -0.1, 0);
+  for (let i = 0; i < 60; i++) moveEntity(w, body, 0.1, -0.1, 0);
   assert.ok(body.x < 6 - 0.44 && body.collidedH, 'wall stops it');
   const b2 = { x: 30.5, y: 4, z: 0.5, width: 0.6, height: 1.8, stepHeight: 0.6, onGround: true };
-  for (let i = 0; i < 30; i++) localMoveAndCollide(w, b2, 0.2, -0.08, 0);
+  for (let i = 0; i < 30; i++) moveEntity(w, b2, 0.2, -0.08, 0);
   assert.ok(b2.x <= 32 - 0.3 + 1e-6, `unloaded columns are solid (${b2.x})`);
 });
 

@@ -21,6 +21,12 @@ async function spawnNear(t, type, dx, dz, opts = {}) {
     return e ? e.id : null;
   }, { type, dx, dz, opts });
 }
+/** Event counters are cumulative for the whole page session: scenarios compare against a baseline. */
+async function evBase(t, names) {
+  const base = {};
+  for (const n of names) base[n] = await t.call('eventCount', n);
+  return async (n) => (await t.call('eventCount', n)) - (base[n] || 0);
+}
 const ent = (t, id) => t.eval((id) => { const e = window.__game.game.entities.get(id); return e ? { id: e.id, x: e.x, y: e.y, z: e.z, health: e.health, removed: e.removed, data: JSON.parse(JSON.stringify(e.data)), baby: !!e.data.baby } : null; }, id);
 
 export default [
@@ -50,9 +56,15 @@ export default [
       await t.call('waitFrames', 3);
       const meshes = await t.eval(() => window.__game.game.entities.all().filter((e) => e.object3d).length);
       t.assert(meshes >= 19, `every entity has a mesh (${meshes})`);
-      const draws = await t.call('stats');
-      t.note('drawCalls', draws.drawCalls);
-      t.assert(draws.drawCalls <= 19 + 5, `one draw call per mob (${draws.drawCalls} for 19 entities)`);
+      // the real renderer also draws terrain: count the entity draws as (all) - (entities hidden)
+      const setVis = (v) => t.eval((v) => { for (const e of window.__game.game.entities.all()) if (e.object3d) e.object3d.visible = v; }, v);
+      await setVis(false); await t.call('waitFrames', 3);
+      const without = (await t.call('stats')).drawCalls;
+      await setVis(true); await t.call('waitFrames', 3);
+      const withEnt = (await t.call('stats')).drawCalls;
+      const entityDraws = withEnt - without;
+      t.note('drawCalls', { total: withEnt, entities: entityDraws });
+      t.assert(entityDraws <= 19 + 2, `one draw call per mob (${entityDraws} entity draws for 19 entities)`);
       t.note('renderCache', await t.eval(() => window.__game.game.mobs.renderStats()));
       await t.shot('mobs-gallery');
     },
@@ -65,13 +77,14 @@ export default [
       await t.call('startWorld', NO_SPAWN);
       await t.call('setFlying', false);
       const a = await spawnNear(t, 'cow', 2, -3), b = await spawnNear(t, 'cow', -2, -3);
+      const ec = await evBase(t, ['mob:bred']);
       await t.call('setSlot', 0, 'wheat', 4);
       await t.call('selectSlot', 0);
       for (const id of [a, b]) { const r = await t.call('interactEntity', id, 'use'); t.assert(r.targeted, `cow ${id} targeted`); t.assert(r.data.love > 0, 'in love'); }
       await t.call('runTicks', 200);
       const babies = await t.eval(() => window.__game.game.entities.ofType('cow').filter((e) => e.data.baby).length);
       t.assert(babies === 1, `a baby within 200 ticks (${babies})`);
-      t.assert(await t.call('eventCount', 'mob:bred') === 1, 'mob:bred');
+      t.assert(await ec('mob:bred') === 1, 'mob:bred');
     },
   },
   {
@@ -81,13 +94,14 @@ export default [
       await t.call('setFlying', false);
       await t.call('waitTicks', 10);
       await t.call('setLook', 0, -55);
+      const ec = await evBase(t, ['item:pickup']);
       const before = await t.eval(() => window.__game.game.inventory.count('dirt'));
       const br = await t.call('breakTarget', 6000);
       t.assert(br.ok, `broke a block (${JSON.stringify(br)})`);
       await t.call('runTicks', 40);
       const after = await t.eval(() => window.__game.game.inventory.count('dirt'));
       t.assert(after === before + 1, `+1 dirt (${before} -> ${after})`);
-      t.assert(await t.call('eventCount', 'item:pickup') >= 1, 'item:pickup');
+      t.assert(await ec('item:pickup') >= 1, 'item:pickup');
     },
   },
   {
@@ -113,6 +127,7 @@ export default [
     async run(t) {
       await t.call('startWorld', NO_SPAWN);
       await t.call('setFlying', false);
+      const ec = await evBase(t, ['mob:hurt', 'mob:death']);
       const id = await spawnNear(t, 'pig', 0, -2.5);
       for (let i = 0; i < 20; i++) {
         const p = await ent(t, id);
@@ -122,8 +137,8 @@ export default [
       }
       const pig = await ent(t, id);
       t.assert(pig && pig.health === 10, `health unchanged (${pig && pig.health})`);
-      t.assert(await t.call('eventCount', 'mob:hurt') >= 15, 'hits registered');
-      t.assert(await t.call('eventCount', 'mob:death') === 0, 'no deaths');
+      t.assert(await ec('mob:hurt') >= 15, `hits registered (${await ec('mob:hurt')})`);
+      t.assert(await ec('mob:death') === 0, 'no deaths');
     },
   },
   {
@@ -181,12 +196,13 @@ export default [
     async run(t) {
       await t.call('startWorld', NO_SPAWN);
       await t.call('setFlying', false);
+      const ec = await evBase(t, ['mob:love']);
       const a = await spawnNear(t, 'cow', 2, -3), b = await spawnNear(t, 'cow', -2, -3);
       for (const id of [a, b]) {
         const r = await t.eval((id) => window.__game.game.mobs.useOn(id, 'wheat'), id);
         t.assert(r.ok && r.data.love > 0, 'fed wheat -> love');
       }
-      t.assert(await t.call('eventCount', 'mob:love') === 2, 'mob:love x2');
+      t.assert(await ec('mob:love') === 2, 'mob:love x2');
       await t.call('runTicks', 200);
       const babies = await t.eval(() => window.__game.game.entities.ofType('cow').filter((e) => e.data.baby).length);
       t.assert(babies === 1, `baby cow within 200 ticks (${babies})`);
@@ -247,17 +263,18 @@ export default [
     async run(t) {
       await t.call('startWorld', NO_SPAWN);
       await t.call('setFlying', false);
+      const ec = await evBase(t, ['mob:hurt', 'mob:death']);
       const id = await spawnNear(t, 'pig', 0, -3);
       for (let i = 0; i < 20; i++) { await t.eval((id) => window.__game.game.mobs.hit(id, 7), id); await t.call('runTicks', 11); }
       const pig = await ent(t, id);
       t.assert(pig && !pig.removed && pig.health === 10, `kid world: pig unhurt (${pig && pig.health})`);
-      t.assert(await t.call('eventCount', 'mob:hurt') === 20 && await t.call('eventCount', 'mob:death') === 0, 'hop + squeak, no death');
+      t.assert(await ec('mob:hurt') === 20 && await ec('mob:death') === 0, `hop + squeak, no death (${await ec('mob:hurt')} hurt)`);
       await t.call('setRule', 'animalsCanDie', true);
       const id2 = await spawnNear(t, 'pig', 2, -3);
       for (let i = 0; i < 3; i++) { await t.eval((id) => window.__game.game.mobs.hit(id, 4), id2); await t.call('runTicks', 11); }
       await t.call('runTicks', 25);
       t.assert(await ent(t, id2) === null, 'with the rule off a pig can die');
-      t.assert(await t.call('eventCount', 'mob:death') === 1, 'mob:death');
+      t.assert(await ec('mob:death') === 1, 'mob:death');
     },
   },
   {
@@ -265,6 +282,7 @@ export default [
     async run(t) {
       await t.call('startWorld', NO_SPAWN);
       await t.call('setFlying', false);
+      const ec = await evBase(t, ['mobs:rainbow']);
       const id = await spawnNear(t, 'sheep', 0, -3, { color: 'white' });
       let r = await t.eval((id) => window.__game.game.mobs.useOn(id, 'shears'), id);
       t.assert(r.ok && r.data.sheared, 'sheared');
@@ -273,7 +291,7 @@ export default [
       await t.eval((id) => { window.__game.game.entities.get(id).data.sheared = false; }, id);
       for (const c of ['red', 'yellow', 'blue']) { r = await t.eval(({ id, c }) => window.__game.game.mobs.useOn(id, c + '_dye'), { id, c }); await t.call('runTicks', 5); }
       t.assert(r.data.rainbow, 'rainbow sheep');
-      t.assert(await t.call('eventCount', 'mobs:rainbow') === 1, 'mobs:rainbow event');
+      t.assert(await ec('mobs:rainbow') === 1, 'mobs:rainbow event');
       await t.call('setLook', 0, -25);
       await t.call('waitFrames', 3);
       await t.shot('mobs-sheep');
@@ -287,6 +305,7 @@ export default [
     async run(t) {
       await t.call('startWorld', SURVIVAL);
       await t.call('setFlying', false);
+      const ec = await evBase(t, ['player:ate', 'player:death']);
       const land = (blockId) => t.eval((blockId) => window.__game.game.events.emit('player:land', { fallDistance: 10, x: 0, y: 4, z: 0, blockId }), blockId);
       await land(await t.call('blockId', 'grass_block'));
       t.assert((await t.call('pos')).health === 13, '10-block fall costs 7');
@@ -300,10 +319,10 @@ export default [
       t.assert(await t.eval(() => { const g = window.__game.game; return window.__game.game.survival.startEating({ game: g, player: g.player, stack: g.inventory.getSelected(), slot: g.inventory.selected, hit: null }); }), 'started eating');
       await t.call('runTicks', 33);
       t.assert((await t.call('pos')).food === 13, 'bread +5 hunger');
-      t.assert(await t.call('eventCount', 'player:ate') === 1, 'player:ate');
+      t.assert(await ec('player:ate') === 1, 'player:ate');
       // death -> immediate respawn with keep-inventory
       await t.eval(() => { const g = window.__game.game; g.inventory.set(5, { item: 'diamond', count: 3 }); g.survival.damage(99, 'mob'); });
-      t.assert(await t.call('eventCount', 'player:death') === 1, 'player:death');
+      t.assert(await ec('player:death') === 1, 'player:death');
       await t.call('runTicks', 22);
       const p = await t.call('pos');
       t.assert(p.health === 20 && p.food === 20, 'respawned full');
@@ -315,6 +334,7 @@ export default [
     async run(t) {
       await t.call('startWorld', { ...SURVIVAL, rules: { passiveMobs: false, hostileMobs: true } });
       await t.call('setTime', 18000);
+      const ec = await evBase(t, ['explosion']);
       await spawnNear(t, 'zombie', 0, -6);
       let hurt = false;
       for (let i = 0; i < 20 && !hurt; i++) { await t.call('runTicks', 15); hurt = (await t.call('pos')).health < 20; }
@@ -328,7 +348,7 @@ export default [
       await t.shot('mobs-creeper-fuse');
       await t.call('runTicks', 50);
       t.assert(await ent(t, cid) === null, 'creeper exploded');
-      t.assert(await t.call('eventCount', 'explosion') === 1, 'explosion event');
+      t.assert(await ec('explosion') === 1, 'explosion event');
       t.assert(await t.eval(() => window.__game.game.events.recent('player:hurt', 5).some((e) => e.payload.cause === 'explosion')), 'the blast hurt the player');
       await t.eval(() => { const g = window.__game.game; g.__arrows = 0; g.events.on('entity:spawn', (e) => { if (e.type === 'arrow') g.__arrows++; }); });
       await spawnNear(t, 'skeleton', 3, -10);
