@@ -79,9 +79,10 @@ export function createRendererSystem(game) {
     uniforms: {
       uTex: { value: null }, uDaylight: { value: 1 }, uSkyColor: { value: new THREE.Color(0.47, 0.65, 1) },
       uFogColor: { value: new THREE.Color(0.75, 0.85, 1) }, uFogNear: { value: 48 }, uFogFar: { value: 88 },
-      uTime: { value: 0 }, uMinLight: { value: 0.23 }, uWave: { value: 1 },
+      uTime: { value: 0 }, uMinLight: { value: 0.155 }, uWave: { value: 1 },
       // CORE-D additions (not part of the frozen list, safe to read):
       uFogSphere: { value: 0 },
+      uGamma: { value: 0.7 },   // integration: classic brightness curve strength = settings.brightness
       uAnimFrames: { value: new THREE.Vector4(0, ANIM.FRAMES[1], ANIM.FRAMES[2], ANIM.FRAMES[3]) },
       uAnimFps: { value: new THREE.Vector4(0, ANIM.FPS[1], ANIM.FPS[2], ANIM.FPS[3]) },
     },
@@ -143,7 +144,7 @@ export function createRendererSystem(game) {
       r.scene.add(skyMesh);
       outline = new Outline();
       r.scene.add(outline.group);
-      r.uniforms.uMinLight.value = 0.06 + 0.24 * clamp01(game.settings.brightness ?? 0.7);
+      applyBrightness(game.settings.brightness ?? 0.7);
       r.uniforms.uWave.value = game.settings.waving === false ? 0 : 1;
 
       // ---- render distance (auto => preset) + dynamic quality
@@ -764,10 +765,17 @@ export function createRendererSystem(game) {
     else if (act.type === 'r' && game.world && game.world.setRenderDistance) game.world.setRenderDistance(act.value);
   }
 
+  /** settings.brightness 0..1: classic brightness curve (uGamma) + the cave floor light (uMinLight 0.05..0.20). */
+  function applyBrightness(v) {
+    const b = clamp01(Number.isFinite(v) ? v : 0.7);
+    r.uniforms.uGamma.value = b;
+    r.uniforms.uMinLight.value = 0.05 + 0.15 * b;
+  }
+
   function onSetting(e) {
     if (!e) return;
     switch (e.key) {
-      case 'brightness': r.uniforms.uMinLight.value = 0.06 + 0.24 * clamp01(Number(e.value)); break;
+      case 'brightness': applyBrightness(Number(e.value)); break;
       case 'waving': r.uniforms.uWave.value = e.value ? 1 : 0; break;
       case 'fov': if (r.camera) { r.camera.fov = Number(e.value) || 70; r.camera.updateProjectionMatrix(); } break;
       case 'pixelRatioCap': {
