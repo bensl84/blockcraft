@@ -105,6 +105,7 @@ export function createHudSystem(game) {
     const inContainer = game.ui && CONTAINERS.has(game.ui.current);
     if (a === 'toggleHud') { hud.visible = !hud.visible; return; }
     if (!game.meta) return;
+    if (game.ui && game.ui.current && !inContainer) return; // pause / settings / death screens: keys do nothing here
     if (a.startsWith('hotbar') && a.length === 7) {
       const i = Number(a.slice(6)) - 1;
       if (inContainer) { if (game.invui && game.invui.hotbarKey) game.invui.hotbarKey(i); }
