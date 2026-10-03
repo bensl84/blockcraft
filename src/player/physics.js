@@ -61,8 +61,8 @@ function gatherBoxes(world, minX, minY, minZ, maxX, maxY, maxZ) {
   for (let x = x0; x <= x1; x++) {
     for (let z = z0; z <= z1; z++) {
       if (!columnLoaded(world, x >> 4, z >> 4)) {
-        // Unloaded: a solid wall from y 0 to the top of the world (one tall box per cell column).
-        pushBox(x, 0, z, x + 1, WORLD_HEIGHT, z + 1);
+        // Unloaded: every cell is a full solid cube (per cell, so a body inside still finds a floor under it)
+        for (let y = y0; y <= y1; y++) pushBox(x, y, z, x + 1, y + 1, z + 1);
         continue;
       }
       for (let y = y0; y <= y1; y++) {

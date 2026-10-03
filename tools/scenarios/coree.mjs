@@ -25,6 +25,7 @@ const px = (n) => ({ x: Math.round((n.x + 1) / 2 * W), y: Math.round((1 - n.y) /
 async function ticksUntil(t, src, max = 400) {
   return t.eval(({ src, max }) => {
     const g = window.__game.game;
+    if (src.hold) g.input.setVirtual(src.hold, true);   // same task as the loop: no real-time tick sneaks in
     for (let n = 1; n <= max; n++) {
       g.stepTicks(1);
       if (src.kind === 'blockIs' && g.world.getBlock(src.x, src.y, src.z) === src.id) return n;
@@ -49,16 +50,22 @@ export default [
       t.assert(pts[39].z < before.z, 'forward at yaw 0 goes north (-Z)');
       await t.call('runTicks', 20);
       const y0 = (await t.call('pos')).y;
-      await t.eval(() => window.__game.game.input.setVirtual('jump', true));
-      const jump = await t.call('recordTicks', 14, { sync: true });
-      await t.eval(() => window.__game.game.input.setVirtual('jump', false));
+      // press + record in one page task so no real-time tick lands between them
+      const jump = await t.eval(() => {
+        const g = window.__game.game, out = [];
+        g.input.setVirtual('jump', true);
+        for (let i = 0; i < 14; i++) { g.stepTicks(1); out.push({ y: g.player.y, onGround: g.player.onGround }); }
+        g.input.setVirtual('jump', false);
+        return out;
+      });
       const apex = Math.max(...jump.map((s) => s.y)) - y0;
       const landTick = jump.findIndex((s, i) => i > 0 && s.onGround);
       t.note('apex', apex); t.note('jumpTicks', landTick + 1);
       t.assert(Math.abs(apex - 1.2522) < 0.01, `jump apex 1.2522 (got ${apex.toFixed(4)})`);
       t.assert(landTick + 1 === 12, `flat jump lasts 12 ticks (got ${landTick + 1})`);
       t.assert(await t.call('eventCount', 'player:jump') >= 1 && await t.call('eventCount', 'player:land') >= 1, 'jump + land events');
-      // the built-in move() helper (real time) agrees
+      // the built-in move() helper (real time) agrees (let the re-jump from the held key land first)
+      await t.call('runTicks', 30);
       const a = await t.call('pos');
       const b = await t.call('move', 1, 0, 1000);
       const d = Math.hypot(b.x - a.x, b.z - a.z);
@@ -429,8 +436,7 @@ export default [
         await t.call('setSlot', 0, item, 1);
         await t.call('selectSlot', 0);
         await t.call('runTicks', 8);
-        await t.eval(() => window.__game.game.input.setVirtual('attack', true));
-        const n = await ticksUntil(t, { kind: 'blockNot', x: tg.x, y: tg.y, z: tg.z, id: await ID(name) }, 400);
+        const n = await ticksUntil(t, { kind: 'blockNot', x: tg.x, y: tg.y, z: tg.z, id: await ID(name), hold: 'attack' }, 400);
         await t.eval(() => window.__game.game.input.setVirtual('attack', false));
         await t.call('runTicks', 8);
         return n;

@@ -138,6 +138,11 @@ export function createPlayerSystem(game) {
       // ---- one-shot actions (toggleView / toggleFly arrive through 'input:action', see init)
       if (p.dead || p.sleeping) { p.vx = p.vz = 0; p.vy = 0; setSprinting(false); return; }
       if (p.riding !== null && p.riding !== undefined) { tickRiding(kid); return; }
+      // the column under the player is not loaded yet (teleport / Home far away): wait in place, like Java
+      if (world.isColumnLoaded && !world.isColumnLoaded(Math.floor(p.x) >> 4, Math.floor(p.z) >> 4)) {
+        p.vx = p.vy = p.vz = 0; p.fallDistance = 0;
+        return;
+      }
       if (!kid && input.wasPressed('jump')) {
         if (tick - lastJumpPressTick <= PHYS.DOUBLE_TAP_TICKS && p.canFly()) { p.setFlying(!p.flying); lastJumpPressTick = -100; }
         else lastJumpPressTick = tick;

@@ -11,7 +11,9 @@ import { STATE } from '../src/data/blocks.js';
 import { boxCollides, collectBlockBoxes, findFreeY, fluidState, moveAndCollide } from '../src/player/physics.js';
 import { raycast } from '../src/player/raycast.js';
 import { createPlayerSystem } from '../src/player/player.js';
-import { facingOfNormal, placementState } from '../src/player/interaction.js';
+import { createInteractionSystem, facingOfNormal, placementState } from '../src/player/interaction.js';
+import { hooks } from '../src/core/hooks.js';
+import { Inventory } from '../src/inventory/inventory.js';
 import { isNotchedWheel } from '../src/player/input.js';
 
 /* ------------------------------------------------------------------ fakes */
@@ -127,6 +129,13 @@ test('physics: unloaded columns are solid, collectBlockBoxes/boxCollides/findFre
   const b = body(14.5, 4, 0.5, { onGround: true });
   moveAndCollide(w, b, 3, -0.08, 0);
   near(b.x, 16 - 0.3, 1e-6, 'stops at the unloaded column');
+  const inside = body(20.5, 50.3, 0.5);
+  for (let i = 0; i < 20; i++) moveAndCollide(w, inside, 0, -0.5, 0);
+  assert.ok(inside.y >= 50 - 1e-9, 'a body inside an unloaded column never falls through it (' + inside.y + ')');
+  const pg = makeGame(w);
+  pg.player.spawn(40.5, 70, 0.5, 0, 0);
+  pg.tick(20);
+  near(pg.player.y, 70, 1e-9, 'the player waits in place until its column loads');
   const boxes = collectBlockBoxes(w, 0, 3, 0, 1, 4, 1);
   assert.ok(boxes.some((bx) => bx[4] === 4), 'floor box found');
   assert.ok(boxCollides(w, 0.2, 3.5, 0.2, 0.8, 5, 0.8));
@@ -385,4 +394,140 @@ test('input: notched wheel vs trackpad swipe heuristic', () => {
   assert.ok(!isNotchedWheel({ deltaY: 37, deltaMode: 0, wheelDeltaY: -44 }), 'trackpad swipe 2');
   assert.ok(!isNotchedWheel({ deltaY: 120, deltaMode: 0, ctrlKey: true }), 'pinch zoom');
   assert.ok(!isNotchedWheel({ deltaY: 0, deltaMode: 0 }));
+});
+
+/* ------------------------------------------------------------------ interaction: use order + hooks (SPEC §7.4) */
+function makeIxGame({ scheme = 'kid', creative = true } = {}) {
+  const w = makeWorld({ size: 32 });
+  w.setBlock = (x, y, z, id, st = 0) => { if (w.getRaw(x, y, z) === packBlock(id, st)) return false; w.set(x, y, z, id, st); return true; };
+  w.getBlockEntity = () => null;
+  const events = new EventBus();
+  const held = new Set();
+  let pressed = new Set(), queued = new Set();
+  const input = {
+    scheme, aim: { x: 0, y: 0 }, aimActive: true, pointerLocked: false, move: { forward: 0, strafe: 0 },
+    isDown: (a) => held.has(a), wasPressed: (a) => pressed.has(a), isCaptured: () => false,
+    tap(a) { queued.add(a); }, hold(a) { if (!held.has(a)) queued.add(a); held.add(a); }, release(a) { held.delete(a); },
+    beginTick() { pressed = queued; queued = new Set(); },
+  };
+  const player = {
+    x: 0.5, y: 4, z: 3.5, width: 0.6, height: 1.8, eyeHeight: 1.62, yaw: 0, pitch: -55 * Math.PI / 180, sneaking: false,
+    vx: 0, vy: 0, vz: 0, onGround: true, swingTicks: 0, fov: 70,
+    getEyePos(out = {}) { out.x = this.x; out.y = this.y + this.eyeHeight; out.z = this.z; return out; },
+    swing() { this.swingTicks = 6; },
+  };
+  const inventory = new Inventory(events);
+  const game = {
+    events, settings: { ...DEFAULT_SETTINGS }, state: 'playing', meta: { mode: creative ? 'creative' : 'survival', rules: { dropItemsOnBreak: !creative } },
+    world: w, input, player, inventory, renderer: { camera: null, setHighlight() {} }, entities: null, rand: () => 0.5,
+    isCreative: () => creative, reportError: (e) => { throw e; },
+  };
+  const ix = createInteractionSystem(game);
+  game.interaction = ix;
+  ix.init(game);
+  const tick = (n = 1) => { for (let i = 0; i < n; i++) { input.beginTick(); ix.tick(game); } };
+  return { game, ix, input, w, inventory, player, tick };
+}
+
+test('interaction: hook order blockUse > itemUse > placer/default place; kid empty-hand break; one action per press', () => {
+  const { game, ix, input, w, inventory, tick } = makeIxGame({ scheme: 'kid' });
+  const calls = [];
+  try {
+    tick(1);
+    assert.ok(ix.target && ix.target.y === 3 && ix.target.ny === 1, `targets the floor (${JSON.stringify(ix.target)})`);
+    const tx = ix.target.x, tz = ix.target.z;
+    inventory.set(0, { item: 'oak_planks', count: 64 }); inventory.selectSlot(0);
+    input.tap('use'); tick(1);
+    assert.equal(w.getBlock(tx, 4, tz), ID.oak_planks, 'default placement');
+    assert.equal(inventory.get(0).count, 64, 'creative never consumes');
+    // blockUse on the planks consumes the tap
+    hooks.blockUse.set('oak_planks', (ctx) => { calls.push(['block', ctx.action, ctx.hit.id]); return true; });
+    tick(1);
+    input.tap('use'); tick(1);
+    assert.equal(calls.length, 1, 'blockUse called');
+    assert.equal(w.getBlock(tx, 5, tz), 0, 'nothing placed on top');
+    assert.equal(game.events.counts.get('block:use'), 1, 'block:use emitted');
+    hooks.blockUse.delete('oak_planks');
+    // itemUse runs when the block has no handler
+    hooks.itemUse.set('oak_planks', (ctx) => { calls.push(['item', ctx.stack.item]); return true; });
+    input.tap('use'); tick(1);
+    assert.deepEqual(calls[1], ['item', 'oak_planks'], 'itemUse called');
+    assert.equal(w.getBlock(tx, 5, tz), 0, 'item hook consumed the tap');
+    hooks.itemUse.delete('oak_planks');
+    // a placer replaces the default placement
+    hooks.placers.set('oak_planks', (ctx) => { calls.push(['placer', ctx.x, ctx.y, ctx.z]); return ctx.game.world.setBlock(ctx.x, ctx.y, ctx.z, ID.stone, 0, { action: ctx.action }); });
+    input.tap('use'); tick(1);
+    assert.equal(calls[2][0], 'placer', JSON.stringify(calls));
+    assert.equal(w.getBlock(calls[2][1], calls[2][2], calls[2][3]), ID.stone, 'placer placed its own block');
+    hooks.placers.delete('oak_planks');
+    // kid creative: tap with food never breaks; empty hand / tool breaks
+    inventory.set(0, { item: 'apple', count: 1 });
+    tick(1);
+    const top = { ...ix.target };
+    input.tap('use'); tick(1);
+    assert.equal(w.getBlock(top.x, top.y, top.z), top.id, 'apple tap does not break');
+    inventory.set(0, null);
+    input.tap('use'); tick(1);
+    assert.equal(w.getBlock(top.x, top.y, top.z), 0, 'empty-hand tap breaks in kid creative');
+    inventory.set(0, { item: 'wooden_pickaxe', count: 1 });
+    tick(1);
+    const t2 = { ...ix.target };
+    input.tap('use'); tick(1);
+    assert.equal(w.getBlock(t2.x, t2.y, t2.z), 0, 'tool tap breaks in kid creative');
+    // one action id per press
+    const acts = [];
+    game.events.on('block:placed', (e) => acts.push(e.action));
+    inventory.set(0, { item: 'cobblestone', count: 64 });
+    game.player.z = 6.5; game.player.pitch = -40 * Math.PI / 180;
+    tick(1);
+    input.tap('use'); tick(1);
+    input.tap('use'); tick(1);
+    assert.ok(acts.length === 2 && acts[0] !== acts[1] && acts[0] > 0, 'distinct action per press: ' + acts.join(','));
+  } finally {
+    hooks.blockUse.delete('oak_planks'); hooks.itemUse.delete('oak_planks'); hooks.placers.delete('oak_planks');
+  }
+});
+
+test('interaction: survival mining ticks + stages; creative hold repeats every 5 ticks with one action; sneak skips blockUse', () => {
+  const s = makeIxGame({ scheme: 'kid', creative: false });
+  s.tick(1);
+  const t = { ...s.ix.target };
+  s.w.set(t.x, t.y, t.z, ID.dirt);
+  const stages = [];
+  s.game.events.on('block:mining', (e) => stages.push(e.stage));
+  s.input.hold('attack');
+  let n = 0;
+  while (s.w.getBlock(t.x, t.y, t.z) === ID.dirt && n < 50) { s.tick(1); n++; }
+  s.input.release('attack');
+  assert.equal(n, 15, 'dirt by hand: 15 ticks');
+  assert.deepEqual(stages, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 'every crack stage once');
+  s.tick(10);
+  const t2 = { ...s.ix.target };
+  s.input.tap('use'); s.tick(1);
+  assert.equal(s.w.getBlock(t2.x, t2.y, t2.z), t2.id, 'survival empty-hand tap does not break');
+
+  const c = makeIxGame({ scheme: 'kid', creative: true });
+  c.player.pitch = -89 * Math.PI / 180;
+  c.tick(1);
+  const broken = [];
+  c.game.events.on('block:broken', (e) => broken.push(e.action));
+  c.input.hold('attack');
+  for (let i = 0; i < 11; i++) c.tick(1);
+  c.input.release('attack');
+  assert.equal(broken.length, 3, `creative hold breaks at ticks 0, 5, 10 (${broken.length})`);
+  assert.ok(broken.every((a) => a === broken[0]), 'one hold = one action id (one undo entry)');
+
+  const k = makeIxGame({ scheme: 'classic', creative: true });
+  let used = 0;
+  hooks.blockUse.set('stone', () => { used++; return true; });
+  try {
+    k.tick(1);
+    k.inventory.set(0, { item: 'cobblestone', count: 64 });
+    k.input.tap('use'); k.tick(1);
+    assert.equal(used, 1, 'blockUse without sneak');
+    k.player.sneaking = true;
+    k.input.tap('use'); k.tick(1);
+    assert.equal(used, 1, 'sneaking with an item skips blockUse');
+    assert.equal(k.game.events.counts.get('block:placed'), 1, 'and places instead');
+  } finally { hooks.blockUse.delete('stone'); }
 });
