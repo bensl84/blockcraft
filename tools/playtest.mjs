@@ -634,8 +634,20 @@ async function main() {
       p = await api('pos');
       check(p.y > water.y + 0.8 || !p.eyeInWater, 'space swims up', p.y);
       await api('setLook', 0, -25);
+      await hideCursor();
       await waitFrames(5);
       await shot('swim-surface');
+      // the water surface animates (texture frames + bob): two exact captures 400 ms apart must differ
+      const diff = await ev(async () => {
+        const r = window.__game.game.renderer;
+        const a = r.capturePixels(96, 54).data;
+        await new Promise((res) => setTimeout(res, 400));
+        const b = r.capturePixels(96, 54).data;
+        let n = 0;
+        for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 12) n++;
+        return n;
+      });
+      check(diff > 30, 'water animates', { changedPixels: diff });
     });
 
     await step('classic-scheme', async () => {

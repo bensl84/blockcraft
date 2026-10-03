@@ -1,6 +1,6 @@
 # Blockcraft — Engineering Specification
 
-Version 1.1 · 2026-10-03 · owner: LEAD (architect / integrator) · v1.1 applies the independent review (lane isolation, persistence, undo data, test API, kid controls, content gaps)
+Version 1.2 · 2026-10-03 · owner: LEAD (architect / integrator) · v1.1 applies the independent review (lane isolation, persistence, undo data, test API, kid controls, content gaps) · v1.2 records the CORE integration (lanes A–E merged): light curve with the brightness lift, accepted lane spec conflicts, streaming radii, new lane events and decisions D14–D15
 
 This file is the single source of truth for Blockcraft. Two kinds of files back it up:
 
@@ -623,7 +623,7 @@ Owner: FEATURE-KID.
 
 | File | Owner | Purpose |
 |---|---|---|
-| `build.mjs`, `tools/png.mjs`, `tools/serve.mjs`, `tools/smoke.mjs`, `tools/spec-tables.mjs`, `tools/scenarios/lead.mjs`, `tools/lane-worktree.mjs` | LEAD | Build, static server, Playwright harness, spec appendix generator, lane worktrees |
+| `build.mjs`, `tools/png.mjs`, `tools/serve.mjs`, `tools/smoke.mjs`, `tools/spec-tables.mjs`, `tools/scenarios/lead.mjs`, `tools/lane-worktree.mjs`, `tools/playtest.mjs` | LEAD | Build, static server, Playwright harness, spec appendix generator, lane worktrees, scripted integration playtest |
 | `docs/SPEC.md`, `docs/STATUS.md` | LEAD | Specification; status record (integrator only) |
 | `docs/handoff/<lane>.md` | each lane | That lane's handoff notes (§0.1) |
 | `tools/scenarios/<lane>.mjs` | each lane | That lane's smoke scenarios |
@@ -854,7 +854,7 @@ Per-world rules live in `game.meta.rules` (§1.3, `DEFAULT_RULES` / `SURVIVAL_RU
 | `fancyLeaves` | CORE-D (renderer) | rebuild textures (`buildTextures({fastLeaves})`, `bindTextures`, `game.textures = …`), re-upload the array texture, then `world.remeshAll()` |
 | `fov`, `viewBobbing`, `autoPitch`, `controls` | CORE-E | read live; `controls` also releases all input |
 | `guiScale`, `buttonSize` | LEAD | `applyGuiScale` (already wired in `main.js`) |
-| `waving`, `clouds`, `brightness`, `pixelRatioCap` | CORE-D / FX | uniforms / DPR updated live |
+| `waving`, `clouds`, `brightness`, `pixelRatioCap` | CORE-D / FX | uniforms / DPR updated live (`brightness` 0..1 = strength of the classic brightness lift `uGamma` plus the cave floor `uMinLight = 0.05 + 0.15·brightness`, §5.5.3) |
 | `masterVolume`, `musicVolume`, `sfxVolume`, `muted` | AUDIO | gains updated live |
 
 ---
@@ -1080,6 +1080,8 @@ export function fbm2(n2, x, y, octaves=4, lacunarity=2, gain=0.5)
 - **`snowy` (P1)** forces the snowy biome. **`islands` (P2)** is an archipelago over ocean.
 - **Spawn:** search outward in a spiral from (0, 0) to radius 256 for a dry grass surface at least 3 blocks from water, with no leaves above. Return the feet position at the block centre. It must be deterministic.
 
+- *(v1.2, as built by CORE-B)* Extra decoration: mossy-cobblestone boulders (taiga, some forests and mountains), branching oaks (plains and forests), mushrooms on cave floors and rarely in forests. Lava pools in carved cells at y ≤ 6 (D14). "Water fills air below y 48" means sea water above the terrain top; cave air below 48 stays dry. Flat-preset decoration keeps 24 blocks clear around the origin. `generateColumn` uses shared scratch memory: never run two at once in one thread or worker.
+
 **Performance:** `generateColumn` under 3 ms per column on a mid laptop (8 sections of noise plus decoration), measured in a unit test with a fast desktop budget of 1 ms.
 
 ### 5.3 CORE-C — World, lighting, mesher (`src/world/*`)
@@ -1128,6 +1130,8 @@ pregenerate(cx, cz, radius, onProgress(done,total)) -> Promise   // spawn area; 
 frame(game, dt)                          // streaming (§5.3.3)
 getDirtyColumns() -> [[cx, cz]] ; exportColumn(cx, cz) -> {blocks: Uint16Array copy, blockEntities: [{i, data}]} | null ; markColumnSaved(cx, cz)
 stats() -> {columns, columnsMeshed, genAvgMs, meshAvgMs, renderDistance, savedColumns, pendingSave, ...}
+// v1.2 additions (CORE-C): disableWorkers(reason) ; enableWorkers() ; stats() also has columnsLit, sectionMeshes, lightAvgMs,
+// workers, workerReason, inFlight, genInFlight, workerMeshes, workerGens, syncMeshes, urgentMeshes, droppedResults, streamMs
 ```
 
 **`setBlock` semantics.** It does all of the following in one synchronous call:
@@ -1157,7 +1161,7 @@ It returns false for an unloaded column, out-of-range y, or no change.
 #### 5.3.3 Streaming pipeline
 
 - **States:** EMPTY → GENERATED (terrain plus decoration from `generateColumn`, or restored from save) → LIT (needs the 3×3 neighbourhood GENERATED) → MESHED (needs the 3×3 neighbourhood LIT).
-- **Radii:** data out to R + 2 (`DATA_MARGIN`), meshes within R (circular), unload beyond R + 4 (`UNLOAD_MARGIN`).
+- **Radii:** data out to R + 3 (`DATA_MARGIN` + 1, so the diagonal neighbours of every lit column exist; light reaches about R + 1.5), meshes within R (circular), meshes dropped beyond R + 1 (the column goes back to LIT, bounding draw calls and geometries), unload beyond R + 4 (`UNLOAD_MARGIN`). *(v1.2: as built by CORE-C.)*
 - **Order:**
   - Precomputed offsets sorted by distance², with a look-direction bias of `dist² − 2·dot(lookDir, offset)`.
   - Rebuild the queue when the player crosses a column border.
@@ -1250,6 +1254,8 @@ CORE-D builds one `BufferGeometry` per section per pass:
 - Index: a view of one shared, precomputed `Uint16Array` of `QUAD_INDICES` for 16384 quads (`subarray(0, quads·6)`); one `BufferAttribute` per geometry. A pass with **more than 16384 quads** (a section dense with stairs, fences or panes) uses a second shared `Uint32Array` index buffer, grown by doubling; the mesher never has to split.
 - Bounds: set `boundingSphere` and `boundingBox` manually (centre (8, 8, 8), radius 13.86).
 - The mesh sits at `(cx·16, sy·16, cz·16)` with `matrixAutoUpdate = false`.
+- *(v1.2, as built by CORE-D, allowed by §5.5.6)* Opaque and cutout geometry is **merged per column per pass** (one draw each). An edited section is drawn as its own small "hot" mesh the same frame while its old quads in the column buffer collapse to degenerate triangles; the column is re-merged 3 s after the last edit. Translucent geometry stays per section and keeps its own index copy so its quads can be re-sorted back to front.
+- *(v1.2)* The mesher never mutates a `MeshBuffers` after handing it to `setSectionMesh` (hot and translucent meshes use the arrays directly; context restore re-uploads them).
 
 ### 5.5 CORE-D — Renderer and sky (`src/render/*`)
 
@@ -1258,7 +1264,7 @@ CORE-D builds one `BufferGeometry` per section per pass:
 **Why one array texture instead of an atlas:** WebGL2 `DataArrayTexture` layers never bleed into each other, so there is no need for atlas gutters, half-texel insets or per-tile mip tricks. Mipmaps work per layer, which removes the far-distance sparkle. Layers are addressed by an integer (`aTex.x`). The two costs are the 256-layer minimum guarantee (we use about 238, D5) and needing WebGL2, which every target browser has.
 
 - The WebGL2 renderer and the gamma-space pipeline (§3.7).
-- The `DataArrayTexture`: `magFilter` Nearest, `minFilter` NearestMipmapLinear, mipmaps, anisotropy 4, flipY false, `NoColorSpace`.
+- The `DataArrayTexture`: `magFilter` Nearest, `minFilter` NearestMipmapLinear, mipmaps, flipY false, `NoColorSpace`. *(v1.2: no anisotropy. Forcing it through ANGLE/D3D11, which every Windows laptop uses, switched magnification to linear and blurred the pixel art.)*
 - Three chunk `ShaderMaterial`s sharing one uniforms object.
 - Section mesh management, sky, fog, selection outline.
 - Entity materials and block models, the view-model pass.
@@ -1269,7 +1275,7 @@ CORE-D builds one `BufferGeometry` per section per pass:
 ```js
 three: THREE.WebGLRenderer ; scene ; camera (PerspectiveCamera, rotation.order 'YXZ') ; worldGroup ; dynamicGroup
 viewModelScene ; viewModelCamera          // rendered after the world with a depth clear (held item / hand)
-uniforms: {uTex, uDaylight, uSkyColor, uFogColor, uFogNear, uFogFar, uTime, uMinLight, uWave}
+uniforms: {uTex, uDaylight, uSkyColor, uFogColor, uFogNear, uFogFar, uTime, uMinLight, uWave}   // + uFogSphere, uAnimFrames, uAnimFps, uGamma (v1.2)
 sky                                       // last computeSky() result
 gpu: {renderer, vendor, maxLayers} ; quality: {preset: 'low'|'medium'|'high', dpr}
 init(game) ; resize()
@@ -1307,14 +1313,21 @@ dispose()
 
 ```
 tex = texture(uTex, vec3(uv, layer))
-cutout: discard if a < 0.5      translucent: keep alpha (water ~0.7)
+cutout: discard if a < threshold (0.5, lowered toward 0.18 with the mip level so leaves keep their shape far away)
+translucent: keep alpha (water ~0.7)
 effSky = max(0, sky - (1 - uDaylight) * 11)
-skyB = pow(0.8, 15 - effSky) ; blkB = pow(0.8, 15 - block)
-light = max(vec3(skyB), blkB * vec3(1.0, 0.92, 0.78)) ; light = max(light, vec3(uMinLight))
+skyB = pow(0.8, 15 - effSky) ; b = pow(0.8, 15 - block)          // close to the classic f / (4 - 3f) ramp
+blk = (b, b * ((b * 0.6 + 0.4) * 0.6 + 0.4), b * (b * b * 0.6 + 0.4))   // warm; whiter near a torch, orange at the edge
+light = max(vec3(skyB), blk)
+light = mix(light, 1 - (1 - light)^4, uGamma)                        // classic brightness lift, uGamma = settings.brightness
+light = max(light, vec3(uMinLight))                                  // uMinLight = 0.05 + 0.15 * brightness
 aoF = [0.5, 0.7, 0.85, 1.0][ao]
 color = tex.rgb * shade * aoF * light
-fog: linear by view distance from uFogNear to uFogFar toward uFogColor
+fog: f = clamp((d - uFogNear) / (uFogFar - uFogNear)), eased 1 - (1 - f)^2, toward uFogColor
+     d = horizontal distance on land (flying high must not wash out the ground), spherical underwater and in lava
 ```
+
+*(v1.2)* Without the brightness lift a torch visibly lit only about 3 blocks and every cell at light 8 or less sat on one flat floor; with it (default 0.7) a torch warmly lights a 13 × 13 room, as in the original. The fog ramp is eased because the circular mesh radius leaves diagonal gaps that begin before `uFogFar` (worst case about 52 % into a linear ramp at R 4); eased, every gap is at least 75 % fogged for R 3–12 (`cored-fog`). Entity materials use the same light and fog code (they share `uGamma`).
 
 **Passes**
 
@@ -1446,6 +1459,7 @@ Use `game.events.on(name, fn) → unsubscribe`, `emit(name, payload)`. Delivery 
 | `craft` / `smelt` | INV | `{item, count}` | audio (success), kid (hints) |
 | `input:action` | E | `{action, down, source: 'key'\|'mouse'\|'touch'\|'virtual'\|'release'\|'test'}` | ui manager, hud (hotbar keys), kid (home, undo), player (toggleFly, toggleView) |
 | `input:pointerType` / `input:pointerLock` | E | `{type}` / `{locked}` | touch (show/hide), menus (click-to-play overlay) |
+| `input:gesture` | E | `{phase: 'down'\|'hold'\|'tap'\|'drag'\|'up'\|'cancel', x, y (NDC), pointerType}` (v1.2) | fx (instant ring / crack start), audio — fires on pointerdown, within 50 ms |
 | `kid:home` / `kid:undo` / `kid:rescue` / `hint` | KID | `{x, y, z}` / `{count}` / `{reason}` / `{name}` | fx, audio |
 | `save:start` / `save:done` | MENUS | `{reason}` / `{ok, reason, ms}` | hud (spinner) |
 | `time:dawn` / `day` / `noon` / `dusk` / `night` / `midnight` / `set` | LEAD | `{dayTime, day}` | audio (music mood), mobs |
@@ -1488,7 +1502,7 @@ lastManualLookMs ; noteManualLook()          // any manual look (and test setLoo
 - **Keyboard turning:** `turnLeft`/`turnRight` produce a 10–15° nudge on a tap under 150 ms. Holding ramps over 200 ms to `60 + 80·turnSpeed` °/s (100°/s at the default). `lookUp`/`lookDown` (PageUp/PageDown) pitch at 60°/s.
 - **Auto-pitch** (`settings.autoPitch`, default on): while walking with no manual look input for 1.5 s (`KID.AUTO_PITCH_DELAY_TICKS`), ease pitch toward −12°. Every manual look — drag, PageUp/PageDown, `addLook`, and the test API's `setLook`/`lookAt` — calls `noteManualLook()`, which restarts the timer, so tests are not overridden.
 - **No Shift in the kid scheme:** five quick Shift presses open the Windows Sticky Keys dialog and drop fullscreen. Fly-down is `descend` on C and Z (and the touch ▼); the kid scheme has no sneak at all.
-- **Wheel:** only notched wheels (|deltaY| a multiple of 120 or `deltaMode` 1) emit `hotbarNext`/`hotbarPrev`, at most once per 150 ms. Trackpad swipes are ignored. Always `preventDefault` the wheel (passive: false), which also blocks pinch zoom.
+- **Wheel:** only notched wheels emit `hotbarNext`/`hotbarPrev`, at most once per 150 ms: `deltaMode` 1 or 2, `wheelDeltaY` a non-zero multiple of 120, |deltaY| a multiple of 120, or (v1.2) a multiple of 100 that is at least 100 — Chrome on Windows reports 100 px per notch. Ctrl + wheel (pinch) never steps. Trackpad swipes are ignored. Always `preventDefault` the wheel (passive: false), which also blocks pinch zoom.
 
 **Classic scheme**
 
@@ -2264,6 +2278,8 @@ Each lane is done when all of the following hold:
 
 **Integration loop** (LEAD, on `main`): merge one `lane/*` branch at a time; after each merge run `npm run build`, `npm run test:unit`, `npm test`; when all lanes are in, `npm test -- --strict`, `npm test -- --strict --http`, `npm test -- --swiftshader` and `npm test -- --touch`. Update `docs/STATUS.md` from the handoff notes only after re-running their commands. Review the screenshots, then run scripted playtests (a 5-minute walk, build and fly script; survival day 1).
 
+**Scripted playtest** (`node tools/playtest.mjs [--swiftshader] [--seed N|random] [--file path] [--tag name]`, LEAD): a ~75 s session in real Chrome driven by real input (Play click, arrow keys, Space, F/C flight, H home, kid taps and holds on the canvas, drag look, classic pointer lock, Esc pause and resume). It flies, digs into a cave, places torches, builds a 5 × 5 planks house with glass windows, a door and a roof (every block hover-verified, then tapped), swims, checks day/night, column-border torch light and water animation, and records fps percentiles, draw calls and streaming completeness. Screenshots go to `.tmp/<tag>-NN-<step>.png` (tag `integ`, or `integ-ss` with `--swiftshader`), the report to `.tmp/<tag>-report.json`; exit code 1 on any failed check or error. The test API is used only to place the camera where a script cannot navigate, to pick hotbar slots (the HUD owns the hotbar keys) and to read state.
+
 **Manual checks** (parent-facing, before release):
 
 - Windows touchpad with "Most sensitive" palm check.
@@ -2290,6 +2306,8 @@ Each lane is done when all of the following hold:
 | D11 | Shift in the kid scheme | **Unbound**; fly down = C / Z / touch ▼ | Five Shift presses open the Windows Sticky Keys dialog and drop fullscreen. Parent tip explains how to disable the shortcut. |
 | D12 | Survival-only item sources before P1 monsters | Gravel 5% bone, oak/birch leaves 2% string (original twists) | Gunpowder stays creeper-only, so TNT is creative-only until creepers ship (P1). |
 | D13 | Recipe book priority | **P0 for survival worlds** | A non-reader cannot use survival crafting without it. |
+| D14 | Lava pools in deep caves (CORE-B) | **On**: carved cave cells at y ≤ 6 hold lava | Original-like and very deep, and the pools glow. **Decision for the parent**; `LAVA_LEVEL = 0` in `src/world/worldgen.js` removes them. Caves below sea level otherwise stay dry. |
+| D15 | Kid flight take-off hop (CORE-E) | **On**: switching flight on while standing gives a 0.25 hop in the kid scheme | The child sees that flying started. The original has no hop. `KID_FLY_LIFT` in `src/player/player.js`. |
 
 ---
 

@@ -27,7 +27,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   smoothLighting: true,
   viewBobbing: false,         // kid default off
   fov: 70,
-  brightness: 0.7,            // 0..1 -> minimum light floor (caves never pitch black)
+  brightness: 0.7,            // 0..1 -> classic brightness lift (uGamma) + cave floor light (SPEC §5.5.3)
   guiScale: 0,                // 0 = auto
   showFps: false,
   // audio
