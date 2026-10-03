@@ -93,7 +93,7 @@ test('coreb columns: only defined blocks, bedrock floor, terrain height and biom
           if (top === ID.air || top === ID.lava) topMismatch++; // only at rare cave openings
           for (let y = h + 1; y < 128; y++) {
             const id = idAt(col, lx, y, lz);
-            assert.ok(id === ID.air || id === ID.water || id === ID.ice || id === ID.snow || LOGS.has(id) || LEAVES.has(id) || !B_OPAQUE[id] || id === ID.pumpkin || id === ID.melon,
+            assert.ok(id === ID.air || id === ID.water || id === ID.ice || id === ID.snow || LOGS.has(id) || LEAVES.has(id) || !B_OPAQUE[id] || id === ID.pumpkin || id === ID.melon || id === ID.cobblestone || id === ID.mossy_cobblestone,
               `nothing terrain-like above getTerrainHeight at ${x},${y},${z}: ${id}`);
           }
         }

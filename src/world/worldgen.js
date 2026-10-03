@@ -14,7 +14,7 @@
 //   8. snow layers on every exposed solid top in snowy places (+ snowy grass bit), mountain snow caps
 
 import { COLUMN_VOLUME, FLAT_SURFACE_Y, SEA_LEVEL, WORLD_HEIGHT, colIndex } from '../core/constants.js';
-import { ID } from '../core/registry.js';
+import { ID, B_OPAQUE } from '../core/registry.js';
 import { hash32, hash01, mulberry32 } from '../core/math.js';
 import { getTerrain, B } from './gen_terrain.js';
 import { buildTree, TREE_MAX_RADIUS } from './gen_trees.js';
@@ -39,6 +39,8 @@ export const BIOME_BY_NAME = Object.freeze(Object.fromEntries(BIOMES.map((b) => 
 
 // block ids as module constants (registry ID is a large dynamic object; keep property lookups out of hot loops)
 const _air = ID.air,
+  _cobblestone = ID.cobblestone,
+  _mossy_cobblestone = ID.mossy_cobblestone,
   _andesite = ID.andesite,
   _bedrock = ID.bedrock,
   _birch_leaves = ID.birch_leaves,
@@ -109,6 +111,7 @@ const blobRadius = (size) => (size <= 1 ? 0 : size <= 6 ? 1 : size <= 10 ? 2 : 3
 
 const TREE_KIND_IDS = {
   oak: [_oak_log, _oak_leaves],
+  fancy_oak: [_oak_log, _oak_leaves],
   birch: [_birch_log, _birch_leaves],
   spruce: [_spruce_log, _spruce_leaves],
 };
@@ -118,7 +121,7 @@ for (const b of [B.PLAINS, B.FOREST, B.SNOWY, B.BIRCH, B.TAIGA, B.MOUNTAINS]) GR
 
 // salts
 const S_BEDROCK = 0x11, S_FILL = 0x12, S_ORE = 0x13, S_TREE = 0x14, S_PLANT = 0x15, S_PATCH = 0x16, S_CACTUS = 0x17;
-const S_PUMPKIN = 0x18, S_CANE = 0x19, S_MUSH = 0x1a;
+const S_PUMPKIN = 0x18, S_CANE = 0x19, S_MUSH = 0x1a, S_BOULDER = 0x1b;
 
 /* ------------------------------------------------------------------------------------------ scratch */
 
@@ -137,9 +140,11 @@ const CAVE_W = 0.1, CAVE_W_MAX = 0.115, CAVERN_THR_MIN = 0.7;
 
 /* ------------------------------------------------------------------------------------------ helpers */
 
-function treeKindIndex(kinds, r) {
-  if (kinds.length === 1) return kinds[0];
-  return r < 0.75 ? kinds[0] : kinds[1]; // first kind dominates (oak forests with a few birches)
+function treeKindIndex(kinds, r, biome) {
+  let k = kinds.length === 1 ? kinds[0] : r < 0.75 ? kinds[0] : kinds[1]; // first kind dominates (oak forests with a few birches)
+  // some oaks grow big and branchy: a few in forests, more of the lone plains trees
+  if (k === 'oak' && ((biome === B.PLAINS && (r * 7.13) % 1 < 0.4) || (biome === B.FOREST && (r * 7.13) % 1 < 0.14))) k = 'fancy_oak';
+  return k;
 }
 
 /**
@@ -168,7 +173,7 @@ function treeCandidate(T, seed, gx, gz) {
     if (Math.max(Math.abs(a - h), Math.abs(b - h), Math.abs(c - h), Math.abs(d - h)) >= 3) return null;
   }
   const s2 = T.sample(x, z); // (sample record is shared; re-read after neighbour samples)
-  return { x, z, y: s2.h + 1, kind: treeKindIndex(def.trees.kinds, hash01(seed, x, z, 0x2b)), seed: hash32(seed, x, z, 0x7ee) };
+  return { x, z, y: s2.h + 1, kind: treeKindIndex(def.trees.kinds, hash01(seed, x, z, 0x2b), biome), seed: hash32(seed, x, z, 0x7ee) };
 }
 
 /** Flat preset tree candidates: one grid cell per column, about 1 tree per 5 columns, away from the origin. */
@@ -185,13 +190,13 @@ function flatTreeCandidate(seed, gx, gz) {
 function writeTreeClipped(blocks, x0, z0, t) {
   const [logId, leafId] = TREE_KIND_IDS[t.kind];
   const rand = mulberry32(t.seed);
-  buildTree(t.kind, rand, (dx, dy, dz, isLog) => {
+  buildTree(t.kind, rand, (dx, dy, dz, isLog, axis) => {
     const lx = t.x + dx - x0, lz = t.z + dz - z0, y = t.y + dy;
     if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || y < 1 || y >= WORLD_HEIGHT) return;
     const i = colIndex(lx, y, lz);
     const cur = blocks[i] & 0xff;
     if (isLog) {
-      if (cur === _air || cur === leafId || cur === _oak_leaves || cur === _birch_leaves || cur === _spruce_leaves || cur === _short_grass || cur === _fern || cur === _snow) blocks[i] = logId;
+      if (cur === _air || cur === leafId || cur === _oak_leaves || cur === _birch_leaves || cur === _spruce_leaves || cur === _short_grass || cur === _fern || cur === _snow) blocks[i] = logId | ((axis || 0) << 8);
     } else if (cur === _air) {
       blocks[i] = leafId;
     }
@@ -253,6 +258,7 @@ export function generateColumn(seed, cx, cz, preset, out) {
   const blocks = out.blocks, biomes = out.biomes;
   if (blocks.length !== COLUMN_VOLUME) throw new Error('generateColumn: blocks must be Uint16Array(32768)');
   seed >>>= 0;
+  blocks.fill(0); // callers pass zeroed arrays (SPEC); cheap insurance for pooled worker buffers
   if (preset === 'flat') { generateFlat(seed, cx, cz, blocks, biomes); return out; }
   const T = getTerrain(seed, preset);
   const x0 = cx * 16, z0 = cz * 16;
@@ -495,6 +501,38 @@ export function generateColumn(seed, cx, cz, preset, out) {
     }
   }
 
+  /* 6b. boulders (taiga, some forests and mountains), pull model radius 2 ----------------------------- */
+  for (let gz = Math.floor((z0 - 2) / 16); gz <= Math.floor((z0 + 17) / 16); gz++) {
+    for (let gx = Math.floor((x0 - 2) / 16); gx <= Math.floor((x0 + 17) / 16); gx++) {
+      const hb = hash32(seed ^ 0xb01d, gx, gz, S_BOULDER);
+      const pr = (hb >>> 8) / 16777216;
+      if (pr >= 0.3) continue;
+      const bx = gx * 16 + 2 + (hb & 7) + ((hb >>> 3) & 3), bz = gz * 16 + 2 + ((hb >>> 5) & 7) + ((hb >>> 13) & 3);
+      if (bx + 2 < x0 || bx - 2 > x0 + 15 || bz + 2 < z0 || bz - 2 > z0 + 15) continue;
+      const sb = T.sample(bx, bz);
+      const want = sb.biome === B.TAIGA ? 0.3 : (sb.biome === B.MOUNTAINS || sb.biome === B.FOREST) ? 0.08 : 0;
+      if (pr >= want || sb.h < SEA_LEVEL + 1 || sb.river > 0.02 || sb.open > 0.68) continue;
+      const by = sb.h + 1;
+      let st = (hb ^ 0x51ab1e) >>> 0;
+      for (let k = 0; k < 3; k++) {
+        st = (Math.imul(st ^ (st >>> 15), 0x2c1b3c6d) + 0x297a2d39) >>> 0;
+        const ox = k === 0 ? 0 : ((st & 3) % 3) - 1, oz = k === 0 ? 0 : (((st >>> 4) & 3) % 3) - 1;
+        const oy = k === 0 ? 0 : ((st >>> 6) & 1);
+        const r2 = k === 0 ? 2.3 : 1.2;
+        for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+          if (dx * dx + dy * dy + dz * dz > r2) continue;
+          const wx = bx + ox + dx, wz = bz + oz + dz, wy = by + oy + dy - 1;
+          const lx = wx - x0, lz = wz - z0;
+          if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || wy < 1 || wy >= WORLD_HEIGHT) continue;
+          const i = colIndex(lx, wy, lz);
+          const cur = blocks[i] & 0xff;
+          if (cur === _air || cur === _short_grass || cur === _fern || cur === _grass_block || cur === _dirt || cur === _snow)
+            blocks[i] = (hash32(seed, wx, wy, wz) & 3) === 0 ? _cobblestone : _mossy_cobblestone;
+        }
+      }
+    }
+  }
+
   /* 7. plants --------------------------------------------------------------------------------------- */
   const patchN = T.patch;
   for (let lz = 0; lz < 16; lz++) {
@@ -575,9 +613,7 @@ export function generateColumn(seed, cx, cz, preset, out) {
       const id = blocks[i] & 0xff;
       if (snowyBiome && id === _water && y === SEA_LEVEL - 1) { blocks[i] = _ice; continue; }
       if (!(snowyBiome || y >= SNOW_LINE)) continue;
-      if (id === _grass_block || id === _dirt || id === _stone || id === _gravel || id === _sand || id === _oak_leaves ||
-          id === _birch_leaves || id === _spruce_leaves || id === _granite || id === _diorite || id === _andesite ||
-          id === _coal_ore || id === _iron_ore || id === _emerald_ore || id === _clay) {
+      if (B_OPAQUE[id] || id === _oak_leaves || id === _birch_leaves || id === _spruce_leaves) {
         blocks[i + 256] = _snow;
         if (id === _grass_block) blocks[i] = _grass_block | (1 << 8); // snowy bit
       }
@@ -804,7 +840,7 @@ export function placeTree(set, get, x, y, z, kind, rand) {
   if (below !== _grass_block && below !== _dirt && below !== _farmland) return false;
   // collect the shape first (one rand stream), then check room, then write
   const cells = [];
-  buildTree(kind in TREE_KIND_IDS ? kind : 'oak', rand, (dx, dy, dz, isLog) => { cells.push(dx, dy, dz, isLog ? 1 : 0); });
+  buildTree(kind in TREE_KIND_IDS ? kind : 'oak', rand, (dx, dy, dz, isLog, axis) => { cells.push(dx, dy, dz, isLog ? 1 + (axis || 0) : 0); });
   for (let i = 0; i < cells.length; i += 4) {
     const cy = y + cells[i + 1];
     if (cy >= WORLD_HEIGHT) return false;
@@ -816,7 +852,7 @@ export function placeTree(set, get, x, y, z, kind, rand) {
   if (below === _grass_block || below === _farmland) set(x, y - 1, z, _dirt, 0);
   for (let i = 0; i < cells.length; i += 4) {
     const cx = x + cells[i], cy = y + cells[i + 1], cz = z + cells[i + 2];
-    if (cells[i + 3]) set(cx, cy, cz, logId, 0);
+    if (cells[i + 3]) set(cx, cy, cz, logId, cells[i + 3] - 1);
     else {
       const id = get(cx, cy, cz);
       if (id === _air || id === _short_grass || id === _fern || id === _snow) set(cx, cy, cz, leafId, 0);
