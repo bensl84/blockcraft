@@ -6,7 +6,7 @@ Branch `lane/audio` · worktree `C:\Users\BSLeo\AppData\Roaming\Claude\scratch-w
 
 ## 2026-10-03 · PHASE 2 - merged real core, verified in real gameplay
 
-Merge: `git merge main` into `lane/audio` = `5047df5` (clean, no conflicts; no LEAD file touched by this lane).
+Merges: `git merge main` into `lane/audio` = `5047df5`, and again after the integrator's brightness + playtest commits = `5e9145b` (both clean, no conflicts; no LEAD file touched by this lane). After the second merge: unit 108/108, all 13 audio smoke scenarios PASS (mob voices PENDING), `audio-inworld` 46/46 PASS.
 No temporary stub fallbacks existed in this lane, so nothing to remove. MOBS is still a stub on main, so
 `audio-mob-voices` stays PENDING (mob voices were verified with real `mob:sound` events at real positions instead).
 
@@ -100,7 +100,7 @@ PASS, coree-touch PASS, touch-controls PENDING (touch stub).
    `node tools/smoke.mjs --scenario cored-daynight` three times on a busy machine -> FAIL, FAIL, PASS (`merges` 415 -> 432
    and 591 -> 692 while `sets` stays the same). It passed in the first full run of this phase. `before` is sampled right
    after `startWorld`, while the world is still streaming and merging sections, so streaming merges are counted as
-   remeshes. Audio is not involved (it fails in isolated runs where audio was never unlocked). Suggested fix (CORE-D
+   remeshes. After the second merge it passed 3/3 on a quieter machine, so it is load-dependent. Audio is not involved (it fails in isolated runs where audio was never unlocked). Suggested fix (CORE-D
    owner): wait until streaming is idle (world backlog 0 / no pending meshes for ~10 frames) before sampling `before`,
    or assert on `sets` only, or count setTime-caused remeshes with a dedicated counter.
 2. **MENUS (stub): the title Play button emits no `ui:click`** - see gap 3 (matters once MENUS lands; SPEC §6 lists `ui:click`).
