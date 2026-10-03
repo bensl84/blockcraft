@@ -32,6 +32,8 @@ async function touchPad(t) {
   };
 }
 
+const W = 1280, H = 720;
+const px = (n) => ({ x: Math.round((n.x + 1) / 2 * W), y: Math.round((1 - n.y) / 2 * H) });
 const centre = (r) => [Math.round(r.x + r.w / 2), Math.round(r.y + r.h / 2)];
 const held = (t) => t.eval(() => window.__game.game.touch.held().sort());
 const isDown = (t, a) => t.eval((a) => window.__game.game.input.isDown(a), a);
@@ -170,18 +172,73 @@ export default [
   {
     // Real core: kid tap places, the door placer (MECH) adds the upper half, a real TNT explosion.
     name: 'kid-undo-real',
+    requires: ['input', 'player', 'physics', 'raycast', 'interaction', 'world'],
+    async run(t) {
+      // a child taps to build, holds to break, then presses the real Undo button / U key
+      await t.call('startWorld', FLAT);
+      await t.call('setFlying', false);
+      await t.call('waitTicks', 10);
+      await t.call('setLook', 0, -25);
+      await t.call('waitFrames', 3);
+      const p = await t.call('pos');
+      const bx = Math.floor(p.x) - 1, bz = Math.floor(p.z) - 5;
+      await t.call('selectSlot', 0);
+      const item = await t.eval(() => { const s = window.__game.game.inventory.getSelected(); return s ? s.item : null; });
+      const tapAt = async (x, y, z, ms = 80) => {
+        const n = px(await t.call('worldToNdc', x, y, z));
+        await t.page.mouse.move(n.x, n.y);
+        await t.call('waitFrames', 2);
+        await t.page.mouse.down();
+        await t.call('sleep', ms);
+        await t.page.mouse.up();
+        await t.call('waitTicks', 3);
+      };
+      // tap three blocks into a little wall (each tap is its own action)
+      for (let i = 0; i < 3; i++) await tapAt(bx + i + 0.5, 4, bz + 0.5);
+      const tower = [];
+      for (let i = 0; i < 3; i++) tower.push(await t.call('getBlock', bx + i, 4, bz));
+      t.assert(tower.every((b) => b && b !== 'air'), `tapping built a wall (${tower} / held ${item})`);
+      await t.shot('kid-undo-real-tower');
+      const undo = await rectOf(t, '[data-kid="undo"]');
+      await t.page.mouse.click(...centre(undo));
+      await t.call('waitTicks', 2);
+      t.assert(await t.call('getBlock', bx + 2, 4, bz) === 'air' && await t.call('getBlock', bx + 1, 4, bz) !== 'air', 'Undo button removes only the newest block');
+      await t.page.keyboard.press('KeyU');
+      await t.call('waitTicks', 2);
+      t.assert(await t.call('getBlock', bx + 1, 4, bz) === 'air' && await t.call('getBlock', bx, 4, bz) !== 'air', 'U removes the next one');
+      // hold to break the last tower block, undo brings it back
+      const n = px(await t.call('worldToNdc', bx + 0.5, 4.6, bz + 0.98));
+      await t.page.mouse.move(n.x, n.y);
+      await t.call('waitFrames', 2);
+      await t.page.mouse.down();
+      await t.call('sleep', 560);
+      await t.page.mouse.up();
+      await t.call('waitTicks', 2);
+      t.assert(await t.call('getBlock', bx, 4, bz) === 'air', 'hold broke the block');
+      await t.page.mouse.click(...centre(undo));
+      await t.call('waitTicks', 2);
+      t.assert(await t.call('getBlock', bx, 4, bz) === tower[0], 'undo puts the broken block back');
+      // a block placed where the player stands is undone without trapping them; then nothing left -> error sound
+      const ev = await t.call('eventCount', 'kid:undo');
+      t.assert(ev >= 3, `kid:undo events (${ev})`);
+      await t.page.mouse.click(...centre(undo));
+      await t.call('waitTicks', 2);
+      await t.page.mouse.click(...centre(undo));
+      await t.call('waitTicks', 2);
+      const snd = await t.call('events', 'sound', 3);
+      t.assert(snd.some((e) => e.payload.name === 'ui.error'), 'empty undo plays the error sound');
+      await t.call('waitFrames', 10);
+      await t.shot('kid-undo-real-empty');
+    },
+  },
+  {
+    name: 'kid-undo-mech',
     requires: ['input', 'player', 'physics', 'raycast', 'interaction', 'world', 'mechanics'],
     async run(t) {
       await t.call('startWorld', FLAT);
       await t.call('setFlying', false);
       await t.call('waitTicks', 10);
       await t.call('setLook', 0, -55);
-      await t.call('selectSlot', 1);
-      const pl = await t.call('placeTarget');
-      t.assert(pl.ok, `placed (${JSON.stringify(pl)})`);
-      await t.call('press', 'undo');
-      await t.call('waitTicks', 2);
-      t.assert(await t.call('getBlock', pl.x, pl.y, pl.z) === 'air', 'undo removes the tapped block');
       await t.call('setSlot', 0, 'oak_door', 1);
       await t.call('selectSlot', 0);
       const dp = await t.call('placeTarget');
@@ -541,12 +598,82 @@ export default [
       await pad.up(1);
       await t.call('waitFrames', 3);
       t.assert(Math.abs((await t.call('pos')).yaw - yaw0) > 5, 'drag on the right side looks');
+      // ▲ walks (finger held 0.6 s)
       const f = await rectOf(t, '[data-touch="forward"]');
-      const z0 = (await t.call('pos')).z;
+      const a0 = await t.call('pos');
       await pad.down(2, ...centre(f));
       await t.call('sleep', 600);
       await pad.up(2);
-      t.assert((await t.call('pos')).z !== z0, 'D-pad walks the player');
+      const a1 = await t.call('pos');
+      const walked = Math.hypot(a1.x - a0.x, a1.z - a0.z);
+      t.note('dpadWalk', walked);
+      t.assert(walked > 1, `D-pad ▲ walks the player (${walked.toFixed(2)} blocks)`);
+      // ◀ turns left (+yaw), ▶ turns right
+      const l = await rectOf(t, '[data-touch="turnLeft"]');
+      const y0 = (await t.call('pos')).yaw;
+      await pad.down(3, ...centre(l));
+      await t.call('sleep', 500);
+      await pad.up(3);
+      await t.call('waitFrames', 2);
+      const y1 = (await t.call('pos')).yaw;
+      t.note('dpadTurnDeg', y1 - y0);
+      t.assert(y1 - y0 > 15, `D-pad ◀ turns left (${(y1 - y0).toFixed(1)} deg)`);
+      const r = await rectOf(t, '[data-touch="turnRight"]');
+      await pad.down(4, ...centre(r));
+      await t.call('sleep', 500);
+      await pad.up(4);
+      await t.call('waitFrames', 2);
+      const y2 = (await t.call('pos')).yaw;
+      t.assert(y2 < y1 - 15, `D-pad ▶ turns right (${(y2 - y1).toFixed(1)} deg)`);
+      // slide the finger from ▲ onto ◀ without lifting: walking becomes turning
+      await pad.down(5, ...centre(f));
+      await t.call('sleep', 200);
+      t.assert((await held(t)).includes('forward'), 'slide start holds forward');
+      await pad.move(5, ...centre(l));
+      await t.call('sleep', 100);
+      const h2 = await held(t);
+      t.assert(h2.includes('turnLeft') && !h2.includes('forward'), `slide onto ◀ swaps to turning (${h2})`);
+      await pad.up(5);
+      // Jump button: a real jump
+      const j = await rectOf(t, '[data-touch="jump"]');
+      await pad.down(6, ...centre(j));
+      let maxY = (await t.call('pos')).y;
+      const yStart = maxY;
+      for (let i = 0; i < 8; i++) { await t.call('sleep', 40); maxY = Math.max(maxY, (await t.call('pos')).y); }
+      await pad.up(6);
+      t.assert(maxY > yStart + 0.8, `Jump button jumps (rose ${(maxY - yStart).toFixed(2)})`);
+      await t.call('waitTicks', 20);
+      // Fly button (creative) -> flying; Up rises; Down appears and descends; Fly again lands
+      const fl = await rectOf(t, '[data-touch="fly"]');
+      t.assert(fl && fl.visible, 'Fly button visible in creative');
+      await pad.down(7, ...centre(fl)); await t.call('sleep', 60); await pad.up(7);
+      t.assert(await t.waitFor(() => window.__game.game.player.flying, null, 2000), 'Fly button starts flying');
+      await t.call('waitFrames', 3);
+      const yF0 = (await t.call('pos')).y;
+      await pad.down(8, ...centre(j)); await t.call('sleep', 700); await pad.up(8);
+      const yF1 = (await t.call('pos')).y;
+      t.assert(yF1 > yF0 + 2, `Up rises while flying (${(yF1 - yF0).toFixed(2)})`);
+      const dn = await rectOf(t, '[data-touch="down"]');
+      t.assert(dn && dn.visible, 'Down button shows while flying');
+      await t.shot('kid-touch-world-flying');
+      await pad.down(9, ...centre(dn)); await t.call('sleep', 400); await pad.up(9);
+      const yF2 = (await t.call('pos')).y;
+      t.assert(yF2 < yF1 - 1, `Down descends (${(yF2 - yF1).toFixed(2)})`);
+      await pad.down(10, ...centre(fl)); await t.call('sleep', 60); await pad.up(10);
+      t.assert(await t.waitFor(() => !window.__game.game.player.flying, null, 2000), 'Fly button again stops flying');
+      t.assert(await t.waitFor(() => window.__game.game.player.onGround, null, 4000), 'lands');
+      t.assert((await held(t)).length === 0, 'nothing left held');
+      // a tap on the world while a D-pad finger is down still places (multi-touch)
+      await t.call('setLook', 0, -35);
+      await t.call('waitFrames', 3);
+      const q = await t.call('pos');
+      const bx = Math.floor(q.x), bz = Math.floor(q.z) - 3;
+      const placed0 = await t.call('eventCount', 'block:placed');
+      const n = px(await t.call('worldToNdc', bx + 0.5, 4, bz + 0.5));
+      await t.page.touchscreen.tap(n.x, n.y);
+      await t.call('waitTicks', 3);
+      t.assert(await t.call('eventCount', 'block:placed') > placed0, 'tap on the world through the overlay places a block');
+      await t.shot('kid-touch-world');
       await pad.end();
     },
   },

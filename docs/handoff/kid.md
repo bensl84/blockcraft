@@ -4,6 +4,130 @@ Branch `lane/kid` · worktree `C:\Users\BSLeo\AppData\Roaming\Claude\scratch-wor
 
 <!-- newest first: date · what changed · commands run + results (copy the PASS/FAIL lines) · remaining · blockers · spec conflicts -->
 
+## 2026-10-03 · Phase 2: merged main (real core) and verified in-world
+
+### What changed
+
+- Merged `main` into `lane/kid` (no conflicts; merge commit `725a9d7`).
+- Removed the phase-1 stub fallbacks:
+  - `kid.js`: deleted `ownBoxCollides` and every `isStub('physics')` branch. Collision, `findFreeY` and the border push now always use `player/physics.js`.
+  - `touch.js`: deleted its own window `pointerdown` listener. The overlay now reads `input.lastPointerType` (CORE-E keeps it).
+- **Fix (stuck rescue, real physics):** jumping inside a 2-deep pit lifted the head above the rim for a few ticks. The detector read that as "free" and reset, so holding Jump never popped the child out. Enclosure is now judged from the floor last stood on (`groundY`, updated on ground / flying / water / ladder / teleport). The rim pick uses it too.
+- **Fix (far Home):** Home into a column that is not loaded yet left the player inside a hill (the y was checked before the column existed). The kid system now watches that spot. When the column streams in and the player is buried, it lifts them to the surface. Before, the suffocation auto-pop took about 2 s and could land them in a cave pocket.
+- **Kid-friendliness after looking at the screenshots:**
+  - The home arrow's yellow tip is bigger (48x32, was 30x20); it was hard to read at a glance.
+  - The hint plate is darker (0.72 alpha, was 0.55). Busy terrain showed through and muddied the pictogram.
+  - The home arrow also shows deep in the border fog (`fogT > 0.3`). At the border everything is white, and a radius of 48 or less meant the arrow never appeared there.
+  - When the arrow and a hint plate show together, the plate moves down below the arrow (`.kid-arrow-on`).
+- Scenarios:
+  - `kid-undo-real` is rewritten as real gameplay: mouse taps build a 3-block wall, the Undo button and the U key remove the newest blocks one at a time, a hold breaks a block and Undo puts it back, and an empty undo plays `ui.error`.
+  - The MECH half (door placer + `mechanics.explode`) moved to the new `kid-undo-mech` (requires `mechanics`).
+  - `kid-touch-world` now also covers D-pad ▲ walking, ◀/▶ turning, sliding from ▲ to ◀, the Jump button, Fly → Up → Down → Fly off → lands, and a world tap through the overlay.
+- New `tools/kid-play.mjs` drives the real game like a child (real keyboard / mouse / touch) and saves `.tmp/kidplay-*.png`. Run it with `node tools/kid-play.mjs [--only walk,build,border,void,stuck,farhome,touch,perf]`.
+
+### In-world verification (real core, headless Chrome 1280x720, `node tools/kid-play.mjs`)
+
+```
+PASS  hint-walk-appears      idle 7 s shows the walk pictogram
+PASS  keyboard-walk          holding W walks (6.2 blocks)
+PASS  hint-walk-done         walking clears the walk hint
+PASS  hint-turn-appears      next hint is turn
+PASS  keyboard-turn          holding A turns left (77.0 deg)
+PASS  hint-turn-done         turning clears the turn hint
+PASS  hint-turn-drag         a drag-look counts as the turn step
+PASS  hint-place-appears     next hint is place
+PASS  tap-build              tapping built 3/3 blocks
+PASS  undo-button            Undo button removed the newest block
+PASS  home-arrow             home arrow visible 72 blocks away
+PASS  home-arrow-ahead       facing home the arrow points up (0.0 deg)
+PASS  home-key               H took the player home
+PASS  home-faces-build       after Home the player faces the build (off by 0.0 deg)
+PASS  border-walk            walking 4 s outward (jumping) stops at the border (max 48.04 of 48)
+PASS  border-fog             fog override is on at the border {"near":1.8,"far":18}
+PASS  border-arrow           the home arrow shows the way back inside the border fog
+PASS  arrow-hint-stack       hint plate below the arrow
+PASS  border-fly             flying outward stops at the border (max 48.00)
+PASS  border-fog-clear       fog override cleared back inside
+PASS  void-rescue            falling through a hole dug to y 0 is rescued (lowest y 1.9, back to y 66)
+PASS  void-no-fall           no hard landing after the rescue (player:land fallDistance 0)
+PASS  void-health            health untouched (20)
+PASS  stuck-pit              pushing in a 2-deep pit for 3 s shows the "hold jump" help
+PASS  stuck-pop              holding Space 1 s pops onto the rim
+PASS  stuck-sand             head-in-sand pops out on its own within 2.5 s
+PASS  home-far               far Home (700 blocks, unloaded, y 40 inside a hill) lands standing on the surface
+PASS  touch-auto-1280 / -1024       a finger tap shows the touch controls
+PASS  touch-no-overlap-1280 / -1024 Home / Undo / Pause / D-pad / Jump / Fly do not overlap
+PASS  perf-kid               kid tick 0.032 ms, kid+touch frame 0.037 ms (fps 144, 178 draw calls)
+PASS  perf-stats             overlay on/off: 178 / 177 draw calls (DOM only, no GPU cost)
+PASS  *-page-errors          none
+```
+
+Screenshots reviewed (`.tmp/`):
+- `kidplay-spawn`, `kidplay-hint-walk` / `-turn` / `-place`
+- `kidplay-built`, `kidplay-after-undo`
+- `kidplay-home-arrow`, `kidplay-home-fade`, `kidplay-home-arrived` (faces the wall, sparkles), `kidplay-home-far`
+- `kidplay-border-ground`, `kidplay-border-flight` (white-out wall), `kidplay-border-arrow-hint`
+- `kidplay-void-falling`, `kidplay-void-rescued`
+- `kidplay-stuck-pit`, `kidplay-stuck-popped`, `kidplay-stuck-sand`, `kidplay-stuck-sand-popped`
+- `kidplay-touch-1280x720[-flying]`, `kidplay-touch-1024x600[-flying]`
+- smoke: `smoke-kid-kid-undo-real-tower`, `smoke-kid-kid-undo-real-empty`, `smoke-kidtouch-kid-touch-world[-flying]`
+
+Phase-1 "needs in-world verification" list:
+
+| # | Item | Result |
+|---|---|---|
+| 1 | Real input sets `lastPointerType`; canvas tap/drag works around the overlay | PASS (`kid-touch-world`: drag looks, a world tap places through the overlay layer) |
+| 2 | D-pad turning turns | PASS (◀ +38° in 0.5 s, ▶ back; slide ▲→◀ swaps walk for turn) |
+| 3 | Fly → `toggleFly`; Down → `descend` | PASS (Up +2 blocks in 0.7 s, Down −1, Fly off lands) |
+| 4 | `kid-undo-real` | PASS for tap / hold / button / U. Door + explosion: PENDING (`kid-undo-mech`, MECH still a stub) |
+| 5 | Border push with real physics, ground + flight, fog | PASS (max 48.04 / 48.00; fog wall seen) |
+| 6 | Stuck: dug pit / sand on head / survival damage | pit + head-in-block PASS (after the fix). Falling sand and suffocation damage not verifiable: MECH and SURVIVAL are stubs |
+| 7 | Void rescue with real gravity, no fall damage | PASS (fallDistance 0 on landing; damage itself needs SURVIVAL) |
+| 8 | Home into an unloaded column | was FAIL (buried at y 40 under a 55 surface); PASS after the fix |
+| 9 | Hint walk/turn detection with real input | PASS (W, A, and drag-look) |
+| 10 | Hotbar overlap with the D-pad at 1024 wide | NOT VERIFIABLE: HUD/INV are still stubs. LEAD request 2 still stands: at 1024x600 only x 304..760 (456 px) is free between the D-pad and the Down/Jump buttons; a 9 x 72 px hotbar is 648 px |
+| 11 | Manual: Esc-hold in real fullscreen, real touchscreen palm rejection, Sticky Keys | NOT DONE (needs a person on the real laptop) |
+
+### Commands run and results (phase 2)
+
+`npm run test:unit`: `tests 100 / pass 100 / fail 0`
+
+`node tools/smoke.mjs --tag kid` (all scenarios):
+```
+PASS     kid-home / kid-buttons / kid-void / kid-undo / kid-undo-real / kid-border / kid-stuck / kid-hints / kid-speech / kid-home-arrow / kid-guards
+PENDING  kid-undo-mech     - stub lanes: mechanics
+FAIL     cored-daynight    - flaky in the full run only (see Cross-lane defects); PASS alone 4/4 on this branch and on main
+[smoke] {"PASS":65,"PENDING":4,"SKIP":4,"FAIL":1}
+```
+`node tools/smoke.mjs --tag kidtouch --touch`:
+```
+PASS     touch-controls / kid-touch-overlay / kid-touch-world
+FAIL     coree-touch       - order-dependent, also fails on main (see Cross-lane defects); PASS alone
+[smoke] {"PASS":69,"PENDING":4,"FAIL":1}
+```
+`node build.mjs --out .tmp/build-kid-prod` (852 KB) + `smoke --scenario boot,world,kid-home,kid-buttons,kid-undo,kid-undo-real,kid-void,kid-stuck,kid-border,kid-hints,kid-guards`: `{"PASS":12}`
+
+### Cross-lane defects (not edited; for the owners)
+
+1. **CORE-E test `coree-touch` is order-dependent** (`tools/scenarios/coree.mjs` ~line 595). Repro: `node tools/smoke.mjs --touch --scenario hotbar,coree-touch` (or `coree-place-rules,coree-touch`) gives FAIL "touch tap places". It fails the same way on `main`.
+   - Cause (a): it never calls `selectSlot(0)` and asserts `grass_block`.
+   - Cause (b): `Inventory.clear()` does not reset `selected`, so a new world inherits the previous world's slot.
+   - Cause (c): after `touch-controls` it fails "input:pointerType emitted" instead, because `lastPointerType` is already `touch` and the event fires only on change.
+   - Suggested fix: in the scenario, `selectSlot(0)` and set `game.input.lastPointerType = 'mouse'` first.
+2. **INV: a new world keeps the previous world's selected hotbar slot** (`src/inventory/inventory.js` `clear()`). A new creative world should start on slot 1 (grass). Suggested fix: `this.selected = 0` in `clear()`, or in `startWorld` when `isNew`.
+3. **CORE-D test `cored-daynight` is flaky in the full suite.** "setTime never remeshes" compares `merges` counts that background column merges from earlier scenarios still bump (7406 → 7441 seen). It passed 4/4 alone. Suggested fix: wait for the streaming / merge queue to go idle before taking the "before" sample, or count only light-triggered remeshes.
+4. **Renderer/FX (polish, Minecraft parity):** with the head inside an opaque block (sand dropped on the head), the camera sees straight through the world, plus the huge outline of the block it is inside (`.tmp/kidplay-stuck-sand.png`). Minecraft draws the block's texture as a full-screen overlay. Suggested: FX or the renderer draws an in-block overlay when `B_OPAQUE[block at eye]`, and interaction skips targeting the block the eye is inside. The kid auto-pop still fixes it within 2 s.
+5. **CORE-E (minor):** right after a teleport into an unloaded column, the player drifted about 0.1 blocks horizontally in the first tick after the column loaded (x 701 → 700.91, while inside solid terrain). That looks like depenetration. It is harmless now that Home settles the player, so this is only for information.
+
+### Remaining gaps
+
+- `kid-undo-mech` (door halves + explosion in one undo) waits for MECH.
+- Survival suffocation damage during the head-in-block auto-pop, and real falling sand, wait for SURVIVAL / MECH.
+- Hotbar vs D-pad on narrow screens waits for HUD/INV (LEAD request 2).
+- FX `fade` / `spawnParticles` and the AUDIO mapping of `ui.whoosh` / `ui.error` / `ui.success` wait for those lanes (the kid fallbacks are used today).
+- Manual checks on the real laptop: Esc held in fullscreen, a real touchscreen, Sticky Keys.
+- P2 photo button: not done.
+
 ## 2026-10-03 · P0 + P1 complete against the stubs (code commit `db8282b`)
 
 ### What changed

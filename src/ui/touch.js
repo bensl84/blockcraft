@@ -1,7 +1,6 @@
 // OWNER LANE: KID (touch). SPEC §8.5.1, §10.3. API FROZEN: visible, setVisible(bool) (+ additive members below).
 // On-screen controls in uiLayer(game, 'touch', Z.TOUCH), shown when settings.touchControls === 'on', or 'auto'
-// and the last pointer was a touch (input.lastPointerType, 'input:pointerType', plus our own window pointerdown
-// listener so the overlay also works while CORE-E's pointer handling is a stub):
+// and the last pointer was a touch (input.lastPointerType, kept by CORE-E's window pointerdown listener):
 //   - D-pad bottom left (▲ forward, ▼ back, ◀ ▶ TURN via setVirtual('turnLeft'/'turnRight')), one capture
 //     area with a 12 px safe ring; the finger may slide between the 8 sectors (diagonals = walk + turn).
 //     Optional fixed joystick (160 px base, 64 px knob) via setMoveVector: setStyle('joystick').
@@ -27,7 +26,6 @@ export function createTouchSystem(game) {
   /** actions currently held by the overlay (released when it hides) */
   const held = new Set();
   let forced = null;            // setVisible override (true/false) or null = automatic
-  let lastPointer = 'mouse';
   let layoutKey = '';
   let style = 'dpad';
   let joyTurn = 0;              // joystick turning (-1..1) applied per frame in the kid scheme
@@ -47,9 +45,6 @@ export function createTouchSystem(game) {
     init() {
       try { const s = localStorage.getItem(STYLE_KEY); if (s === 'joystick' || s === 'dpad') style = s; } catch { /* private mode */ }
       build();
-      const notePointer = (type) => { if (type && type !== lastPointer) lastPointer = type; };
-      window.addEventListener('pointerdown', (e) => notePointer(e.pointerType), true);
-      game.events.on('input:pointerType', (e) => notePointer(e && e.type));
       game.events.on('settings:changed', (e) => {
         if (e.key === 'buttonSize' || e.key === 'leftHanded') layoutKey = '';
         if (e.key === 'touchOpacity') applyOpacity();
@@ -65,7 +60,7 @@ export function createTouchSystem(game) {
 
     frame(g, dt) {
       const want = forced !== null ? forced
-        : wantTouch(game.settings.touchControls, game.input && game.input.lastPointerType === 'touch' ? 'touch' : lastPointer);
+        : wantTouch(game.settings.touchControls, game.input ? game.input.lastPointerType : 'mouse');
       const show = !!want && game.state === 'playing' && !!game.meta && !game.ui.current;
       if (show !== touch.visible) {
         touch.visible = show;

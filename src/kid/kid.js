@@ -19,8 +19,7 @@ import './kid.css';
 import { el, uiLayer } from '../core/dom.js';
 import { DEG } from '../core/math.js';
 import { KID, WORLD_HEIGHT, Z } from '../core/constants.js';
-import { B_OPAQUE, B_SOLID, getCollisionBoxes } from '../core/registry.js';
-import { isStub } from '../core/stubs.js';
+import { B_OPAQUE, B_SOLID } from '../core/registry.js';
 import { getItem } from '../data/items.js';
 import { boxCollides as physicsBoxCollides, findFreeY as physicsFindFreeY, moveAndCollide } from '../player/physics.js';
 import { UndoLog } from './undo.js';
@@ -35,24 +34,6 @@ import { HINT_LINES, hintHtml } from './hints.js';
 /** Ticks from the Home press to the teleport (fade out first; the kid-home scenario allows 5). */
 export const HOME_TELEPORT_TICK = 3;
 const HOME_SEQ_TICKS = 12;
-
-/* ------------------------------------------------------------------ collision helpers (stub-tolerant) */
-function ownBoxCollides(world, minX, minY, minZ, maxX, maxY, maxZ) {
-  const e = 1e-7;
-  for (let x = Math.floor(minX); x <= Math.floor(maxX - e); x++) {
-    for (let y = Math.max(0, Math.floor(minY)); y <= Math.min(WORLD_HEIGHT - 1, Math.floor(maxY - e)); y++) {
-      for (let z = Math.floor(minZ); z <= Math.floor(maxZ - e); z++) {
-        const v = world.getRaw(x, y, z), id = v & 0xff;
-        if (!id || !B_SOLID[id]) continue;
-        const boxes = getCollisionBoxes(id, v >> 8);
-        for (const b of boxes) {
-          if (b[0] + x < maxX && b[3] + x > minX && b[1] + y < maxY && b[4] + y > minY && b[2] + z < maxZ && b[5] + z > minZ) return true;
-        }
-      }
-    }
-  }
-  return false;
-}
 
 /** @returns {object} Kid system (game.kid) */
 export function createKidSystem(game) {
@@ -73,6 +54,8 @@ export function createKidSystem(game) {
   let stuckHintShown = false;
   let lastYaw = 0, turnAccum = 0, walkTicks = 0, teleported = false;
   let lowestCache = { x: NaN, z: NaN, y: -1, tick: -100 };
+  let groundY = null;           // feet y of the last floor stood on (stuck detection)
+  let settleAt = null;          // {x, z, ticks}: a Home into an unloaded column, fixed up once it loads
 
   const playing = () => game.state === 'playing' && !!game.meta;
   const touchVariant = () => (game.touch && game.touch.visible ? 'touch' : 'keys');
@@ -140,6 +123,9 @@ export function createKidSystem(game) {
       const p = game.player;
       const y = freeY(h.x, h.y, h.z);
       p.teleport(h.x, y, h.z, 'home');
+      // far home: the column is not loaded yet (the player waits frozen on "unloaded = solid"); place them in
+      // free space as soon as it streams in instead of leaving them inside a hill
+      settleAt = columnLoaded(h.x, h.z) ? null : { x: h.x, z: h.z, ticks: 0 };
       const yaw = facingYaw(h);
       if (yaw !== null) { p.yaw = yaw; p.pitch = -12 * DEG; }
       game.events.emit('kid:home', { x: h.x, y, z: h.z });
@@ -198,6 +184,7 @@ export function createKidSystem(game) {
         }
         if (homeSeq >= HOME_SEQ_TICKS) { homeSeq = -1; kid.homeSeqActive = false; }
       }
+      if (settleAt) tickSettle();
       const rules = game.meta.rules || {};
       // Void rescue
       if (rules.voidRescue !== false && !p.dead) {
@@ -320,7 +307,8 @@ export function createKidSystem(game) {
     let vis = false;
     if (show && h && game.state === 'playing') {
       const d = dist2d(p.renderX ?? p.x, p.renderZ ?? p.z, h.x, h.z);
-      vis = d > KID.HOME_ARROW_DIST;
+      // far away, or deep in the border fog (where nothing else shows the way back)
+      vis = d > KID.HOME_ARROW_DIST || kid.border.fogT > 0.3;
       kid.homeArrow.dist = d;
       if (vis) {
         const deg = -homeArrowAngle(p.renderX ?? p.x, p.renderZ ?? p.z, p.yaw, h.x, h.z) / DEG;
@@ -328,29 +316,42 @@ export function createKidSystem(game) {
         if (Math.abs(deg - arrowDeg) > 0.75) { arrowDeg = deg; arrowRot.style.transform = `rotate(${deg.toFixed(1)}deg)`; }
       }
     }
-    if (vis !== arrowShown) { arrowShown = vis; arrowEl.classList.toggle('kid-hidden', !vis); kid.homeArrow.visible = vis; }
+    if (vis !== arrowShown) {
+      arrowShown = vis; arrowEl.classList.toggle('kid-hidden', !vis); kid.homeArrow.visible = vis;
+      layer.classList.toggle('kid-arrow-on', vis);   // hint plates move down below the arrow
+    }
   }
 
   /* ------------------------------------------------------------------ world helpers */
-  function collidesAt(minX, minY, minZ, maxX, maxY, maxZ) {
-    const w = game.world;
-    if (!isStub('physics')) return physicsBoxCollides(w, minX, minY, minZ, maxX, maxY, maxZ);
-    return ownBoxCollides(w, minX, minY, minZ, maxX, maxY, maxZ);
-  }
   function playerCollides(x, y, z) {
     const p = game.player, hw = (p.width || 0.6) / 2, hh = p.height || 1.8;
-    return collidesAt(x - hw, y, z - hw, x + hw, y + hh, z + hw);
+    return physicsBoxCollides(game.world, x - hw, y, z - hw, x + hw, y + hh, z + hw);
   }
-  /** Nearest y >= y where the player's box is free (physics.findFreeY when live, own scan otherwise). */
+  function columnLoaded(x, z) {
+    const w = game.world;
+    return !!(w && w.isColumnLoaded && w.isColumnLoaded(Math.floor(x) >> 4, Math.floor(z) >> 4));
+  }
+  function tickSettle() {
+    const p = game.player;
+    // the player moved away on their own (or another teleport), or it took too long: stop watching
+    if (++settleAt.ticks > 20 * 30 || Math.abs(p.x - settleAt.x) > 1.5 || Math.abs(p.z - settleAt.z) > 1.5) { settleAt = null; return; }
+    if (!columnLoaded(p.x, p.z)) return;
+    settleAt = null;
+    if (playerCollides(p.x, p.y, p.z)) {
+      // buried: come out on top (findFreeY alone could stop in a cave pocket inside the hill)
+      const sy = game.world.getSurfaceY(p.x, p.z);
+      const y = freeY(p.x, sy >= 0 ? Math.max(sy, p.y) : p.y, p.z);
+      p.teleport(p.x, y, p.z, 'home');
+    }
+  }
+  /** Nearest y >= y where the player's box is free (physics.findFreeY; plain upward scan as a last resort). */
   function freeY(x, y, z) {
     const w = game.world;
     if (!w || !w.isColumnLoaded || !w.isColumnLoaded(Math.floor(x) >> 4, Math.floor(z) >> 4)) return y;
     if (!playerCollides(x, y, z)) return y;
     const p = game.player;
-    if (!isStub('physics')) {
-      const fy = physicsFindFreeY(w, x, y, z, p.width || 0.6, p.height || 1.8);
-      if (fy < WORLD_HEIGHT && !playerCollides(x, fy, z)) return fy;
-    }
+    const fy = physicsFindFreeY(w, x, y, z, p.width || 0.6, p.height || 1.8);
+    if (fy < WORLD_HEIGHT && !playerCollides(x, fy, z)) return fy;
     for (let yy = Math.floor(y) + 1; yy < WORLD_HEIGHT; yy++) if (!playerCollides(x, yy, z)) return yy;
     return WORLD_HEIGHT;
   }
@@ -401,7 +402,10 @@ export function createKidSystem(game) {
     const hx = Math.floor(p.x), hz = Math.floor(p.z);
     const headId = w.getBlock(hx, Math.floor(p.y + (p.eyeHeight || 1.62)), hz);
     const headInBlock = !!(B_OPAQUE[headId] && B_SOLID[headId]);
-    const ly = Math.floor(p.y + 1.2);
+    // enclosure is judged from the floor the player last stood on, so a hopeless jump inside a pit does not
+    // count as "free" (the head clears the rim for a moment at the top of the jump)
+    if (p.onGround || p.flying || p.inWater || p.onLadder || teleported || groundY === null) groundY = p.y;
+    const ly = Math.floor(groundY + 1.2);
     const enclosed = !!(B_SOLID[w.getBlock(hx + 1, ly, hz)] && B_SOLID[w.getBlock(hx - 1, ly, hz)]
       && B_SOLID[w.getBlock(hx, ly, hz + 1)] && B_SOLID[w.getBlock(hx, ly, hz - 1)]);
     const mv = inp && inp.move ? inp.move : { forward: 0, strafe: 0 };
@@ -430,7 +434,7 @@ export function createKidSystem(game) {
       let best = Infinity;
       for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         const sy = w.getSurfaceY(bx + dx + 0.5, bz + dz + 0.5);
-        if (sy >= p.y && sy < best) { best = sy; tx = bx + dx + 0.5; tz = bz + dz + 0.5; }
+        if (sy >= (groundY ?? p.y) - 1e-6 && sy < best) { best = sy; tx = bx + dx + 0.5; tz = bz + dz + 0.5; }
       }
       ty = best < Infinity ? freeY(tx, best, tz) : freeY(p.x, p.y + 1, p.z);
       if (best === Infinity) { tx = p.x; tz = p.z; }
@@ -453,11 +457,9 @@ export function createKidSystem(game) {
       const out = -(p.vx * bs.nx + p.vz * bs.nz);
       if (out > 0) { p.vx += out * bs.nx; p.vz += out * bs.nz; }
       const dx = bs.nx * BORDER_PUSH, dz = bs.nz * BORDER_PUSH;
-      if (!isStub('physics')) {
-        const og = p.onGround, ch = p.collidedH, cv = p.collidedV;
-        moveAndCollide(game.world, p, dx, 0, dz, {});
-        p.onGround = og; p.collidedH = ch; p.collidedV = cv;
-      } else { p.x += dx; p.z += dz; }
+      const og = p.onGround, ch = p.collidedH, cv = p.collidedV;
+      moveAndCollide(game.world, p, dx, 0, dz, {});
+      p.onGround = og; p.collidedH = ch; p.collidedV = cv;
     }
     const r = game.renderer;
     if (!r || !r.setFogOverride) return;
@@ -510,6 +512,8 @@ export function createKidSystem(game) {
     kid.homeSeqActive = false;
     walkTicks = 0; turnAccum = 0;
     lowestCache = { x: NaN, z: NaN, y: -1, tick: -100 };
+    groundY = null;
+    settleAt = null;
     if (fadeEl) { fadeEl.style.transitionDuration = '0ms'; fadeEl.style.opacity = '0'; }
     hideHint();
     if (game.player) lastYaw = game.player.yaw;

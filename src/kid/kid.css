@@ -27,7 +27,7 @@
 .kid-arrow-house { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; }
 .kid-arrow-house .kid-px { width: 100%; height: 100%; }
 .kid-arrow-rot { position: absolute; inset: 2px; transition: transform 90ms linear; }
-.kid-arrow-tip { position: absolute; left: 50%; top: -14px; width: 30px; height: 20px; margin-left: -15px; filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.4)); }
+.kid-arrow-tip { position: absolute; left: 50%; top: -30px; width: 48px; height: 32px; margin-left: -24px; filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.4)); }
 .kid-arrow-tip .kid-px { width: 100%; height: 100%; }
 @keyframes kid-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
 
@@ -45,9 +45,10 @@
 /* ---------------------------------------------------------------- hint plate */
 .kid-hint {
   position: absolute; left: 50%; top: 17%; width: 320px; height: 176px; margin-left: -160px;
-  border-radius: 22px; background: rgba(0, 0, 0, 0.55); border: 2px solid rgba(255, 255, 255, 0.85);
+  border-radius: 22px; background: rgba(0, 0, 0, 0.72); border: 2px solid rgba(255, 255, 255, 0.85);
   box-sizing: border-box; overflow: hidden; animation: kid-hint-in 320ms ease-out;
 }
+.kid-layer.kid-arrow-on .kid-hint { top: max(17%, 172px); }
 @media (max-width: 520px), (max-height: 420px) { .kid-hint { transform: scale(0.78); transform-origin: 50% 0; } }
 @keyframes kid-hint-in { from { opacity: 0; translate: 0 -16px; } to { opacity: 1; translate: 0 0; } }
 .kid-pic { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; gap: 26px; }
