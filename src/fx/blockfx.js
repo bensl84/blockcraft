@@ -6,10 +6,10 @@
 
 import * as THREE from 'three';
 import {
-  B_REPLACEABLE, B_SOLID, blockDef, getCollisionBoxes, getSelectionBoxes, isReplaceable, itemPlaces,
+  B_OPAQUE, B_SHAPE, B_SOLID, SHAPE, blockDef, getCollisionBoxes, getSelectionBoxes, isReplaceable, itemPlaces,
 } from '../core/registry.js';
 import { WORLD_HEIGHT } from '../core/constants.js';
-import { yawToFacing } from '../core/math.js';
+import { placementState } from '../player/interaction.js';
 import { FACE_CORNERS } from '../world/mesher.js';
 import { blockModelGeometry } from './itemmesh.js';
 
@@ -129,13 +129,25 @@ export class CrackOverlay {
 
 /* ------------------------------------------------------------------ ghost block */
 
-const FACING_OF = (nx, nz) => (nz < 0 ? 0 : nx > 0 ? 1 : nz > 0 ? 2 : 3);
+/** Solid block whose collision reaches the top of the cell (floor support; mirrors CORE-E interaction). */
+function hasSolidTop(world, x, y, z) {
+  const v = world.getRaw(x, y, z), id = v & 0xff;
+  if (!B_SOLID[id]) return false;
+  for (const b of getCollisionBoxes(id, v >> 8)) if (b[4] >= 1 - 1e-6) return true;
+  return false;
+}
+/** Full solid cube (wall support for torches and ladders; mirrors CORE-E interaction). */
+function isWallSupport(world, x, y, z) {
+  const id = world.getRaw(x, y, z) & 0xff;
+  return B_OPAQUE[id] === 1 || (B_SOLID[id] === 1 && B_SHAPE[id] === SHAPE.CUBE);
+}
 
 /**
  * Where (and as what) a tap would place the held item. Pure (world, player and hit are plain objects).
- * Mirrors the default placement rules of SPEC §7.4 closely enough for a preview.
+ * Follows CORE-E's default placement (interaction.js tryPlace): the same target cell, the same
+ * `placementState` rules and the same support checks, so the ghost never promises a block that will not go in.
  * @param {{getRaw: Function}} world
- * @param {{x,y,z,nx,ny,nz,id,py?}} hit RayHit
+ * @param {{x,y,z,nx,ny,nz,face?,py?}} hit RayHit
  * @param {string|null} itemKey
  * @param {{x,y,z,width,height,yaw}} player
  * @returns {{x:number,y:number,z:number,id:number,state:number}|null}
@@ -145,29 +157,34 @@ export function ghostPlacement(world, hit, itemKey, player) {
   const pl = itemPlaces(itemKey);
   if (!pl) return null;
   const id = pl.id;
-  let x = hit.x, y = hit.y, z = hit.z;
-  const hitRaw = world.getRaw(x, y, z);
-  const hitId = hitRaw & 0xff;
-  if (!(isReplaceable(hitId) && hitId !== id)) { x += hit.nx; y += hit.ny; z += hit.nz; }
-  if (y < 0 || y >= WORLD_HEIGHT) return null;
-  const cur = world.getRaw(x, y, z) & 0xff;
-  if (!B_REPLACEABLE[cur] || cur === id) return null;
   const def = blockDef(id);
   if (!def) return null;
-  let state = pl.state || 0;
-  const shape = def.shape;
-  if (shape === 'torch') {
-    if (hit.ny > 0) state = 0; else if (hit.ny < 0) return null; else state = 1 + FACING_OF(-hit.nx, -hit.nz);
-  } else if (shape === 'ladder') {
-    if (hit.ny !== 0) return null;
-    state = FACING_OF(hit.nx, hit.nz);
-  } else if (def.facing) {
-    state = (state & ~3) | yawToFacing((player ? player.yaw : 0) + Math.PI);
-  } else if (def.axis) {
-    state = (state & ~3) | (hit.ny !== 0 ? 0 : hit.nx !== 0 ? 1 : 2);
-  } else if (shape === 'slab') {
-    const fy = Number.isFinite(hit.py) ? hit.py - Math.floor(hit.py) : 0;
-    state = hit.ny < 0 || (hit.ny === 0 && fy > 0.5) ? 1 : 0;
+  let x = hit.x, y = hit.y, z = hit.z;
+  const hitId = world.getRaw(x, y, z) & 0xff;
+  const replaceHit = isReplaceable(hitId) && hitId !== id;
+  if (!replaceHit) { x += hit.nx; y += hit.ny; z += hit.nz; }
+  if (y < 0 || y >= WORLD_HEIGHT) return null;
+  const cur = world.getRaw(x, y, z) & 0xff;
+  if (!isReplaceable(cur) || cur === id) return null;
+  // replacing the hit cell (grass, snow) acts as its top face
+  const face = replaceHit ? { face: 2, nx: 0, ny: 1, nz: 0, py: hit.y } : { ...hit, py: Number.isFinite(hit.py) ? hit.py : hit.y + 0.5 };
+  const state = placementState(id, pl.state || 0, face, player ? player.yaw : 0, (a, b, c) => world.getRaw(a, b, c), [x, y, z]);
+  if (state < 0) return null;
+  // support rules
+  if (def.placeOn) {
+    const below = blockDef(world.getRaw(x, y - 1, z) & 0xff);
+    if (!below || !def.placeOn.includes(below.name)) return null;
+  } else if (def.support === 'floor' && !hasSolidTop(world, x, y - 1, z)) return null;
+  if (def.support === 'floor_or_wall' && B_SHAPE[id] === SHAPE.TORCH) {
+    if ((state & 7) === 0) { if (!hasSolidTop(world, x, y - 1, z)) return null; }
+    else {
+      const d = ((state & 7) - 1) & 3;
+      if (!isWallSupport(world, x + [0, 1, 0, -1][d], y, z + [-1, 0, 1, 0][d])) return null;
+    }
+  }
+  if (def.support === 'wall') {
+    const back = ((state & 3) + 2) & 3;
+    if (!isWallSupport(world, x + [0, 1, 0, -1][back], y, z + [-1, 0, 1, 0][back])) return null;
   }
   // a solid block must not overlap the player
   if (B_SOLID[id] && player) {
@@ -214,12 +231,21 @@ export class GhostBlock {
         try { pl = ghostPlacement(g.world, ix.target, s.item, p); } catch { pl = null; }
       }
     }
+    // a ghost right in front of the eye fills the screen with a tinted box (e.g. aiming at tall grass at your
+    // feet): hide it when the cell is within ~1.3 blocks of the eye and fade it in over the next block
+    let near = 1;
+    if (pl && p.getEyePos) {
+      const e = p.getEyePos(this._eye || (this._eye = { x: 0, y: 0, z: 0 }));
+      const d = Math.hypot(pl.x + 0.5 - e.x, pl.y + 0.5 - e.y, pl.z + 0.5 - e.z);
+      near = Math.max(0, Math.min(1, (d - 1.3) / 1.0));
+      if (near <= 0) pl = null;
+    }
     this.placement = pl;
     if (!pl) { this.mesh.visible = false; return; }
     const geo = this.geometryFor(pl.id, pl.state);
     if (this.mesh.geometry !== geo) this.mesh.geometry = geo;
     this.mesh.position.set(pl.x + 0.5, pl.y + 0.01, pl.z + 0.5);
-    this.material.uniforms.uAlpha.value = 0.35 + Math.sin(this.time * 4) * 0.08;
+    this.material.uniforms.uAlpha.value = (0.35 + Math.sin(this.time * 4) * 0.08) * near;
     this.material.uniforms.uLightSky.value = 15;
     this.material.uniforms.uLightBlock.value = 15;
     this.mesh.visible = true;

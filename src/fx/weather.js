@@ -79,7 +79,7 @@ export class Weather {
           vec3 p = vec3(wx + right.x * aCorner.x * w, wy + aCorner.y * h, wz + right.y * aCorner.x * w);
           vWorld = p;
           vUv = vec2((aCorner.x + 0.5) * 0.5 + uSnow * 0.5, 1.0 - aCorner.y);
-          vUv.y = fract(vUv.y * 0.5 + aSeed.z);
+          vUv.y = vUv.y * mix(0.5, 1.0, uSnow) + aSeed.z;   // rain: stretched streaks; snow: square texels (wrapped per pixel)
           vec4 mv = viewMatrix * vec4(p, 1.0);
           vDist = length(mv.xyz);
           gl_Position = projectionMatrix * mv;
@@ -99,7 +99,7 @@ export class Weather {
             float hgt = texture(uHeight, hc).r * 255.0;
             if (vWorld.y < hgt) discard;
           }
-          vec4 t = texture(uWeather, vUv);
+          vec4 t = texture(uWeather, vec2(vUv.x, fract(vUv.y)));
           if (t.a < 0.05) discard;
           float fade = (1.0 - smoothstep(10.0, 14.0, vDist)) * smoothstep(0.8, 2.5, vDist);
           vec3 c = t.rgb * max(0.25, uDaylight);

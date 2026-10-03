@@ -1,41 +1,7 @@
 // OWNER LANE: FEATURE-FX. Smoke scenarios for the FX lane (SPEC §8.7 acceptance + visual review shots).
-// Scenarios that only make sense with the real core (terrain drawn by CORE-D, real targeting/mining by CORE-E)
-// list those lanes in `requires`, so they report PENDING until the core lands. While the renderer is a stub the
-// visual scenarios build a small "scenery" platform out of FX block meshes so screenshots show something.
+// Scenarios that need lanes which may still be stubs (items, mobs) list them in `requires` and report PENDING.
 
 const FLAT = { preset: 'flat', seed: 1, mode: 'creative', difficulty: 'peaceful' };
-
-/** Stub renderer only: a 9x9 grass platform (plus a few blocks) drawn with FX block meshes at full light. */
-async function scenery(t) {
-  if (!t.stubs.includes('renderer')) return false;
-  await t.eval(() => {
-    const g = window.__game.game, fx = g.fx, p = g.player;
-    const bx = Math.floor(p.x), bz = Math.floor(p.z);
-    const add = (item, x, y, z) => {
-      const o = fx.makeItemMesh(item);
-      o.userData.fxMesh.scale.setScalar(o.userData.fxKind === 'block' ? 1 : 1);
-      o.userData.fxMesh.userData.fxLight = { sky: 15, block: 0 };
-      o.position.set(x + 0.5, y, z + 0.5);
-      o.userData.scenery = true;
-      g.renderer.addObject(o);
-    };
-    for (let dz = -8; dz <= 2; dz++) for (let dx = -5; dx <= 5; dx++) add('grass_block', bx + dx, 3, bz + dz);
-    add('oak_planks', bx - 1, 4, bz - 4);
-    add('stone', bx + 1, 4, bz - 4);
-    add('cobblestone', bx + 1, 5, bz - 4);
-    window.__fxScenery = true;
-  });
-  return true;
-}
-
-async function clearScenery(t) {
-  await t.eval(() => {
-    const g = window.__game.game;
-    const list = [];
-    g.renderer.dynamicGroup.traverse((o) => { if (o.userData && o.userData.scenery) list.push(o); });
-    for (const o of list) g.fx.disposeItemMesh(o);
-  });
-}
 
 const fxStats = (t) => t.eval(() => window.__game.game.fx.stats());
 
@@ -74,6 +40,9 @@ export default [
       const res = await t.eval(async () => {
         const g = window.__game.game, fx = g.fx;
         const wait = () => new Promise((r) => requestAnimationFrame(() => r()));
+        // the real world streams columns in after startWorld: wait until the renderer's geometry count is steady
+        let last = -1, steady = 0;
+        for (let i = 0; i < 600 && steady < 30; i++) { await wait(); const n = g.renderer.getStats().geometries; steady = n === last ? steady + 1 : 0; last = n; }
         const keys = ['diamond', 'grass_block', 'stone_pickaxe', 'poppy', 'torch'];
         const cycle = async () => {
           const objs = keys.map((k, i) => { const o = fx.makeItemMesh(k); o.position.set(g.player.x + i * 0.4 - 0.8, g.player.y + 1.4, g.player.z - 2); g.renderer.addObject(o); return o; });
@@ -81,18 +50,19 @@ export default [
           for (const o of objs) fx.disposeItemMesh(o);
         };
         await cycle(); await wait();
-        const g0 = g.renderer.getStats().geometries;
+        const g0 = g.renderer.getStats().geometries, i0 = fx.stats().itemGeometries;
         for (let i = 0; i < 100; i++) await cycle();
         await wait();
-        const g1 = g.renderer.getStats().geometries;
+        const g1 = g.renderer.getStats().geometries, i1 = fx.stats().itemGeometries;
         const a = fx.makeItemMesh('diamond'), b = fx.makeItemMesh('diamond');
         const shared = a.userData.fxMesh.geometry === b.userData.fxMesh.geometry;
         fx.disposeItemMesh(a); fx.disposeItemMesh(b);
-        return { g0, g1, shared, live: fx.stats().itemMeshesLive };
+        return { g0, g1, i0, i1, shared, live: fx.stats().itemMeshesLive };
       });
       t.note('geometries', res);
       t.assert(res.shared, 'geometry is shared per item key');
-      t.assert(res.g1 <= res.g0, `100 make/dispose cycles keep the geometry count flat (${res.g0} -> ${res.g1})`);
+      t.assert(res.i1 === res.i0, `100 make/dispose cycles keep the FX item geometry cache flat (${res.i0} -> ${res.i1})`);
+      t.assert(res.g1 <= res.g0 + 2, `100 make/dispose cycles keep the renderer geometry count flat (${res.g0} -> ${res.g1})`);
     },
   },
   {
@@ -100,27 +70,37 @@ export default [
     requires: [],
     async run(t) {
       await t.call('startWorld', FLAT);
-      await scenery(t);
-      await t.call('setLook', 90, 25);
+      // yaw 270 faces east (+X, sunrise), yaw 90 faces west (sunset); the sun/moon must be where we look
+      const bodyOnScreen = (sign) => t.eval((sign) => {
+        const g = window.__game.game, c = g.renderer.camera, d = g.renderer.sky.sunDir;
+        return window.__game.worldToNdc(c.position.x + sign * d[0] * 60, c.position.y + sign * d[1] * 60, c.position.z + sign * d[2] * 60);
+      }, sign);
+      await t.call('setLook', 270, 25);
       await t.call('setTime', 1000);
       await t.call('waitFrames', 4);
       let s = await fxStats(t);
       t.assert(s.sky.sunVisible, 'sun is up in the morning');
       t.assert(s.clouds, 'clouds shown (settings.clouds default on)');
+      let n = await bodyOnScreen(1);
+      t.assert(n.onScreen && Math.abs(n.x) < 0.5, `morning sun in the east, in view (${JSON.stringify(n)})`);
       await t.shot('fx-sky-morning');
       await t.call('setLook', 0, 70);
       await t.call('setTime', 6000);
       await t.call('waitFrames', 4);
       await t.shot('fx-sky-noon');
-      await t.call('setLook', 270, 20);
+      await t.call('setLook', 90, 8);
       await t.call('setTime', 12300);
       await t.call('waitFrames', 4);
+      n = await bodyOnScreen(1);
+      t.assert(n.onScreen && Math.abs(n.x) < 0.5, `setting sun in the west, in view (${JSON.stringify(n)})`);
       await t.shot('fx-sky-sunset');
-      await t.call('setLook', 270, 45);
+      await t.call('setLook', 270, 80);
       await t.call('setTime', 18000);
       await t.call('waitFrames', 4);
       s = await fxStats(t);
       t.assert(s.sky.stars > 0.3, `stars at midnight (${s.sky.stars})`);
+      n = await bodyOnScreen(-1);
+      t.assert(n.onScreen, `moon overhead at midnight (${JSON.stringify(n)})`);
       await t.shot('fx-sky-night');
       // moon phases: day 0..7 -> phase 0..7
       const phases = await t.eval(async () => {
@@ -135,7 +115,6 @@ export default [
       t.assert(!(await fxStats(t)).clouds, 'clouds toggle off with settings.clouds');
       await t.call('setSetting', 'clouds', true);
       await t.call('setTime', 3000);
-      await clearScenery(t);
     },
   },
   {
@@ -143,7 +122,6 @@ export default [
     requires: [],
     async run(t) {
       await t.call('startWorld', FLAT);
-      await scenery(t);
       await t.call('setLook', 0, -20);
       await t.call('selectSlot', 1);           // planks
       await t.call('waitFrames', 30);
@@ -166,7 +144,6 @@ export default [
       t.assert((await fxStats(t)).heldItem === null, 'empty hand shows the arm only');
       await t.shot('fx-hand-empty');
       await t.call('selectSlot', 0);
-      await clearScenery(t);
     },
   },
   {
@@ -174,7 +151,6 @@ export default [
     requires: [],
     async run(t) {
       await t.call('startWorld', FLAT);
-      await scenery(t);
       await t.call('setLook', 0, -35);
       const p = await t.call('pos');
       const bx = Math.floor(p.x), bz = Math.floor(p.z) - 3;
@@ -192,7 +168,6 @@ export default [
         await t.eval(([x, z]) => window.__game.game.events.emit('block:miningStop', { x, y: 3, z }), [bx, bz]);
         await t.call('waitFrames', 2);
         t.assert((await fxStats(t)).crack === -1, 'crack hides on block:miningStop');
-        await clearScenery(t);
         return;
       }
       await t.eval(([x, z]) => {
@@ -210,7 +185,6 @@ export default [
       await t.call('waitFrames', 2);
       s = await fxStats(t);
       t.assert(s.crack === -1 && !s.ghost, 'crack and ghost hide again');
-      await clearScenery(t);
     },
   },
   {
@@ -218,43 +192,24 @@ export default [
     requires: [],
     async run(t) {
       await t.call('startWorld', FLAT);
-      await scenery(t);
       await t.call('setLook', 30, -10);
-      // stand-in for the player lane's third-person camera: 4 blocks behind the eye
-      await t.eval(() => {
-        const g = window.__game.game, p = g.player;
-        p.view = 1;
-        window.__fxOrigFrame = p.frame;
-        p.frame = function (gg, dt, a) {
-          window.__fxOrigFrame.call(this, gg, dt, a);
-          const cam = g.renderer.camera, d = p.getLookDir({});
-          cam.position.set(p.renderX - d.x * 4, p.renderY + p.eyeHeight - d.y * 4, p.renderZ - d.z * 4);
-        };
-      });
+      // the player lane's real third-person camera (V / F5): 0 first person -> 1 behind -> 2 in front
+      await t.call('press', 'toggleView');
       await t.call('waitFrames', 5);
       let s = await fxStats(t);
+      t.assert((await t.call('pos')).view === 1, 'V switches to the camera behind');
       t.assert(s.playerModel && !s.viewModel, 'third person: body visible, hand hidden');
       await t.shot('fx-player-back');
       await t.eval(() => { window.__game.game.player.yaw += Math.PI; });
       await t.call('waitFrames', 30);
       await t.eval(() => { const p = window.__game.game.player; p.yaw -= Math.PI; });
-      await t.eval(() => {
-        const g = window.__game.game, p = g.player;
-        p.view = 2;
-        p.frame = function (gg, dt, a) {
-          window.__fxOrigFrame.call(this, gg, dt, a);
-          const cam = g.renderer.camera, d = p.getLookDir({});
-          cam.position.set(p.renderX + d.x * 3.2, p.renderY + p.eyeHeight + d.y * 3.2, p.renderZ + d.z * 3.2);
-          cam.lookAt(p.renderX, p.renderY + 1.3, p.renderZ);
-        };
-      });
+      await t.call('press', 'toggleView');
       await t.call('waitFrames', 5);
       await t.shot('fx-player-front');
-      await t.eval(() => { const p = window.__game.game.player; p.frame = window.__fxOrigFrame; p.view = 0; });
+      await t.call('press', 'toggleView');
       await t.call('waitFrames', 2);
       s = await fxStats(t);
       t.assert(!s.playerModel && s.viewModel, 'first person again: body hidden, hand visible');
-      await clearScenery(t);
     },
   },
   {
@@ -295,7 +250,6 @@ export default [
     requires: [],
     async run(t) {
       await t.call('startWorld', FLAT);
-      await scenery(t);
       await t.call('setLook', 0, -15);
       await t.eval(() => {
         const g = window.__game.game, fx = g.fx, p = g.player;
@@ -319,7 +273,6 @@ export default [
       await t.shot('fx-particles');
       await t.call('runTicks', 80);
       t.assert((await fxStats(t)).particles < 10, 'particles expire');
-      await clearScenery(t);
     },
   },
   {
@@ -327,7 +280,6 @@ export default [
     requires: [],
     async run(t) {
       await t.call('startWorld', FLAT);
-      await scenery(t);
       await t.call('setLook', 0, 5);
       await t.eval(() => window.__game.game.fx.setWeather(1));
       await t.call('sleep', 2500);
@@ -337,7 +289,6 @@ export default [
       t.assert((await t.call('eventCount', 'fx:weather')) >= 1, 'fx:weather emitted');
       await t.shot('fx-rain');
       await t.eval(() => window.__game.game.fx.setWeather(0));
-      await clearScenery(t);
     },
   },
   {
@@ -389,6 +340,7 @@ export default [
       t.assert((await fxStats(t)).particles < 10, 'particles settle and expire');
       // kid ghost block on the real cursor target
       await t.call('setMode', 'creative');
+      await t.call('setSlot', 1, 'oak_planks', 64);   // the survival hotbar starts empty
       await t.call('selectSlot', 1);
       const p = await t.call('pos');
       const bx = Math.floor(p.x), bz = Math.floor(p.z) - 2;
@@ -401,7 +353,7 @@ export default [
       await t.shot('fx-inworld-ghost');
       // the sky over real terrain, and a third-person look (player lane camera)
       await t.call('setTime', 12500);
-      await t.call('setLook', 270, 10);
+      await t.call('setLook', 90, 6);
       await t.call('waitFrames', 5);
       await t.shot('fx-inworld-sunset');
       await t.call('setTime', 3000);

@@ -4,6 +4,120 @@ Branch `lane/fx` · worktree `C:\Users\BSLeo\AppData\Roaming\Claude\scratch-work
 
 <!-- newest first: date · what changed · commands run + results (copy the PASS/FAIL lines) · remaining · blockers · spec conflicts -->
 
+## 2026-10-03 · Phase 2: merged the real core, verified in-world, fixed what looked wrong
+
+`git merge main` into `lane/fx` (merge commit `ea295cf`, no conflicts; LEAD files untouched). Everything below was
+driven in real headless Chrome (RTX 3080 Ti / ANGLE D3D11, plus SwiftShader for the weak-laptop path) with real
+`page.mouse` / `page.keyboard` input plus the test API, and every screenshot was looked at.
+
+### Stub-era code removed
+
+- `avatar.js`: the view-model `autoClear` workaround (CORE-D's view-model pass clears depth only, autoClear off).
+- `fxmat.js`: the `ArrayTextureRef` fallback texture built from `game.textures` (CORE-D's `uTex` is always there now).
+- `tools/scenarios/fx.mjs`: the stub-only "scenery" platform; `fx-player-model` now uses the player lane's real
+  V / F5 camera instead of patching `player.frame`.
+- No mobs-collision fallback existed in FX (particles already used `getCollisionBoxes`).
+
+### Defects found in-world and fixed (FX files only)
+
+| What a player would have seen | Fix |
+|---|---|
+| Black squares in the mining dust: dust is spawned on the face of the block being mined and lit by that (solid, light 0) cell | `particles.js lightAround()`: a particle in an opaque cell takes the brightest open neighbour (unit test added) |
+| Clouds cut off by a hard straight line across the sky (the camera far plane, 120-152 blocks, is closer than the clouds) | `celestial.js`: far cloud vertices are squeezed along the view ray into [0.6, 0.97] x far (same pixel, order kept, near clouds keep true depth); fade range now 150-190 blocks, so clouds stretch to the horizon |
+| Huge translucent green box filling the screen at dusk / in tall grass: the kid ghost block in the cell right in front of the eye | `blockfx.js`: ghost hidden within 1.3 blocks of the eye and faded in over the next block |
+| Ghost could promise a block that will not go in (flower on stone, torch without a wall) and used its own copy of the state rules | `ghostPlacement()` now imports CORE-E's `placementState` and mirrors `tryPlace` (same cell, "replace acts as top face", placeOn / floor / wall support) |
+| Hand and held item off-screen in a 375 px-wide portrait window | `avatar.js`: hand x offset scales with aspect (unchanged at 4:3 and 16:9) |
+| Full moon at dusk was a 20-degree white blob on the bright horizon (additive) | moon quad 20 -> 14 (disc ~12 degrees), moon fades in with darkness |
+| Sun a white blob at sunset | sun tinted warm orange near the horizon |
+| Stars clearly visible in a blue sunset sky | star alpha = starBrightness^2 (classic curve), stars a little smaller |
+| Pink/maroon clouds in the dark after sunset | sunset tint on clouds fades with daylight |
+| Snow fell as long white streaks (per-vertex `fract` collapsed each quad onto one texel row) | wrap moved to the fragment shader; snow uses square texels (small flakes) |
+| Underwater tint could lag the fog by a tick and fail `fx-overlays` | tint follows `renderer.eyeMedium` (the same answer as CORE-D's fog, per frame) |
+| Clouds cost ~4 ms/frame on SwiftShader | low preset (SwiftShader, Intel HD) draws flat single-pass clouds (`buildFlatCloudGeometry`, 330 quads vs 4400 x 2 passes; SPEC §8.7 "flat clouds"); cost now within noise |
+| Scenario bugs: `fx-itemmesh` measured world streaming, `fx-inworld-break` had an empty survival hotbar, `fx-sky` looked east at sunset (yaw 90 = west) | fixed; `fx-sky` now asserts the morning sun is on screen looking east, the setting sun looking west and the moon overhead at midnight |
+
+### Verified in-world (PASS/FAIL)
+
+Screenshots: `.tmp/fxv/*.png` (my scripts in `.tmp/fxv/*.mjs`, git-ignored) and `.tmp/smoke-fx-fx-*.png`.
+
+```
+PASS view model over real terrain: block / tool / food / torch / empty hand, 16:9 + 4:3 + 375x667   grid-wide.png grid-43.png grid-phone.png
+PASS hand lit by eye light: dark in a closed stone room, warm next to a torch                        grid-w1.png
+PASS swing on real mining (mouse held), equip swap (lower / swap / raise) on hotbar change           hand-wide-mine*.png hand-wide-swap-mid.png
+PASS crack overlay on real survival mining: cube, slab, fence post (shape-fitted), darkens            hand-wide-mine3.png grid-crack.png
+PASS block particles with real textures + light: dark in caves, warm by torches, settle on ground    grid-w1.png smoke-fx-fx-inworld-break.png
+PASS cutout break particles (torch, poppy) use opaque patches                                       grid-crack.png
+PASS ghost: kid cursor cell, torch on wall (state 1), ladder on wall, none for apple / pickaxe       grid-w2.png (+ fx-inworld-break assert)
+PASS ghost on water: none (raycast ignores fluids, same as placing)
+PASS sky vs CORE-D dome: sun / moon / stars drawn over the dome; sunrise east, sunset west (asserted) grid-skyscen.png
+PASS stars rotate with the celestial angle; 8 moon phases; clouds toggle with settings.clouds        fx-sky
+PASS clouds at R3 and R12, fade into the horizon, no far-plane cut; flat clouds on SwiftShader      grid-clouds.png grid-flat.png
+PASS third person with the real V key: body visible / hand hidden, walk cycle with W held,
+     body-yaw lag on turn, front view with face + held sword, back to first person                 grid-tp.png
+PASS rain: sky greys (renderer reads fx.weather.rain), stops under a roof, splashes                 grid-rain.png
+PASS snow in the snowy preset (small flakes), weather eases back to clear                           grid-rain.png
+PASS underwater: CORE-D fog + FX tint, breathing bubbles; splash particles on entering water        grid-w2.png
+PASS kid hold ring on real pointerdown (mouse), fills, hides on release                             hand-wide-mine1.png
+PASS torch flame + smoke display ticks at night                                                     torch-night.png
+PENDING dropped items (fx-inworld-drops): items + mobs lanes are still stubs
+PENDING real MOBS / MECH / KID / SURVIVAL events (love hearts, death poof, TNT, bone meal, home and
+     bed fades, hurt flash from real damage, eat crumbs): those lanes are stubs; the FX side is covered
+     by fx-events / fx-overlays / fx-particles-kinds with emitted events
+NOT RUN touch tap/hold on a real touchscreen (touch lane is a stub; the ring listens to pointer events)
+```
+
+### Performance (FX share, real world)
+
+- RTX, R6, settled world, A/B toggling FX sky + hand: draws 162 -> 156 (day) / 169 -> 162 (night, stars + moon);
+  frame time identical (vsync-bound 6.9 ms). FX adds 5-7 draw calls in normal play (stars, sun, moon, clouds x2,
+  hand, held item) + particles 1, crack 1, ghost 1, weather 1 when active.
+- SwiftShader, low preset R4: per-component A/B (median of 4): clouds 41.6 vs 41.0 ms, hand 45.3 vs 45.4,
+  sun/moon/stars 44.3 vs 43.3 - all within SwiftShader noise after the flat-cloud change (was ~+4 ms).
+- 2000 particles (cap): 1 draw call, frame time unchanged on RTX.
+
+### Commands run and results (final)
+
+```
+node build.mjs --dev --out .tmp/build-fx      -> 1675 KB dev build
+npm run test:unit                             -> tests 104, pass 104, fail 0
+node tools/smoke.mjs --tag fx                 -> {"PASS":66,"PENDING":4,"SKIP":2,"FAIL":1}
+   all 11 runnable fx-* PASS; fx-inworld-break PASS (was PENDING); fx-inworld-drops PENDING (items, mobs)
+   FAIL coree-classic-lock (order/timing-dependent CORE-E scenario, see Cross-lane defects; 6/6 PASS in isolation
+   on both this build and main)
+node tools/smoke.mjs --tag fxss --swiftshader --scenario boot,world,perf,fx-*  -> {"PASS":15,"PENDING":1}
+```
+
+### Cross-lane defects (not edited; for the owners via LEAD)
+
+1. **CORE-D test `cored-daynight` is flaky** (`tools/scenarios/cored.mjs`, "setTime never remeshes"). It compares
+   `getStats().merges` before/after `setTime`, but deferred column re-merges from the initial load are still draining
+   (sets stay equal, merges grow, e.g. 401 -> 416). Fails ~1 in 3 runs on a plain `main` build too. Suggested fix:
+   wait until merges are stable for ~30 frames (or `world.unmeshedWithin(R) === 0` and no pending merge queue) before
+   the `before` snapshot, or assert only `sectionSets`.
+2. **CORE-D test `cored-entity` leaks its test objects**: the 4-part red mob and the oak-log block model are added
+   with `renderer.addObject` and never removed, and `renderer.dynamicGroup` survives `exitToTitle`, so they float in
+   every later scenario's screenshots (`smoke-fx-fx-particles.png`, `-hurt`, `-ring`, `-inworld-ghost` in a full run).
+   Suggested fix: `R.removeObject(mob); R.removeObject(block);` + dispose at the end of the scenario (and/or LEAD:
+   clear non-system dynamic objects on `world:exit`).
+3. **CORE-E test `coree-classic-lock` is order/timing dependent**: in full runs it failed with "walked to the edge"
+   once and "middle click picks the block into the hotbar ({slot:4, item: red_wool})" once; `mouseLookDeg` varies
+   5..96 between runs. 6/6 PASS in isolation on both this build and `main`. Suggested fix: reset hotbar/selection
+   and wait for pointer-lock + a settled frame before the mouse-look and pick-block steps.
+4. **Hotbar number keys do nothing yet**: `hotbar1..9` actions are handled by the HUD (INV lane, still a stub), so
+   `Digit1..9` do not change the selected slot in play. FX's equip-swap animation was verified with
+   `inventory.selectSlot`. Nothing to fix in core; the INV lane needs it.
+
+### Remaining gaps (FX)
+
+- Dropped-item look (spin/bob, sizes) and real mob/mech/kid event effects: wait for items, mobs, mechanics, kid,
+  survival lanes.
+- Touchscreen hold ring on a real touch device (touch lane stub).
+- Arm swing: works and reads as a punch, but the mid-swing pose shows the whole forearm sideways; could be closer to
+  the classic chop arc (cosmetic).
+- Fancy clouds can show faint lines where faces overlap near the fade edge (cosmetic).
+- Merge commit `ea295cf` was created by `git merge --no-edit` without the Co-Authored-By trailer (left as is; no
+  history rewriting).
+
 ## 2026-10-03 · FX lane implemented (P0 + P1 + P2 weather)
 
 `registerStub('fx')` is deleted: `src/fx/fx.js` is real. Built against the frozen interfaces while every CORE lane was

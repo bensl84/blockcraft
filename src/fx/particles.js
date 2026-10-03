@@ -7,12 +7,33 @@
 // (block-break patches) or FX's procedural sprite atlas (smoke, hearts, sparkles...).
 
 import * as THREE from 'three';
-import { B_LIQUID, B_SHAPE, SHAPE, faceLayer, getCollisionBoxes } from '../core/registry.js';
+import { B_LIQUID, B_OPAQUE, B_SHAPE, SHAPE, faceLayer, getCollisionBoxes } from '../core/registry.js';
 import { mulberry32 } from '../core/math.js';
 import { GLSL_LIGHT, pixelTexture } from './fxmat.js';
 import { SPRITE, SPRITE_COLS, buildSpriteAtlas } from './sprites.js';
 
 export const MAX_PARTICLES = 2000;
+
+const NB = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+/**
+ * Packed light (sky << 4 | block) for a particle in cell (x, y, z). An opaque cell has no light of its own (the
+ * block being mined, or a patch that slid into a face), so it takes the brightest neighbour per channel instead
+ * of drawing black.
+ */
+export function lightAround(world, x, y, z) {
+  const l = world.getLight(x, y, z);
+  const raw = world.getRaw ? world.getRaw(x, y, z) : 0;
+  if (!B_OPAQUE[raw & 0xff]) return l;
+  let sky = 0, blk = 0;
+  for (const d of NB) {
+    const nx = x + d[0], ny = y + d[1], nz = z + d[2];
+    if (world.getRaw && B_OPAQUE[world.getRaw(nx, ny, nz) & 0xff]) continue;
+    const v = world.getLight(nx, ny, nz);
+    if ((v >> 4) > sky) sky = v >> 4;
+    if ((v & 15) > blk) blk = v & 15;
+  }
+  return (sky << 4) | blk;
+}
 /** Particles are not spawned farther than this from the viewer (blocks). */
 export const PARTICLE_VIEW_DIST = 48;
 
@@ -72,7 +93,7 @@ export class ParticleSim {
 
   sampleLight(i, world) {
     if (world && world.getLight) {
-      const l = world.getLight(Math.floor(this.x[i]), Math.floor(this.y[i]), Math.floor(this.z[i]));
+      const l = lightAround(world, Math.floor(this.x[i]), Math.floor(this.y[i]), Math.floor(this.z[i]));
       this.sky[i] = l >> 4; this.block[i] = l & 15;
     } else { this.sky[i] = 15; this.block[i] = 0; }
   }
@@ -266,7 +287,7 @@ export class ParticleSim {
       this.flags[i] = F_COLLIDE;
       this.sky[i] = 15; this.block[i] = 0;
       if (world && world.getLight) {
-        const l = world.getLight(bx, by, bz);
+        const l = lightAround(world, bx, by, bz);
         this.sky[i] = l >> 4; this.block[i] = l & 15;
       }
     }

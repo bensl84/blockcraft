@@ -138,7 +138,7 @@ export function createFxSystem(game) {
         crack: crack.mesh.visible ? crack.stage : -1, ghost: ghost.mesh.visible ? { ...ghost.placement } : null,
         viewModel: viewModel.root.visible, heldItem: viewModel.itemKey, playerModel: avatar.mesh.visible,
         underwater: overlays.underwater, flashes: overlays.flashes, fade: overlays.fadeLevel,
-        sky: { ...celestial.state }, clouds: celestial.clouds.visible, cloudQuads: celestial.cloudQuads, stars: celestial.starCount,
+        sky: { ...celestial.state }, clouds: celestial.clouds.visible, cloudQuads: celestial.flat ? celestial.flatCloudQuads : celestial.cloudQuads, flatClouds: celestial.flat, stars: celestial.starCount,
         weather: { ...weather.state }, ring: !!overlays.ringState,
       };
     },
@@ -382,7 +382,11 @@ export function createFxSystem(game) {
     const p = game.player;
     const inWorld = !!(game.meta && p && (game.state === 'playing' || game.state === 'paused'));
     let eyeWater = false, eyeLava = false;
-    if (inWorld) {
+    const medium = game.renderer && game.renderer.eyeMedium;
+    if (inWorld && typeof medium === 'string') {
+      // CORE-D decides the underwater fog from the camera cell every frame: the tint follows the same answer
+      eyeWater = medium === 'water'; eyeLava = medium === 'lava';
+    } else if (inWorld) {
       eyeWater = !!p.eyeInWater;
       const w = game.world;
       if (w && w.getBlock) {

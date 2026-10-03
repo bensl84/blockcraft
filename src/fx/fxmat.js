@@ -54,46 +54,23 @@ export function sharedUniforms(renderer) {
   };
 }
 
-/* ------------------------------------------------------------------ array texture (with stub fallback) */
+/* ------------------------------------------------------------------ array texture */
 
 /**
- * Keeps `uniform.value` pointing at the renderer's array texture, or at a fallback built from game.textures
- * while the renderer has none. Call update() once per frame.
+ * Keeps `uniform.value` pointing at CORE-D's block DataArrayTexture (`renderer.uniforms.uTex`, rebuilt on
+ * context restore / halfAnim). Call update() once per frame.
  */
 export class ArrayTextureRef {
   constructor(game) {
     this.game = game;
     this.uniform = { value: null };
-    this.fallback = null;
-    this.fallbackSource = null;
   }
   update() {
     const r = this.game.renderer;
     const real = r && r.uniforms && r.uniforms.uTex && r.uniforms.uTex.value;
-    if (real && (real.isDataArrayTexture || real.isTexture)) {
-      this.uniform.value = real;
-      if (this.fallback) { this.fallback.dispose(); this.fallback = null; this.fallbackSource = null; }
-      return;
-    }
-    const ts = this.game.textures;
-    if (!ts || !ts.data) { this.uniform.value = null; return; }
-    if (!this.fallback || this.fallbackSource !== ts) {
-      if (this.fallback) this.fallback.dispose();
-      const t = new THREE.DataArrayTexture(ts.data, ts.size, ts.size, ts.count);
-      t.format = THREE.RGBAFormat;
-      t.type = THREE.UnsignedByteType;
-      t.magFilter = THREE.NearestFilter;
-      t.minFilter = THREE.NearestFilter;
-      t.generateMipmaps = false;
-      t.flipY = false;
-      t.colorSpace = THREE.NoColorSpace;
-      t.needsUpdate = true;
-      this.fallback = t;
-      this.fallbackSource = ts;
-    }
-    this.uniform.value = this.fallback;
+    this.uniform.value = real && real.isTexture ? real : null;
   }
-  dispose() { if (this.fallback) this.fallback.dispose(); this.fallback = null; }
+  dispose() { this.uniform.value = null; }
 }
 
 /* ------------------------------------------------------------------ per-object light */

@@ -294,6 +294,33 @@ export function buildCloudGeometry(cloudMap, half = CLOUD_MAP_SIZE, cell = CLOUD
 }
 
 /**
+ * Flat clouds (low preset / SPEC §8.7 "flat clouds"): one horizontal layer, each row of cloud cells merged into
+ * runs, so a single blended pass without a depth pre-pass draws them (no overlapping faces).
+ */
+export function buildFlatCloudGeometry(cloudMap, half = CLOUD_MAP_SIZE, cell = CLOUD_CELL, y = CLOUD_THICKNESS / 2) {
+  const pos = [], shade = [];
+  let quads = 0;
+  for (let j = -half; j < half; j++) {
+    for (let i = -half; i < half;) {
+      if (!cloudMap.at(i, j)) { i++; continue; }
+      let e = i;
+      while (e < half && cloudMap.at(e, j)) e++;
+      const x0 = i * cell, x1 = e * cell, z0 = j * cell, z1 = z0 + cell;
+      pos.push(x0, y, z0, x1, y, z0, x1, y, z1, x0, y, z1);
+      shade.push(236, 236, 236, 236);
+      quads++;
+      i = e;
+    }
+  }
+  const index = new Uint32Array(quads * 6);
+  for (let q = 0; q < quads; q++) {
+    const b = q * 4, o = q * 6;
+    index[o] = b; index[o + 1] = b + 1; index[o + 2] = b + 2; index[o + 3] = b; index[o + 4] = b + 2; index[o + 5] = b + 3;
+  }
+  return { position: new Float32Array(pos), shade: new Uint8Array(shade), index, quads };
+}
+
+/**
  * Weather streak texture: 2 cells of 8x32 (rain streaks, snow flakes) = 16x32 RGBA.
  */
 export function buildWeatherTexture() {

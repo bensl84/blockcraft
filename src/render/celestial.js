@@ -14,7 +14,7 @@ import { CLOUD_HEIGHT } from '../core/constants.js';
 import { mulberry32 } from '../core/math.js';
 import { computeSky } from './sky.js';
 import {
-  CLOUD_CELL, CLOUD_MAP_SIZE, buildCloudGeometry, buildCloudMap, buildMoonTexture, buildSunTexture,
+  CLOUD_CELL, CLOUD_MAP_SIZE, buildCloudGeometry, buildFlatCloudGeometry, buildCloudMap, buildMoonTexture, buildSunTexture,
 } from '../fx/sprites.js';
 import { pixelTexture } from '../fx/fxmat.js';
 
@@ -27,16 +27,17 @@ const SKY_VERT = /* glsl */`
 
 function additiveMaterial(map, extraUniforms = {}, frag) {
   return new THREE.ShaderMaterial({
-    uniforms: { uMap: { value: map }, uAlpha: { value: 1 }, uUvRect: { value: new THREE.Vector4(0, 0, 1, 1) }, ...extraUniforms },
+    uniforms: { uMap: { value: map }, uAlpha: { value: 1 }, uTint: { value: new THREE.Color(1, 1, 1) }, uUvRect: { value: new THREE.Vector4(0, 0, 1, 1) }, ...extraUniforms },
     vertexShader: SKY_VERT,
     fragmentShader: frag || /* glsl */`
       uniform sampler2D uMap;
       uniform float uAlpha;
+      uniform vec3 uTint;
       uniform vec4 uUvRect;
       in vec2 vUv;
       void main() {
         vec3 c = texture(uMap, uUvRect.xy + vec2(vUv.x, 1.0 - vUv.y) * uUvRect.zw).rgb;
-        gl_FragColor = vec4(c * uAlpha, 1.0);
+        gl_FragColor = vec4(c * uTint * uAlpha, 1.0);
       }`,
     transparent: true,
     depthWrite: false,
@@ -67,7 +68,7 @@ export function buildStarGeometry(n = 1200, seed = 10842) {
     const l = v.length();
     if (l < 0.01 || l > 1) continue;
     v.multiplyScalar(SKY_R / l);
-    const s = 0.15 + rnd() * 0.18;
+    const s = 0.12 + rnd() * 0.12;
     up.set(Math.abs(v.y) > 90 ? 1 : 0, Math.abs(v.y) > 90 ? 0 : 1, 0);
     a.crossVectors(v, up).normalize().multiplyScalar(s);
     b.crossVectors(v, a).normalize().multiplyScalar(s);
@@ -112,7 +113,7 @@ export class Celestial {
     const moonImg = buildMoonTexture();
     this.moonTex = pixelTexture(moonImg.data, moonImg.w, moonImg.h);
     this.moonMat = additiveMaterial(this.moonTex);
-    this.moon = new THREE.Mesh(skyQuad(20, -SKY_R), this.moonMat);
+    this.moon = new THREE.Mesh(skyQuad(14, -SKY_R), this.moonMat);   // disc ~12 degrees, like the classic moon
     this.moon.renderOrder = -11;
     this.moon.frustumCulled = false;
     // stars
@@ -146,14 +147,22 @@ export class Celestial {
       uFogColor: { value: new THREE.Color(0.72, 0.83, 1) },
       uFadeNear: { value: 110 }, uFadeFar: { value: 180 },
       uAlpha: { value: 0.8 },
+      uDepthFar: { value: 120 },
     };
     const cloudVert = /* glsl */`
+      uniform float uDepthFar;
       in float aShade; out float vShade; out float vDist;
       void main() {
         vShade = aShade;
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         vec4 wp = modelMatrix * vec4(position, 1.0);
         vDist = length((wp.xyz - cameraPosition).xz);
+        // Clouds reach past the camera's far plane (the terrain fog distance), which would cut them off in a hard
+        // straight line. Pull far vertices in ALONG THE VIEW RAY (same pixel on screen) with a monotonic squeeze
+        // into [0.6, 0.97] x far: near clouds keep their true depth, far ones keep their order.
+        float d = length(mv.xyz);
+        float d0 = uDepthFar * 0.6, room = uDepthFar * 0.37;
+        if (d > d0) mv.xyz *= (d0 + room * (1.0 - exp(-(d - d0) / room))) / d;
         gl_Position = projectionMatrix * mv;
       }`;
     const cloudFrag = /* glsl */`
@@ -173,14 +182,26 @@ export class Celestial {
       uniforms: this.cloudUniforms, vertexShader: cloudVert, fragmentShader: cloudFrag,
       transparent: true, depthWrite: false, depthFunc: THREE.LessEqualDepth, side: THREE.DoubleSide,
     });
+    // flat variant for the low preset (weak GPUs): one layer, one pass
+    const fg = buildFlatCloudGeometry(this.cloudMap, CLOUD_MAP_SIZE);
+    const flatGeo = new THREE.BufferGeometry();
+    flatGeo.setAttribute('position', new THREE.BufferAttribute(fg.position, 3));
+    flatGeo.setAttribute('aShade', new THREE.BufferAttribute(fg.shade, 1, true));
+    flatGeo.setIndex(new THREE.BufferAttribute(fg.index, 1));
+    this.flatCloudGeo = flatGeo;
+    this.flatCloudQuads = fg.quads;
+    this.cloudFlat = new THREE.Mesh(flatGeo, this.cloudMat);
+    this.cloudFlat.renderOrder = -10;
+    this.cloudFlat.visible = false;
+    this.flat = false;
     this.cloudDepth = new THREE.Mesh(geo, this.cloudDepthMat);
     this.cloudDepth.renderOrder = -10;
     this.cloudColor = new THREE.Mesh(geo, this.cloudMat);
     this.cloudColor.renderOrder = -10;
     this.clouds = new THREE.Group();
     this.clouds.name = 'fx-clouds';
-    this.clouds.add(this.cloudDepth, this.cloudColor);
-    for (const m of [this.cloudDepth, this.cloudColor]) m.frustumCulled = false;
+    this.clouds.add(this.cloudDepth, this.cloudColor, this.cloudFlat);
+    for (const m of [this.cloudDepth, this.cloudColor, this.cloudFlat]) m.frustumCulled = false;
     this.cloudDrift = 0;
     this.attached = false;
     /** last values (tests / debug) */
@@ -209,11 +230,17 @@ export class Celestial {
     this.rot.rotation.set(0, 0, angle);
     const clear = 1 - Math.min(1, Math.max(0, rain));
     this.sunMat.uniforms.uAlpha.value = clear;
+    // low sun: warm orange instead of a white blob on the bright horizon
+    const low = Math.min(1, Math.max(0, 1 - (sd[1] + 0.05) * 4));
+    this.sunMat.uniforms.uTint.value.setRGB(1, 1 - 0.3 * low, 1 - 0.6 * low);
     const phase = ((sky.moonPhase | 0) % 8 + 8) % 8;
     // atlas: 4 columns x 2 rows, row 0 on top (uv y=0 is the top row since textures are not flipped)
     this.moonMat.uniforms.uUvRect.value.set((phase % 4) / 4, Math.floor(phase / 4) / 2, 0.25, 0.5);
-    this.moonMat.uniforms.uAlpha.value = clear * (0.95 - 0.35 * Math.min(1, sky.daylight ?? 0));
-    const stars = (sky.starBrightness || 0) * clear;
+    // additive: a bright dusk sky would wash a full-strength moon out into a white blob, so it fades in with dark
+    this.moonMat.uniforms.uAlpha.value = clear * (0.95 - 0.75 * Math.min(1, sky.daylight ?? 0));
+    // squared like the classic curve: barely there at sunset, full at night
+    const sb = Math.min(1, Math.max(0, sky.starBrightness || 0));
+    const stars = sb * sb * clear;
     this.starMat.uniforms.uAlpha.value = stars;
     this.stars.visible = stars > 0.01;
     // clouds
@@ -226,6 +253,13 @@ export class Celestial {
       const ox = this.cloudDrift + Math.round((cam.position.x - this.cloudDrift) / period) * period;
       const oz = Math.round(cam.position.z / period) * period;
       this.clouds.position.set(ox, CLOUD_HEIGHT, oz);
+      this.cloudUniforms.uDepthFar.value = cam.far || 120;
+      // low preset (SwiftShader, Intel HD): flat single-pass clouds cost ~1/4 of the fancy ones
+      const flat = !!(r.quality && r.quality.preset === 'low');
+      if (flat !== this.flat) {
+        this.flat = flat;
+        this.cloudFlat.visible = flat; this.cloudDepth.visible = !flat; this.cloudColor.visible = !flat;
+      }
       // clouds fade into the sky's own horizon colour (computeSky.fogColor) - also correct while the eye is under water
       const fc = sky.fogColor;
       if (fc) this.cloudUniforms.uFogColor.value.setRGB(fc[0], fc[1], fc[2]);
@@ -235,13 +269,15 @@ export class Celestial {
       const k = Math.min(1, Math.max(0, d));
       c.setRGB(night[0] + (1 - night[0]) * k, night[1] + (1 - night[1]) * k, night[2] + (1 - night[2]) * k);
       if (sky.sunsetColor) {
-        const a = sky.sunsetColor[3] * 0.35;
+        const a = sky.sunsetColor[3] * 0.35 * Math.min(1, k * 2.5);   // no pink clouds once it is dark
         c.setRGB(c.r * (1 - a) + sky.sunsetColor[0] * a, c.g * (1 - a) + sky.sunsetColor[1] * a, c.b * (1 - a) + sky.sunsetColor[2] * a);
       }
       if (rain > 0) { const gr = 0.55; c.setRGB(c.r * (1 - rain * (1 - gr)), c.g * (1 - rain * (1 - gr)), c.b * (1 - rain * (1 - gr))); }
-      const far = Math.max(120, Math.min(200, (r.renderFar || 88) * 1.6));
+      // fade toward the horizon colour over a range well past the terrain fog (clouds stretch to the horizon like
+      // the classic game); the cloud mesh always covers at least CLOUD_MAP_SIZE * CLOUD_CELL / 2 = 192 blocks
+      const far = Math.max(150, Math.min(190, (r.renderFar || 88) * 2.2));
       this.cloudUniforms.uFadeFar.value = far;
-      this.cloudUniforms.uFadeNear.value = far * 0.55;
+      this.cloudUniforms.uFadeNear.value = far * 0.35;
     }
     this.state.angle = angle; this.state.phase = phase; this.state.stars = stars;
     this.state.sunVisible = sd[1] > -0.2 && clear > 0; this.state.cloudsVisible = this.clouds.visible;
@@ -252,6 +288,6 @@ export class Celestial {
     for (const o of [this.group, this.clouds]) if (o.parent) o.parent.remove(o);
     for (const m of [this.sun, this.moon, this.stars]) m.geometry.dispose();
     for (const m of [this.sunMat, this.moonMat, this.starMat, this.cloudMat, this.cloudDepthMat]) m.dispose();
-    this.cloudGeo.dispose(); this.sunTex.dispose(); this.moonTex.dispose();
+    this.cloudGeo.dispose(); this.flatCloudGeo.dispose(); this.sunTex.dispose(); this.moonTex.dispose();
   }
 }

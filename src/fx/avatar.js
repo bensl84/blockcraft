@@ -93,13 +93,8 @@ export class ViewModel {
   attach(renderer) {
     if (this.attached || !renderer || !renderer.viewModelScene) return;
     const scene = renderer.viewModelScene;
+    // CORE-D renders this scene after the world with autoClear off and only the depth buffer cleared.
     scene.add(this.root);
-    // The view-model pass must keep the world's colour buffer (only depth is cleared). Guard against a renderer
-    // that renders this scene with autoClear on (the CORE-D stub does): switch autoClear off for this scene only.
-    const before = scene.onBeforeRender, after = scene.onAfterRender;
-    let saved = null;
-    scene.onBeforeRender = function (r, ...rest) { saved = r.autoClear; r.autoClear = false; return before.call(this, r, ...rest); };
-    scene.onAfterRender = function (r, ...rest) { if (saved !== null) r.autoClear = saved; saved = null; return after.call(this, r, ...rest); };
     this.attached = true;
   }
 
@@ -201,7 +196,10 @@ export class ViewModel {
     const drop = (1 - this.equip) * 0.55;
     const holding = !!this.itemObj;
     const f = holding ? this.cfg.fistHolding : this.cfg.fist;
-    this.hand.position.set(f[0] + bx + sx, f[1] + by + sy - drop, f[2] + sz);
+    // narrow (portrait phone) windows have a tiny horizontal field of view: pull the hand in toward the middle
+    const vc = g.renderer && g.renderer.viewModelCamera;
+    const ax = clamp((vc && vc.aspect ? vc.aspect : 16 / 9) / 1.2, 0.4, 1);
+    this.hand.position.set(f[0] * ax + bx + sx * ax, f[1] + by + sy - drop, f[2] + sz);
     this.hand.rotation.set(rx2 + swayPitch * 0.25, ry2 + swayYaw * 0.25, rz2 + bx * 2, 'YXZ');
     // arm: +Y of armFrame points from the fist toward the shoulder, rolled so the sleeve/back of the hand shows
     const d = this.cfg.armDir;

@@ -6,10 +6,10 @@ import assert from 'node:assert/strict';
 
 import { buildTextures } from '../src/textures/textures.js';
 import { ID, bindTextures, faceLayer } from '../src/core/registry.js';
-import { ParticleSim, MAX_PARTICLES, PARTICLE_KINDS } from '../src/fx/particles.js';
+import { ParticleSim, MAX_PARTICLES, PARTICLE_KINDS, lightAround } from '../src/fx/particles.js';
 import {
   SPRITE, SPRITE_ATLAS_SIZE, SPRITE_CELL, SPRITE_COLS, buildCloudGeometry, buildCloudMap, buildMoonTexture, buildSpriteAtlas,
-  buildSunTexture, buildWeatherTexture, CLOUD_MAP_SIZE,
+  buildSunTexture, buildWeatherTexture, buildFlatCloudGeometry, CLOUD_MAP_SIZE,
 } from '../src/fx/sprites.js';
 import { ItemMeshFactory, extrudeSprite, itemVisual, paletteOf } from '../src/fx/itemmesh.js';
 import { crackGeometryData, ghostPlacement } from '../src/fx/blockfx.js';
@@ -46,6 +46,16 @@ test('block break: 16-32 textured patches, lit, gone within 60 ticks', () => {
   }
   for (let t = 0; t < 60; t++) sim.tick(fakeWorld(), t);
   assert.equal(sim.count, 0, 'all particles expire within 60 ticks');
+});
+
+test('mining dust from a solid block takes the light of the open face, not black', () => {
+  const w = fakeWorld();
+  assert.equal(lightAround(w, 0, 63, 0) >> 4, 15, 'stone at y 63 under open sky: lit from above');
+  assert.equal(lightAround(w, 0, 64, 0) >> 4, 15, 'air cell keeps its own light');
+  assert.equal(lightAround(w, 0, 40, 0), 0, 'buried stone stays dark');
+  const sim = new ParticleSim();
+  sim.blockBreak(0, 63, 0, ID.stone, 0, w, 2);   // the hit-particle path samples the (still solid) mined block
+  for (let i = 0; i < sim.count; i++) assert.equal(sim.sky[i], 15);
 });
 
 test('particles land on the ground instead of falling through', () => {
@@ -155,6 +165,13 @@ test('cloud map: deterministic, tiles, ~38% cover; cloud mesh culls inner sides'
   assert.ok(g.quads >= cells * 2 && g.quads < cells * 6, `top+bottom per cell, sides only on edges (${g.quads} quads, ${cells} cells)`);
   assert.equal(g.position.length, g.quads * 12);
   assert.ok(g.index.every((i) => i < g.quads * 4));
+  const flat = buildFlatCloudGeometry(c, 8);
+  let flatCells = 0;
+  for (let z = -8; z < 8; z++) for (let x = -8; x < 8; x++) if (c.at(x, z)) flatCells++;
+  let area = 0;
+  for (let q = 0; q < flat.quads; q++) { const p = flat.position; area += (p[q * 12 + 3] - p[q * 12]) * (p[q * 12 + 8] - p[q * 12 + 2]); }
+  assert.equal(area, flatCells * 12 * 12, 'flat clouds cover exactly the cloud cells');
+  assert.ok(flat.quads < g.quads / 3, `flat clouds are much lighter (${flat.quads} vs ${g.quads} quads)`);
 });
 
 test('star field: deterministic ~1200 quads', () => {
@@ -243,7 +260,9 @@ test('ghostPlacement mirrors the placement rules', () => {
   // never inside the player
   const under = { x: 10, y: 63, z: 10, nx: 0, ny: 1, nz: 0, id: ID.stone };
   assert.equal(ghostPlacement(w, under, 'stone', player), null);
-  assert.ok(ghostPlacement(w, under, 'poppy', player), 'non-solid plants may go at the feet');
+  const lawn = fakeWorld(new Map([['10,63,10', ID.grass_block]]));
+  assert.ok(ghostPlacement(lawn, under, 'poppy', player), 'non-solid plants may go at the feet');
+  assert.equal(ghostPlacement(w, under, 'poppy', player), null, 'flowers only on soil (same support rules as placing)');
   // torches: floor = 0, wall = 1 + facing toward the wall, ceiling refused
   const side = { x: 0, y: 64, z: 0, nx: 0, ny: 0, nz: 1, id: ID.stone };
   const ws = fakeWorld(new Map([['0,64,0', ID.stone]]));
