@@ -443,8 +443,13 @@ test('items: magnet + pickup + pop event; merge; despawn after 6000 ticks', () =
 
 test('spawning: chunk-gen animals at most once per column, creature cap 24, culling restored wild animals', () => {
   const g = makeGame({ seed: 31 });
+  // chunk-generation population (and the mobs it creates) never draws game.rand(): streaming is timing dependent
+  let draws = 0;
+  const rand0 = g.rand; g.rand = () => { draws++; return rand0(); };
   let fresh = 0;
   for (let cx = -6; cx <= 6; cx++) for (let cz = -6; cz <= 6; cz++) { g.events.emit('world:columnLoaded', { cx, cz, fresh: true }); fresh++; }
+  g.rand = rand0;
+  assert.equal(draws, 0, 'chunk-gen spawning drew game.rand()');
   const first = g.mobs.counts().creature;
   assert.ok(first > 0 && first <= SPAWN.CREATURE_CAP, `some animals, capped (${first})`);
   assert.equal(g.mobs.populatedCount(), fresh);

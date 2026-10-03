@@ -34,12 +34,16 @@ export class Mob extends Entity {
   /**
    * @param {object} game
    * @param {string} type key of MOBS
-   * @param {object} [opts] spawn options or saved data: {baby, color, tamedBy, variant, ...data keys}
+   * @param {object} [opts] spawn options or saved data: {baby, color, tamedBy, variant, ...data keys}; `rand`: the
+   *   generator for this mob's creation rolls (AI stream seed, sheep colour, egg timer, horse stats). Chunk-generation
+   *   spawns pass their per-column generator so streaming columns never draw game.rand(); default game.rand().
    */
   constructor(game, type, x, y, z, opts = {}) {
     super(type, x, y, z);
     this.game = game;
-    this.rng = mulberry32(game && game.rand ? (game.rand() * 4294967296) >>> 0 : 0x9e3779b9);
+    /** Creation-time roll (only valid during construction / initData). */
+    this.spawnRand = typeof opts.rand === 'function' ? opts.rand : (game && game.rand ? () => game.rand() : () => 0.5);
+    this.rng = mulberry32((this.spawnRand() * 4294967296) >>> 0 || 0x9e3779b9);
     this.def = MOBS[type] || {};
     this.category = this.def.category || 'creature';
     this.persistent = this.category !== 'monster';
@@ -53,6 +57,7 @@ export class Mob extends Entity {
     this.health = this.maxHealth;
     this.yaw = opts.yaw !== undefined ? opts.yaw : this.rng() * Math.PI * 2;
     this.prevYaw = this.yaw;
+    this.spawnRand = null;
     this.updateSize();
     // AI state (not saved)
     this.target = null;            // {x, y, z} navigation goal
@@ -412,6 +417,13 @@ export class Mob extends Entity {
 
   updateLook() {
     const p = this.game.player;
+    if (p && p.riding === this.id) {
+      // a ridden animal looks where it goes (never round at its own rider)
+      this.lookTicks = 0; this.lookTarget = null; this.lookAt = null;
+      this.prevHeadYaw = this.headYaw;
+      this.headYaw *= 0.7; this.headPitch *= 0.7;
+      return;
+    }
     if (!this.lookAt && this.target === null && this.eating === 0 && p) {
       // idle glances are scheduled (one roll per glance, not one per tick: fewer game.rand() draws)
       if (this.lookTicks > 0) this.lookTicks--;
@@ -555,6 +567,8 @@ export class Mob extends Entity {
   }
   /** Subclass hook for shears, dye, bucket, bone, saddle, riding, sitting. */
   interactSpecial(ctx) { return false; }
+  /** True when tapping this mount while riding it with `stack` should use the item (saddle...) instead of getting off. */
+  acceptsWhileRidden(stack) { return false; }
 
   /** Feed a breed item: babies grow 10% faster, adults fall in love (600 ticks, hearts). Always consumes the action. */
   feed(ctx) {

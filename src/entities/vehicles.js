@@ -38,7 +38,8 @@ export class Boat extends Entity {
     this.health = 1; this.maxHealth = 1;
   }
   rider() { const p = this.game.player; return p && p.riding === this.id ? p : null; }
-  getSeat() { return { x: this.x, y: this.y + 0.25, z: this.z, yaw: this.yaw }; }
+  // the rider sits down in the hull (eye ~1.3 above the boat bottom) so the boat's sides frame the view
+  getSeat() { return { x: this.x, y: this.y - 0.3, z: this.z, yaw: this.yaw }; }
   tick(game) {
     this.age++;
     const w = game.world, rider = this.rider();

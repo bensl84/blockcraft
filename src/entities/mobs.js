@@ -122,6 +122,8 @@ export function createMobsSystem(game) {
       registerPreUse((ctx) => {
         const p = game.player, te = game.interaction && game.interaction.targetEntity;
         if (!p || !p.riding || !te || !te.entity || te.entity.id !== p.riding) return false;
+        // a saddle (or food) tapped on the horse you sit on is used on it: saddling happens while riding
+        if (te.entity.acceptsWhileRidden && te.entity.acceptsWhileRidden(ctx.stack)) return false;
         if (te.entity.dismount) te.entity.dismount();
         return true;
       });

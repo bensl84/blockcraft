@@ -42,7 +42,9 @@ export class Pig extends Mob {
     }
     this.think();
   }
-  getSeat() { return { x: this.x, y: this.y + 0.8 * (this.baby ? 0.5 : 1), z: this.z, yaw: this.yaw }; }
+  // the rider sits low on the back like Java's seated passenger (eye ~1.9 above the ground), so the pig's head
+  // and ears stay in view below the camera - a child can see she is riding
+  getSeat() { return { x: this.x, y: this.y + 0.25 * (this.baby ? 0.5 : 1), z: this.z, yaw: this.yaw }; }
   fillPose(v) { v.saddled = !!this.data.saddled; }
 }
 
@@ -68,7 +70,7 @@ export class Cow extends Mob {
 /* ------------------------------------------------------------------ sheep */
 export class Sheep extends Mob {
   initData(game) {
-    if (!this.data.color) this.data.color = game && game.rand ? rollSheepColor(() => game.rand(), MOBS.sheep.colorWeights) : 'white';
+    if (!this.data.color) this.data.color = rollSheepColor(this.spawnRand, MOBS.sheep.colorWeights);
   }
   currentColor() { return this.data.rainbow ? rainbowColor(this.age, MOBS.sheep.rainbow.cycleTicks) : this.data.color; }
   woolColor() { return this.data.rainbow ? COLORS[Math.floor(this.grand() * COLORS.length)] : this.data.color || 'white'; }
@@ -160,7 +162,7 @@ export class Sheep extends Mob {
 export class Chicken extends Mob {
   initData(game) {
     this.slowFall = true;
-    if (!(this.data.eggTimer > 0)) this.data.eggTimer = game && game.rand ? randInt(() => game.rand(), ...MOBS.chicken.layEggTicks) : 6000;
+    if (!(this.data.eggTimer > 0)) this.data.eggTimer = randInt(this.spawnRand, ...MOBS.chicken.layEggTicks);
     this.flap = 0; this.prevFlap = 0;
   }
   tickTimers() {
@@ -338,7 +340,7 @@ export class Cat extends Tameable {
 /* ------------------------------------------------------------------ horse (P1) */
 export class Horse extends Mob {
   initData(game) {
-    const r = game && game.rand ? () => game.rand() : () => 0.5;
+    const r = this.spawnRand;
     const d = this.data, def = MOBS.horse;
     if (!d.coat) d.coat = def.colors[Math.floor(r() * def.colors.length)];
     if (!(d.hp > 0)) d.hp = def.hp[0] + Math.floor(r() * 8) + Math.floor(r() * 9);
@@ -348,6 +350,11 @@ export class Horse extends Mob {
     this.rideTicks = 0;
   }
   canBreed() { return !!this.data.tamed; }
+  acceptsWhileRidden(stack) {
+    const item = stack ? stack.item : null, d = this.data;
+    if (!item) return false;
+    return (item === 'saddle' && d.tamed && !d.saddled) || !!this.def.temperItems[item];
+  }
   interactSpecial(ctx) {
     const item = ctx.stack ? ctx.stack.item : null;
     if (this.baby) return false;
@@ -394,7 +401,8 @@ export class Horse extends Mob {
     if (g.input && g.input.isDown('jump') && this.onGround) this.jumpNext = true;
   }
   jumpVelocity() { return this.rider() ? Math.max(0.42, this.data.jump || 0.5) : 0.42; }
-  getSeat() { return { x: this.x, y: this.y + 1.25 * (this.baby ? 0.5 : 1), z: this.z, yaw: this.yaw }; }
+  // seated passenger height (eye ~2.2 above the ground): the horse's neck and head show in front of the camera
+  getSeat() { return { x: this.x, y: this.y + 0.6 * (this.baby ? 0.5 : 1), z: this.z, yaw: this.yaw }; }
   skinVariant() { return { coat: this.data.coat }; }
   fillPose(v) { v.saddled = !!this.data.saddled; }
 }

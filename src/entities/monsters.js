@@ -70,7 +70,7 @@ class Monster extends Mob {
 
 export class Zombie extends Monster {
   initData(game) {
-    if (this.data.baby === undefined && game && game.rand && game.rand() < (this.def.babyChance || 0)) { this.data.baby = true; this.data.grow = 1e9; }
+    if (this.data.baby === undefined && this.spawnRand() < (this.def.babyChance || 0)) { this.data.baby = true; this.data.grow = 1e9; }
   }
   tickTimers() { super.tickTimers(); if (this.baby) this.data.grow = 1e9; } // baby zombies never grow up
   thinkSpecial() {

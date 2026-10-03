@@ -2,12 +2,12 @@
 //
 // Two kinds:
 //  - the SPEC §8.1 acceptance scenarios (mobs-breeding, mobs-pickup, mobs-wolf-tame, mobs-kid-no-death,
-//    mobs-no-pileup, mobs-step-up) drive the game the way a child does (interactEntity / breakTarget), so they
-//    `require` the CORE lanes they go through and report PENDING while those are stubs;
-//  - '-direct' twins run today: they call the same mob code through game.mobs.useOn / hit (the exact
-//    hooks.entityInteract handlers interaction.use() will call) and interaction.breakBlock.
-// Entities use the local fallback collider (src/entities/collide.js) while CORE-E physics is a stub; the same
-// scenarios automatically exercise the real physics once it lands.
+//    mobs-no-pileup, mobs-step-up) drive the game the way a child does (interactEntity / breakTarget) through
+//    the real CORE-E interaction, input, player and physics;
+//  - '-direct' twins call the same mob code through game.mobs.useOn / hit (the exact hooks.entityInteract
+//    handlers interaction.use() calls) and interaction.breakBlock, so a failure points at the mob or the core side.
+// Event counters (eventCount) are cumulative for the whole page session: scenarios compare against a baseline.
+// Deeper in-world playtests with real mouse / keyboard / touch: tools/mobs-play.mjs.
 
 const FLAT = { preset: 'flat', seed: 1, mode: 'creative', difficulty: 'peaceful' };
 const NO_SPAWN = { ...FLAT, rules: { passiveMobs: false } };

@@ -91,7 +91,7 @@ export function createSpawner(game) {
       if (B_SOLID[w.getBlock(bx, fy, bz)] || B_SOLID[w.getBlock(bx, fy + 1, bz)] || B_LIQUID[w.getBlock(bx, fy, bz)]) continue;
       const l = w.getLight(bx, fy, bz);
       if (Math.max(l >> 4, l & 15) < SPAWN.ANIMAL_MIN_LIGHT) continue;
-      const e = game.mobs.spawnMob(type, bx + 0.5, fy, bz + 0.5, { wild: true, reason });
+      const e = game.mobs.spawnMob(type, bx + 0.5, fy, bz + 0.5, { wild: true, reason, rand });
       if (e) n++;
     }
     return n;
