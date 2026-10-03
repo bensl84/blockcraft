@@ -170,7 +170,7 @@ test('chunkmerge: translucent quads sort back to front', () => {
 /* ------------------------------------------------------------------ shaders */
 test('shaders: chunk contract (SPEC §5.5.3) is present', () => {
   for (const s of [CHUNK_VERT]) for (const k of ['aTex', 'aLight', 'flat out float vLayer', 'aTex.yz / 256.0', 'aLight.w / 255.0', 'uAnimFps', 'uWave']) assert.ok(s.includes(k), k);
-  for (const k of ['sampler2DArray', 'pow(0.8, 15.0 - effSky)', '(1.0 - uDaylight) * 11.0', 'vec3(1.0, 0.92, 0.78)', 'uMinLight', 'CUTOUT', 'discard', '0.85', 'uFogNear', 'uFogFar']) assert.ok(CHUNK_FRAG.includes(k), k);
+  for (const k of ['sampler2DArray', 'pow(0.8, 15.0 - effSky)', '(1.0 - uDaylight) * 11.0', 'b * ((b * 0.6 + 0.4) * 0.6 + 0.4)', 'uGamma', 'uMinLight', 'CUTOUT', 'discard', '0.85', 'uFogNear', 'uFogFar']) assert.ok(CHUNK_FRAG.includes(k), k);
   for (const k of ['uParts[PARTS]', 'aPart', 'ATLAS', 'MAP']) assert.ok(ENTITY_VERT.includes(k), k);
   for (const k of ['uLightSky', 'uLightBlock', 'uTint', 'uAlphaTest']) assert.ok(ENTITY_FRAG.includes(k), k);
   assert.ok(SKY_FRAG.includes('uSunset') && SKY_FRAG.includes('uFogColor'));

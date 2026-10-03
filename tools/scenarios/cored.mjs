@@ -408,9 +408,9 @@ export default [
     async run(t) {
       await t.call('startWorld', FLAT);
       await t.call('setSetting', 'brightness', 1);
-      t.assert(Math.abs((await uniform(t, 'uMinLight')) - 0.3) < 1e-6, 'brightness 1 => min light 0.30');
+      t.assert(Math.abs((await uniform(t, 'uMinLight')) - 0.2) < 1e-6 && (await uniform(t, 'uGamma')) === 1, 'brightness 1 => min light 0.20, full brightness curve');
       await t.call('setSetting', 'brightness', 0.7);
-      t.assert(Math.abs((await uniform(t, 'uMinLight')) - 0.228) < 1e-6, 'brightness 0.7 => min light 0.228');
+      t.assert(Math.abs((await uniform(t, 'uMinLight')) - 0.155) < 1e-6 && Math.abs((await uniform(t, 'uGamma')) - 0.7) < 1e-6, 'brightness 0.7 => min light 0.155, curve 0.7');
       await t.call('setSetting', 'waving', false);
       t.assert((await uniform(t, 'uWave')) === 0, 'waving off');
       await t.call('setSetting', 'waving', true);
