@@ -445,6 +445,13 @@ test('saplings: bone meal grows a tree; leaf decay spares player-placed leaves',
   assert.equal(h.get(10, 10, 10), ID.air, 'lonely leaves decayed');
   assert.equal(h.get(-10, 10, -10), ID.oak_leaves, 'persistent leaves stay');
   assert.equal(h.get(12, 10, 10), ID.oak_leaves, 'leaves next to a log stay');
+  // modern Java distance: a leaf 6 steps (through leaves) from a log stays, 7 steps decays
+  const k = makeGame({ seed: 4 });
+  k.set(0, 20, 0, 'oak_log');
+  for (let i = 1; i <= 7; i++) k.set(i, 20, 0, 'oak_leaves', 0);
+  k.step(60000);
+  assert.equal(k.get(6, 20, 0), ID.oak_leaves, 'leaf 6 steps from the log stays (worldgen trees reach 5)');
+  assert.equal(k.get(7, 20, 0), ID.air, 'leaf 7 steps away decays');
 });
 
 test('grass: spreads to lit dirt, dies under an opaque block; sugar cane grows to 3', () => {
