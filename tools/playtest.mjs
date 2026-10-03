@@ -95,6 +95,8 @@ async function main() {
   const holdKeys = async (codes, ms) => { for (const c of codes) await page.keyboard.down(c); await sleep(ms); for (const c of codes) await page.keyboard.up(c); };
   const ndcToPx = (n) => ({ x: Math.round((n.x + 1) / 2 * W), y: Math.round((1 - n.y) / 2 * H) });
   const waitTicks = (n) => api('waitTicks', n);
+  /** Mouse leaves the game canvas: the kid cursor (and its outline) goes away, for clean scenery shots. */
+  const hideCursor = () => ev(() => window.__game.game.canvas.dispatchEvent(new PointerEvent('pointerleave', { pointerType: 'mouse', bubbles: false })));
   const waitFrames = (n) => api('waitFrames', n);
   const gameErrors = () => ev(() => window.__game.errors.map((e) => `${e.where}: ${e.message}`));
 
@@ -131,6 +133,10 @@ async function main() {
     await page.mouse.down(); await sleep(60); await page.mouse.up();
     await waitTicks(2);
     const got = await api('getBlock', c[0], c[1], c[2]);
+    if (got !== expect) {
+      const diag = await ev(() => ({ gestures: window.__game.events('input:gesture', 4).map((e) => e.payload.phase + '@' + e.tick), placed: window.__game.events('block:placed', 1), broken: window.__game.events('block:broken', 1), tick: window.__game.game.tickCount, target: window.__game.target() }));
+      return { ok: false, got, aimed: true, target: tg, diag };
+    }
     return { ok: got === expect, got, aimed: true, target: tg };
   }
 
@@ -172,8 +178,9 @@ async function main() {
       const full = await page.waitForFunction(() => window.__game.game.world.unmeshedWithin(window.__game.game.world.renderDistance - 1) === 0, null, { timeout: 20000 }).then(() => true, () => false);
       report.perf.spawnAreaCompleteMs = report.perf.playToReadyMs + (Date.now() - t1);
       check(full, 'spawn area (R-1) fully meshed', { ms: report.perf.spawnAreaCompleteMs });
+      await waitTicks(3);
       const p = await api('pos');
-      check(p.onGround && !p.inWater, 'spawned standing on dry ground', { x: p.x, y: p.y, z: p.z });
+      check(p.onGround && !p.inWater, 'spawned standing on dry ground', { x: p.x, y: p.y, z: p.z, onGround: p.onGround, inWater: p.inWater });
       await page.mouse.move(W / 2, H / 2);
       await waitFrames(5);
       await shot('spawn', `seed ${report.seed}`);
@@ -226,6 +233,7 @@ async function main() {
       await holdKeys(['Space'], 3500);
       p = await api('pos');
       check(p.y - y0 > 15, 'space flies up', (p.y - y0).toFixed(1));
+      await hideCursor();
       for (const [i, yaw] of [0, 90, 180, 270].entries()) {
         await api('setLook', yaw, -18);
         await waitFrames(20);
@@ -380,7 +388,7 @@ async function main() {
       if (torches.length) {
         const c = torches.reduce((a, t) => [a[0] + t.x / torches.length, a[1] + t.y / torches.length, a[2] + t.z / torches.length], [0, 0, 0]);
         await api('lookAt', c[0] + 0.5, c[1] + 0.3, c[2] + 0.5);
-        await page.mouse.move(5, 5); // no hover outline in the way
+        await hideCursor(); // no hover outline in the way
         await waitFrames(5);
         await shot('cave-torches');
       }
@@ -462,7 +470,7 @@ async function main() {
       const fails = [];
       const place = async (c, n, item) => {
         const r = await tapPlace(c, n, item);
-        total++; if (r.ok) ok++; else fails.push({ c, item, got: r.got, target: r.target });
+        total++; if (r.ok) ok++; else fails.push({ c, item, got: r.got, target: r.target, diag: r.diag });
         if (!r.aimed) notAimed++;
       };
       // layer 1 (standing): click the ground's top face
@@ -523,6 +531,7 @@ async function main() {
       await api('teleport', cx + 0.5 + 4, base + 2, cz + 0.5 + 8);
       await waitTicks(3);
       await api('lookAt', cx + 0.5, base + 1.5, cz + 0.5);
+      await hideCursor();
       await waitFrames(10);
       await shot('house-outside');
       await api('teleport', cx + 0.5 - 7, base + 6, cz + 0.5 - 6);
@@ -538,6 +547,7 @@ async function main() {
       await api('teleport', cx + 0.5 + 4, base + 2, cz + 0.5 + 8);
       await waitTicks(2);
       await api('lookAt', cx + 0.5, base + 1.5, cz + 0.5);
+      await hideCursor();
       const remesh0 = await ev(() => window.__game.game.world.stats().urgentMeshes + window.__game.game.world.stats().syncMeshes);
       const lum = {};
       for (const [name, t] of [['sunset', 12500], ['night', 18000], ['sunrise', 23300], ['day', 6000]]) {
@@ -556,6 +566,46 @@ async function main() {
       const t1 = await api('getTime');
       check(t1 !== t0, 'daylight cycle advances time when enabled', { t0, t1 });
       await api('setRule', 'daylightCycle', false);
+      await api('setTime', 3000);
+    });
+
+    await step('border-light', async () => {
+      // render check (blocks set through the test API): a closed room in the air centred on a column corner with
+      // one torch next to the corner, so its light crosses into all four columns. The light must be symmetric
+      // and the screenshot must show no seam or step where the columns meet.
+      const room = await ev(() => {
+        const api = window.__game, g = api.game, w = g.world, ID = api.blockId, p = g.player;
+        const X = Math.round(p.x / 16) * 16, Z = Math.round(p.z / 16) * 16, Y = 96;
+        const list = [];
+        for (let x = X - 6; x <= X + 6; x++) for (let z = Z - 6; z <= Z + 6; z++) for (let y = Y - 1; y <= Y + 4; y++) {
+          const shell = x === X - 6 || x === X + 6 || z === Z - 6 || z === Z + 6 || y === Y - 1 || y === Y + 4;
+          list.push([x, y, z, shell ? (y === Y - 1 ? ID('stone') : ID('cobblestone')) : 0]);
+        }
+        list.push([X, Y, Z, ID('torch')]);
+        w.setBlocks(list, { cause: 'test' });
+        const prof = [];
+        for (let d = -5; d <= 5; d++) prof.push(w.getBlockLight(X + d, Y, Z));
+        const profZ = [];
+        for (let d = -5; d <= 5; d++) profZ.push(w.getBlockLight(X, Y, Z + d));
+        const diag = [];
+        for (let d = 1; d <= 4; d++) diag.push([w.getBlockLight(X + d, Y, Z + d), w.getBlockLight(X - d, Y, Z - d), w.getBlockLight(X + d, Y, Z - d), w.getBlockLight(X - d, Y, Z + d)]);
+        return { X, Y, Z, prof, profZ, diag };
+      });
+      const sym = (a) => a.every((v, i) => v === a[a.length - 1 - i]);
+      check(sym(room.prof) && sym(room.profZ) && room.diag.every((q) => q.every((v) => v === q[0])) && room.prof[5] === 14, 'torch light is symmetric across the column borders', room);
+      await api('setTime', 18000);
+      await api('setFlying', true);
+      await api('teleport', room.X - 4.5, room.Y, room.Z - 4.5);
+      await waitTicks(3);
+      await api('lookAt', room.X + 2, room.Y, room.Z + 2);
+      await hideCursor();
+      await waitFrames(8);
+      await shot('border-light-room', `column corner at x ${room.X}, z ${room.Z}`);
+      await api('teleport', room.X + 4.5, room.Y + 1.2, room.Z + 4.5);
+      await waitTicks(3);
+      await api('lookAt', room.X - 3, room.Y - 1, room.Z - 3);
+      await waitFrames(8);
+      await shot('border-light-room-2');
       await api('setTime', 3000);
     });
 
@@ -603,7 +653,8 @@ async function main() {
       for (let i = 1; i <= 10; i++) { await page.mouse.move(W / 2 + i * 20, H / 2); await sleep(16); }
       await waitFrames(4);
       const b = await api('pos');
-      check(Math.abs(b.yaw - a.yaw) > 5, 'classic: mouse motion turns the view', (b.yaw - a.yaw).toFixed(1));
+      const lockEv = await ev(() => window.__game.events('input:pointerLock', 6).map((e) => `${e.payload.locked}@${e.tick}`));
+      check(Math.abs(b.yaw - a.yaw) > 5, 'classic: mouse motion turns the view', { dyaw: +(b.yaw - a.yaw).toFixed(1), lockEvents: lockEv, locked: await ev(() => window.__game.game.input.pointerLocked) });
       await api('setLook', 0, -40);
       await waitFrames(3);
       const tg = await api('target');

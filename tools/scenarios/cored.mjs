@@ -15,8 +15,11 @@ async function settle(t, quietMs = 400, maxMs = 20000) {
   const end = Date.now() + maxMs;
   let last = -1, since = Date.now();
   while (Date.now() < end) {
-    const n = await t.eval(() => window.__game.game.renderer.getStats().sectionSets);
-    if (n !== last) { last = n; since = Date.now(); } else if (Date.now() - since >= quietMs) return true;
+    // quiet = no section uploads, no column re-merges, and no hot (edited) sections still waiting for the 3 s
+    // fold back into their column (on a slow renderer streaming border updates keep folding for a while)
+    const q = await t.eval(() => { const s = window.__game.game.renderer.getStats(); return { n: s.sectionSets * 100000 + s.merges, hot: s.hotSections || 0 }; });
+    const n = q.n;
+    if (n !== last || q.hot > 0) { last = n; since = Date.now(); } else if (Date.now() - since >= quietMs) return true;
     await new Promise((r) => setTimeout(r, 60));
   }
   return false;

@@ -134,6 +134,7 @@ export function createRendererSystem(game) {
       forcedFastLeaves = !!preset.fastLeaves;
       const needHalf = r.gpu.maxLayers > 0 && game.textures && r.gpu.maxLayers < game.textures.count;
       if (needHalf || (forcedFastLeaves && game.settings.fancyLeaves)) rebuildTextures({ halfAnim: needHalf });
+      r.quality.fastLeaves = forcedFastLeaves || !game.settings.fancyLeaves; // integration: which leaf set is bound
       r.quality.dpr = targetDprMax();
       three.setPixelRatio(r.quality.dpr);
 
@@ -390,6 +391,7 @@ export function createRendererSystem(game) {
     const fast = forcedFastLeaves || !game.settings.fancyLeaves;
     const half = opts.halfAnim ?? (r.gpu.maxLayers > 0 && game.textures && r.gpu.maxLayers < game.textures.count);
     const ts = buildTextures({ fastLeaves: fast, halfAnim: !!half });
+    r.quality.fastLeaves = fast;
     bindTextures(ts);
     game.textures = ts;
     return ts;

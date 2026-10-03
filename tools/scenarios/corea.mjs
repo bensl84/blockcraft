@@ -107,7 +107,9 @@ export default [
         const d = g.textures.data;
         let h = 0x811c9dc5;
         for (let i = 0; i < d.length; i++) { h ^= d[i]; h = Math.imul(h, 0x01000193); }
-        return { hash: h >>> 0, fast: !g.settings.fancyLeaves };
+        // the low device preset (SwiftShader, Intel HD) binds fast leaves without changing the saved setting
+        const q = g.renderer && g.renderer.quality;
+        return { hash: h >>> 0, fast: q && typeof q.fastLeaves === 'boolean' ? q.fastLeaves : !g.settings.fancyLeaves };
       });
       const node = buildTextures({ fastLeaves: page.fast });
       const nh = fnv(node.data);
