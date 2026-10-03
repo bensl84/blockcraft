@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { ENTITY_FRAG, ENTITY_VERT } from './shaders.js';
 
 /** Uniform names that are SHARED with the renderer (never cloned). */
-export const SHARED_ENTITY_UNIFORMS = Object.freeze(['uTex', 'uDaylight', 'uMinLight', 'uFogColor', 'uFogNear', 'uFogFar', 'uFogSphere', 'uTime', 'uAnimFrames', 'uAnimFps']);
+export const SHARED_ENTITY_UNIFORMS = Object.freeze(['uTex', 'uDaylight', 'uMinLight', 'uGamma', 'uFogColor', 'uFogNear', 'uFogFar', 'uFogSphere', 'uTime', 'uAnimFrames', 'uAnimFps']);
 export const MAX_PARTS = 8;
 
 /**

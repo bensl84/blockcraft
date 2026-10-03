@@ -7,16 +7,23 @@
 const LIGHT_FOG_GLSL = /* glsl */ `
 uniform float uDaylight;
 uniform float uMinLight;
+uniform float uGamma;
 uniform vec3 uFogColor;
 uniform float uFogNear;
 uniform float uFogFar;
 uniform float uFogSphere;
-// effSky = max(0, sky - (1 - daylight) * 11); bright = 0.8^(15 - L); block light warm-tinted; floor uMinLight.
+// effSky = max(0, sky - (1 - daylight) * 11); ramp = 0.8^(15 - L) (close to the classic f / (4 - 3f) ramp).
+// Block light is warm and gets warmer as it fades (white-yellow next to a torch, orange at the edge of its
+// reach). Then the classic brightness curve lifts the mid tones: l = mix(l, 1 - (1 - l)^4, uGamma), with
+// uGamma = settings.brightness (0 = moody, 1 = bright; default 0.7), and uMinLight keeps caves from going black.
 vec3 bcLight(float sky, float block) {
   float effSky = max(0.0, sky - (1.0 - uDaylight) * 11.0);
   float skyB = pow(0.8, 15.0 - effSky);
-  float blkB = pow(0.8, 15.0 - block);
-  vec3 l = max(vec3(skyB), blkB * vec3(1.0, 0.92, 0.78));
+  float b = pow(0.8, 15.0 - block);
+  vec3 blk = vec3(b, b * ((b * 0.6 + 0.4) * 0.6 + 0.4), b * (b * b * 0.6 + 0.4));
+  vec3 l = max(vec3(skyB), blk);
+  vec3 inv = 1.0 - l;
+  l = mix(l, 1.0 - inv * inv * inv * inv, uGamma);
   return max(l, vec3(uMinLight));
 }
 // Fog by view distance from uFogNear to uFogFar. Cylindrical (horizontal) on land so high flight does not wash
