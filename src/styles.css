@@ -1,0 +1,166 @@
+/* OWNER: LEAD (shared base styles + UI kit). docs/SPEC.md §9. Lanes put their own CSS in their own file
+   (e.g. src/ui/hud.css imported from hud.js) and only USE these shared classes/variables here. */
+
+:root {
+  --gui: 3px;                 /* px per GUI unit (integer scale), set by core/dom.js applyGuiScale */
+  --hotbar-slot: 72px;        /* hotbar slot size (kid >= 64px) */
+  --slot: 54px;               /* container slot size */
+  --touch-btn: 96px;          /* touch button size (S 80 / M 96 / L 112) */
+  --icons-url: none;          /* item icon atlas (set at boot) */
+  --font: "BlockcraftPixel", "Lucida Console", "Courier New", monospace;
+  /* palette (original values, Minecraft-like greys) */
+  --panel: #c6c6c6;
+  --panel-light: #ffffff;
+  --panel-dark: #555555;
+  --outline: #000000;
+  --slot-bg: #8b8b8b;
+  --slot-dark: #373737;
+  --slot-light: #ffffff;
+  --text-dark: #3f3f3f;
+  --text: #ffffff;
+  --text-shadow: #3f3f3f;
+  --btn: #727272;
+  --btn-hover: #8b98c8;
+  --select: #ffd400;          /* selected hotbar slot / focus (kid: yellow + scale + lift) */
+  --plate: rgba(0, 0, 0, 0.55);
+  --good: #5bbf3a;
+  --bad: #d23a2a;
+  --sky: #78a7ff;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--sky);
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  font-family: var(--font);
+  color: var(--text);
+}
+
+#app { position: fixed; inset: 0; overflow: hidden; }
+
+#game-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  outline: none;
+  image-rendering: pixelated;
+}
+
+#ui-root { position: absolute; inset: 0; pointer-events: none; }
+.bc-layer { position: absolute; inset: 0; pointer-events: none; }
+/* Anything a child can touch must opt in: */
+.bc-layer button, .bc-layer [data-interactive], .bc-panel, .bc-screen, .bc-slot { pointer-events: auto; }
+
+.bc-hidden { display: none !important; }
+
+/* ---------------------------------------------------------------- boot / loading */
+.bc-boot {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 48px; font-weight: bold; color: #fff; text-shadow: 4px 4px 0 #3f3f3f;
+  background: linear-gradient(#78a7ff 0%, #a9c8ff 60%, #67a93b 60%, #4d8a2c 100%);
+  z-index: 1000;
+}
+
+/* ---------------------------------------------------------------- panels (Minecraft-like bevel) */
+.bc-panel {
+  background: var(--panel);
+  color: var(--text-dark);
+  border: var(--gui) solid var(--outline);
+  border-radius: calc(var(--gui) * 1);
+  box-shadow: inset var(--gui) var(--gui) 0 var(--panel-light), inset calc(var(--gui) * -1) calc(var(--gui) * -1) 0 var(--panel-dark);
+  padding: calc(var(--gui) * 4);
+  box-sizing: border-box;
+}
+.bc-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.bc-stack { display: flex; flex-direction: column; align-items: stretch; gap: calc(var(--gui) * 3); }
+.bc-row { display: flex; flex-direction: row; align-items: center; gap: calc(var(--gui) * 2); }
+.bc-title { font-size: calc(var(--gui) * 8); color: var(--text-dark); text-align: center; }
+
+/* ---------------------------------------------------------------- buttons */
+.bc-btn {
+  font-family: var(--font);
+  font-size: max(18px, calc(var(--gui) * 7));
+  color: var(--text);
+  text-shadow: 2px 2px 0 var(--text-shadow);
+  background: var(--btn);
+  min-width: 48px;
+  min-height: 48px;
+  padding: 8px 20px;
+  border: 2px solid var(--outline);
+  box-shadow: inset 3px 3px 0 #a8a8a8, inset -3px -4px 0 #3a3a3a;
+  cursor: pointer;
+  image-rendering: pixelated;
+  outline: none;
+}
+.bc-btn:hover, .bc-btn:focus-visible { background: var(--btn-hover); box-shadow: inset 3px 3px 0 #c8d0f0, inset -3px -4px 0 #4a5070; }
+.bc-btn:active { transform: translateY(2px); }
+.bc-btn[disabled] { opacity: 0.5; cursor: default; }
+.bc-btn-big { min-width: 120px; min-height: 96px; font-size: 48px; }
+.bc-btn-play {
+  min-width: 220px; min-height: 120px; font-size: 64px;
+  background: #4f9a2e; box-shadow: inset 4px 4px 0 #8fd86a, inset -4px -5px 0 #2d5c18;
+  animation: bc-pulse 1.6s ease-in-out infinite;
+}
+.bc-btn-play:hover { background: #5fb236; box-shadow: inset 4px 4px 0 #a8ec84, inset -4px -5px 0 #2d5c18; }
+@keyframes bc-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+
+/* Round icon button with a dark plate (HUD / touch): readable over sky, snow and caves */
+.bc-plate-btn {
+  width: var(--touch-btn); height: var(--touch-btn);
+  border-radius: 18%;
+  background: var(--plate);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  color: #fff;
+  font-size: calc(var(--touch-btn) * 0.45);
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: auto;
+  touch-action: none;
+}
+.bc-plate-btn:active, .bc-plate-btn.bc-pressed { background: rgba(255, 212, 0, 0.55); }
+
+/* ---------------------------------------------------------------- slots & icons */
+.bc-slot {
+  position: relative;
+  width: var(--slot); height: var(--slot);
+  background: var(--slot-bg);
+  box-shadow: inset 2px 2px 0 var(--slot-dark), inset -2px -2px 0 var(--slot-light);
+  display: inline-flex; align-items: center; justify-content: center;
+  box-sizing: border-box;
+}
+.bc-slot:hover::after { content: ''; position: absolute; inset: 2px; background: rgba(255, 255, 255, 0.5); pointer-events: none; }
+.bc-icon { display: inline-block; background-repeat: no-repeat; image-rendering: pixelated; pointer-events: none; }
+.bc-count {
+  position: absolute; right: 3px; bottom: 1px;
+  font-family: var(--font); font-size: max(14px, calc(var(--gui) * 6)); color: #fff;
+  text-shadow: 2px 2px 0 var(--text-shadow); pointer-events: none;
+}
+.bc-durability { position: absolute; left: 12%; right: 12%; bottom: 8%; height: 3px; background: #000; pointer-events: none; }
+.bc-durability > i { display: block; height: 100%; background: #5bbf3a; }
+
+/* ---------------------------------------------------------------- full-screen screens */
+.bc-screen { position: absolute; inset: 0; pointer-events: auto; }
+.bc-dim { background: rgba(0, 0, 0, 0.45); }
+.bc-title-screen {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 48px;
+  background: linear-gradient(#78a7ff 0%, #a9c8ff 62%, #67a93b 62%, #5a9a33 70%, #7a5230 70%, #5a3b22 100%);
+}
+.bc-logo {
+  font-family: var(--font);
+  font-size: clamp(48px, 10vw, 120px);
+  font-weight: bold;
+  letter-spacing: 0.04em;
+  color: #e8e8e8;
+  text-shadow: 0 4px 0 #8a8a8a, 0 8px 0 #5a5a5a, 6px 12px 0 rgba(0, 0, 0, 0.35);
+}
+.bc-play-glyph { display: inline-block; transform: translateX(6%); }

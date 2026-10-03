@@ -1,15 +1,19 @@
 {
   "name": "blockcraft",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Blockcraft: an original Minecraft-style block-building game for the browser, built kid-first.",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "node build.mjs",
+    "build:dev": "node build.mjs --dev",
+    "serve": "node tools/serve.mjs",
+    "test": "node tools/smoke.mjs",
+    "test:unit": "node --test \"test/**/*.test.mjs\""
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
-  "type": "commonjs",
+  "license": "UNLICENSED",
   "devDependencies": {
     "esbuild": "^0.28.2",
     "playwright": "^1.63.0",
