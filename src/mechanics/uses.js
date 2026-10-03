@@ -277,8 +277,9 @@ export function registerMechHooks(game, mech) {
   /* ------------------------------------------------------------------ test / integration helper */
   /**
    * Emulate CORE-E's use() steps 3-5 against a block cell (SPEC §7.4): blockUse[block] (unless sneaking with an
-   * item), then itemUse[item], then placers[block of item]. Used by MECH smoke scenarios while CORE-E's
-   * targeting is a stub, and handy for KID/test tooling. Returns {consumed, by: 'block'|'item'|'placer'|null, action}.
+   * item), then itemUse[item], then placers[block of item] (no default placement). Lets MECH unit tests and smoke
+   * scenarios hit an exact cell without aiming; handy for KID/test tooling. Returns
+   * {consumed, by: 'block'|'item'|'placer'|null, action}.
    * opts: {item, face (FACE index, default UP), sneaking, action}
    */
   mech.useAt = (x, y, z, opts = {}) => {

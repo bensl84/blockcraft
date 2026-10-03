@@ -4,6 +4,81 @@ Branch `lane/mech` · worktree `C:\Users\BSLeo\AppData\Roaming\Claude\scratch-wo
 
 <!-- newest first: date · what changed · commands run + results (copy the PASS/FAIL lines) · remaining · blockers · spec conflicts -->
 
+## 2026-10-03 · MECH phase 2: merged with the real CORE, verified in real gameplay
+
+### What changed
+
+- `git merge main` into `lane/mech` (merge commit `2fbd14f`): clean, no conflicts, no LEAD files touched.
+- **Placer contract (CORE-E integration).** CORE-E's `interaction.tryPlace` treats a placer's `false` as *refused* (no default placement) and, on `true`, swings and uses up one item itself. MECH placers now return `false` when refused and never consume. Before: survival doors/beds used up two items, a refused door still used one, and MECH's slab placer refused every ordinary slab (that broke `coree-place-rules`). The slab placers are gone: CORE-E merges double slabs itself (`tryMergeSlab` runs before any placer). The snow placer stacks layers or does the normal placement. `useAt` (test helper) mirrors the same contract.
+- **Real physics for sand/gravel/TNT.** `falling_block` and `tnt` move with `physics.moveAndCollide`; the stub-era mover `src/mechanics/body.js` is deleted.
+- **Leaf decay radius 4 -> 6 (modern Java).** In-world check found CORE-B oak leaves 5 steps (through leaves) from their trunk; the old radius-4 rule was slowly eating untouched worldgen trees. New unit test: 6 steps stays, 7 decays.
+- **Paintings for a 5-year-old.** A random fitting picture weighted by area (Java picks only the largest, so every wall showed the same rainbow). Kid scheme + creative: an empty-hand (or tool) tap takes a painting down, like tapping a block (before, tapping it did nothing; only a long hold worked).
+- **Random ticks.** Cell picking uses a private PRNG re-seeded from `game.rand` (thousands of draws per tick no longer shift every other lane's `game.rand` rolls). Sections holding no random-ticked block (underground stone, open air) are skipped via a lazily scanned per-column mask. Sugar cane / cactus grow with chance 1/16 per random tick instead of counting a 0..15 age in the block state (same average pace, without remeshing an unchanged-looking section 15 times per block). New `game.mechanics.setRandomTicks(on)` pause switch for tests; `stats.schedMs / randomMs / leafChecks` for perf debugging.
+- `tools/mech-play.mjs` (new, lane-owned): in-world play-through in real headless Chrome: real `page.mouse` clicks and hold (kid scheme: click = tap = use), real `KeyW` walking, dry-land stages found by spiralling out from spawn on the default seed-12345 world, screenshots, checks and perf. `--only door,tnt`, `--swiftshader`.
+- New smoke scenarios: `mech-input-survival-door` (one door used per placement, none when refused), `mech-input-painting` (kid tap hangs and removes a painting). `mech-input-bucket` now puts the kid cursor on its target (it failed when run after `mech-input-door`, see cross-lane defect 3).
+
+### Commands and results (this worktree, after the last change)
+
+`node build.mjs --dev --out .tmp/build-mech` -> `[build] 0.1.0-7d401596-dev ... (1635 KB, 163 ms, dev)`
+
+`npm run test:unit` -> `ℹ tests 115 · ℹ pass 115 · ℹ fail 0` (mech: 30)
+
+`node tools/smoke.mjs --tag mech` (runs every lane's scenarios):
+
+```
+PASS     mech-sand-falls / mech-tnt-chain {"worstTickMs":4.9} / mech-door / mech-water-flow / mech-farm / mech-torch-support
+PASS     mech-tnt-batch {"count":23,"items":1,"ms":1.5} / mech-bed-nap / mech-visuals / mech-save-ticks
+PASS     mech-input-door / mech-input-survival-door / mech-input-painting / mech-input-bucket
+PENDING  mech-fence-pen  - stub lanes: mobs
+PENDING  mobs / survival-fall / save-load (other lanes' stubs) · SKIP touch-controls, coree-touch (need --touch)
+FAIL     cored-daynight  - setTime never remeshes (sets +2)      <- intermittent, caused by random ticks: cross-lane defect 1
+[smoke] {"PASS":69,"PENDING":4,"SKIP":2,"FAIL":1}
+```
+
+`cored-edit` fails intermittently for the same reason (2 of 3 repeats failed before the cane change, it passed in the final full run). Proof of cause: a build with random ticks off passed `cored-daynight` + `cored-edit` 3/3 times; with them on, 0/3 and 1/3.
+
+`node tools/mech-play.mjs` -> `[mech-play] 57/57 checks passed; 34 screenshots in .tmp/mech` (report: `.tmp/mech/report.json`, log `.tmp/mech/run.log`)
+
+### Verified in real gameplay (screenshots in `.tmp/mech/`, all looked at)
+
+| # | Handoff item | Result | Screenshots |
+|---|---|---|---|
+| 1 | `mech-input-door`, `mech-input-bucket` through the real kid tap path | PASS (smoke) | - |
+| 1 | `mech-fence-pen` (pig kept in a pen) | PENDING: MOBS still a stub. Pen + gate built by real clicks, connections right, empty-hand tap opens the gate | `03-fence-pen-closed.png`, `04-fence-pen-open.png` |
+| - | Doors: one tap = 2-high door, second door gets the other hinge (double door), tap opens both halves, kid walks through with W | PASS | `01-door-double-closed.png`, `02-door-double-open.png` |
+| 2 | Falling sand/gravel: real block model, lit, lands as a neat stack, no leftover entities | PASS | `07-sand-on-post.png`, `08-sand-falling.png`, `09-sand-landed.png` |
+| 2 | TNT: flint tap primes, hop, white flash, swell, chain of 9, crater | PASS | `26-tnt-before.png` .. `30-tnt-crater-above.png` |
+| 3 | Paintings: real entity material, right way round on all 4 walls, varied pictures, taken down by tap, by hold, and when the wall behind is broken; geometries 555 -> 501 afterwards (no leak) | PASS | `20-painting-north.png` .. `24-painting-wall-broken.png` |
+| 4 | Water: bucket pour, 7-out diamond (113 cells), sloped edges, pick-up drains it; lava: 3-out spread (25 cells), glow at night (block light 14), bucket pick-up; water + lava -> obsidian | PASS | `10-water-spread.png`, `11-lava-water.png`, `12-lava-night-glow.png`, `31-lava-spread.png`, `32-lava-night.png` |
+| 5 | Water current pushes the player (dx 1.11, dz 1.11 in 1.5 s); explosion knockback (dx -1.8) with real CORE-E physics | PASS | - |
+| 6 | Explosion frame time with real relight/remesh: 9-TNT chain, worst frame 7.1 ms (RTX 3080 Ti), **48.7 ms under SwiftShader** (weak-laptop proxy, R auto-dropped to 3); one explosion 1.4-8.2 ms of MECH work, 103-159 blocks | PASS | `.tmp/mech-swiftshader/` |
+| 6 | KID undo restores a crater in one step | NOT VERIFIED: KID lane is a stub | - |
+| 7 | Bed nap: one tap = 2-long bed, tap = nap (starry 18000, wakes at 09:00 by itself); survival: real sleep at night, no walking while asleep (`player.sleeping` honoured), morning after | PASS (MECH side). FX fade is a stub; see gaps | `17-bed-placed.png`, `18-bed-nap.png`, `19-bed-woke.png`, `34-survival-sleeping.png` |
+| 8 | Growth with real light, fast-forwarded 30 000 ticks: wheat 0 -> 5..7, grass spreads onto dirt, sapling -> real CORE-B tree, sugar cane grows (never above 3), **untouched worldgen trees lose no leaves** (after the radius fix) | PASS | `33-growth-after-30000-ticks.png` |
+| 8 | Hoe/seeds/bone meal by tap, sapling + bone meal -> tree | PASS | `13-farm-planted.png` .. `16-farm-tree.png` |
+| 8 | Random-tick cost at R 8 (405 columns): mechanics tick avg 0.49 ms, p95 0.7, max 1.2 (was 0.6-1.36 before the section mask) | PASS | - |
+| 9 | Item drops (explosions, failed landings, washed plants) | NOT VERIFIED: MOBS `dropItem` is still a stub (returns null) | - |
+| 10 | Trampling with the real `player:land` (survival, 3-block fall) | PASS | - |
+| - | Torches: wall + floor by tap, wall broken -> torch pops | PASS | `05-torch-night.png`, `06-torch-popped.png` |
+| - | Cake: tap eats a slice (empty hand never breaks it), bites visible | PASS | `25-cake-bites.png` |
+| - | No game or page errors during the whole play-through | PASS | - |
+
+Draw calls: the play-through adds no lasting draw calls (219 at start, 192 at the end; a hanging painting is one draw call; TNT entities are one each while primed).
+
+### Cross-lane defects (not edited; for the owners)
+
+1. **CORE-D scenarios assume a frozen world** (`tools/scenarios/cored.mjs`, `cored-daynight` line ~94 "setTime never remeshes", `cored-edit` line ~214 "hot sections are folded back"). Random ticks (grass dying under worldgen pumpkins/boulders, grass spreading, crops, cane) legitimately change ~0.5-1.5 blocks/s in a fresh default world, so those exact-count asserts fail intermittently once MECH is merged. Repro: `node tools/smoke.mjs --scenario cored-daynight,cored-edit` 3x on lane/mech (0/3 and 1/3 pass); same build with random ticks off: 3/3. Suggested fix: at the start of both scenarios `await t.eval(() => window.__game.game.mechanics.setRandomTicks && window.__game.game.mechanics.setRandomTicks(false))` and turn it back on at the end, or count only remeshes of the edited/looked-at sections.
+2. **Placer contract mismatch, docs vs CORE-E** (`src/core/hooks.js` header: "returns true when it CONSUMED the action (stop), false to fall through"; SPEC §7.4 step 5 is silent). `src/player/interaction.js` `tryPlace`: placer `false` = refused (no fallback to default placement); `true` = placed, and tryPlace then swings and `consumeSelected(1)` in survival. MECH now follows CORE-E. Suggested fix (LEAD): state that in hooks.js and SPEC §7.4 step 5 so other lanes' placers do not double-consume.
+3. **Kid cursor survives a new world / `lookAt`** (`src/player/input.js`, `src/core/testapi.js`). `input.aim` and `aimActive` keep the last tap's position across `startWorld`, and testapi `lookAt` does not re-centre it, so a scenario that uses `lookAt` + `press('use')` after one that used `aimAt`/`tapAt` targets an off-centre block. Repro: `--scenario mech-input-door,mech-input-bucket` with the old bucket scenario. Suggested fix: reset `input.aim = {0,0}` and `aimActive = false` on `world:ready` (CORE-E), and/or have testapi `lookAt` call `centerAim()`.
+4. **CORE-B (minor): grass under worldgen pumpkins and boulders.** Pumpkin patches and mossy/cobble boulders sit on `grass_block`; grass under an opaque block turns to dirt on its first random tick (Java does the same), which is a stream of small block changes/remeshes for the first minutes in every new area (main source of defect 1). Suggested fix: place `dirt` under pumpkins/boulders at generation (Java's tree/feature placement does this).
+5. **CORE-C (cosmetic): wall torches sit flat against the wall** (`05-torch-night.png`); Java leans them out ~22.5 degrees from the wall. Mesher torch shape, low priority.
+
+### Remaining gaps
+
+- `mech-fence-pen` (needs MOBS), item drops from explosions/washing/failed landings (needs MOBS `dropItem`), KID undo of a crater (needs KID), FX fade + explosion particles + sounds (FX/AUDIO stubs).
+- Sleeping keeps the standing camera looking at the bed; Java lays you down in it. That needs a player/camera pose (CORE-E) plus the FX fade; MECH already sets `player.sleeping` and the spawn point.
+- SPEC decisions from phase 1 still open (setBlock vs breakBlock list, `applyBoneMeal` return, creative bucket swap, TNT `by`, door facing, survival `setTime(0)` not advancing `time.day`). New ones: painting choice is random-by-area (not Java's largest-only) and tap-to-remove in kid creative; cane/cactus growth is a 1/16 roll per random tick (no age bits used); leaf decay radius 6.
+
 ## 2026-10-03 · MECH lane: stub replaced, P0 + P1 done, P2 partly
 
 ### What changed

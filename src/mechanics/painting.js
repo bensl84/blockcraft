@@ -1,12 +1,14 @@
 // OWNER LANE: FEATURE-MECH. Paintings (P1, SPEC §2.5): the `painting` item hangs a `painting` entity on a wall
-// face, choosing the largest of 8 ORIGINAL procedurally painted pictures that fits (solid wall behind, free
-// cells in front, no other painting there). Hitting it (or a nearby explosion, or losing the wall) takes it
-// down and drops the item (survival).
+// face, choosing one of 8 ORIGINAL procedurally painted pictures that fits (solid wall behind, free cells in front,
+// no other painting there) - a random one weighted by area, so a big wall still gets variety (Java picks among the
+// largest only; with one 4x2 picture every wall would show the same rainbow). Hitting it, a kid's empty-hand tap
+// in creative (like tapping a block), a nearby explosion or losing the wall takes it down (survival: drops the item).
 
 import * as THREE from 'three';
 import { Entity, registerEntityType } from '../entities/entity.js';
 import { dropItem } from '../entities/item_entity.js';
-import { registerItemUse } from '../core/hooks.js';
+import { registerEntityInteract, registerItemUse } from '../core/hooks.js';
+import { getItem } from '../data/items.js';
 import { FACE, FACING_DIRS } from '../core/constants.js';
 import { B_SOLID } from '../core/registry.js';
 import { Rng } from '../core/math.js';
@@ -34,10 +36,14 @@ export function pictureCells(ax, ay, az, f, w, h) {
   return out;
 }
 
-/** Largest picture (index into PICTURES) that fits at the anchor, or -1. Centres wide pictures on the anchor. */
-export function choosePicture(getRaw, ax, ay, az, f, occupied = () => false) {
+/**
+ * A picture that fits at the anchor, or null. Without `rand`: the largest that fits. With `rand` (game.rand): a
+ * random one of those that fit, weighted by area. Centres wide pictures on the anchor.
+ */
+export function choosePicture(getRaw, ax, ay, az, f, occupied = () => false, rand = null) {
   const back = FACING_DIRS[(f + 2) & 3];
   const right = FACING_DIRS[(f + 1) & 3];
+  const fits = [];
   for (let p = 0; p < PICTURES.length; p++) {
     const { w, h } = PICTURES[p];
     const ox = -Math.floor((w - 1) / 2), oy = -Math.floor((h - 1) / 2);
@@ -47,9 +53,17 @@ export function choosePicture(getRaw, ax, ay, az, f, occupied = () => false) {
     for (const [x, y, z] of cells) {
       if (y < 0 || y > 127 || B_SOLID[getRaw(x, y, z) & 0xff] || !hasSolidSide(getRaw(x + back[0], y, z + back[2])) || occupied(x, y, z)) { ok = false; break; }
     }
-    if (ok) return { index: p, x: sx, y: sy, z: sz };
+    if (!ok) continue;
+    const pick = { index: p, x: sx, y: sy, z: sz };
+    if (!rand) return pick;
+    fits.push(pick);
   }
-  return null;
+  if (!fits.length) return null;
+  let total = 0;
+  for (const c of fits) total += PICTURES[c.index].w * PICTURES[c.index].h;
+  let r = rand() * total;
+  for (const c of fits) { r -= PICTURES[c.index].w * PICTURES[c.index].h; if (r < 0) return c; }
+  return fits[fits.length - 1];
 }
 
 /* ------------------------------------------------------------------ procedural art (original) */
@@ -251,7 +265,7 @@ export function registerPaintings(game, mech) {
       const P = PICTURES[p.data.index];
       return p.data.facing === f && pictureCells(p.data.ax, p.data.ay, p.data.az, f, P.w, P.h).some(([a, b, c]) => a === x && b === y && c === z);
     });
-    const pick = choosePicture(mech.getRaw, ax, ay, az, f, occupied);
+    const pick = choosePicture(mech.getRaw, ax, ay, az, f, occupied, game.rand);
     if (!pick) return null;
     const P = PICTURES[pick.index];
     const pos = picturePosition(pick.x, pick.y, pick.z, f, P);
@@ -259,6 +273,16 @@ export function registerPaintings(game, mech) {
     if (e) game.events.emit('mech:painting', { id: e.id, x: pos.x, y: pos.y, z: pos.z, picture: P.name, action });
     return e;
   };
+  // Kid scheme + creative: tapping a painting with an empty hand or a tool takes it down, exactly like tapping a
+  // block (CORE-E use() step 6 only breaks blocks, and an entity target blocks that step).
+  registerEntityInteract('painting', (ctx) => {
+    const kid = game.input ? game.input.scheme === 'kid' : game.settings && game.settings.controls === 'kid';
+    if (!kid || !game.isCreative()) return false;
+    const def = ctx.stack ? getItem(ctx.stack.item) : null;
+    if (ctx.stack && !(def && def.tool)) return false;
+    ctx.entity.popOff(game);
+    return true;
+  });
   registerItemUse('painting', (ctx) => {
     const e = mech.hangPainting(ctx.hit, ctx.action);
     if (!e) return false;

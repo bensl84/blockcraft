@@ -1,8 +1,9 @@
 // OWNER LANE: FEATURE-MECH. Smoke scenarios for block mechanics (SPEC §8.6 acceptance).
 // Most scenarios drive MECH directly through the frozen world/interaction contract (world.setBlock,
 // interaction.breakBlock/placeBlock - implemented by the CORE stubs too) and the additive helper
-// game.mechanics.useAt(x, y, z, {item}) (CORE-E's use() steps 3-5), so they verify MECH now. The `mech-input-*`
-// and `mech-fence-pen` scenarios need the real CORE-E / MOBS lanes and report PENDING until those land.
+// game.mechanics.useAt(x, y, z, {item}) (CORE-E's use() steps 3-5). The `mech-input-*` scenarios go through the
+// real CORE-E kid tap path; `mech-fence-pen` needs the MOBS lane and reports PENDING until it lands.
+// The full in-world play-through (real mouse, screenshots, perf) is tools/mech-play.mjs.
 
 const FLAT = { preset: 'flat', seed: 11, mode: 'creative', difficulty: 'peaceful' };
 const SURV = { preset: 'flat', seed: 11, mode: 'survival', difficulty: 'easy' };
@@ -215,7 +216,7 @@ export default [
       t.assert(data.v === 1 && data.ticks.length > 0, `serialize keeps pending ticks (${data.ticks.length})`);
     },
   },
-  /* ---------- these need the real CORE-E / MOBS lanes (PENDING while they are stubs) ---------- */
+  /* ---------- real CORE-E input path (and MOBS for the pen) ---------- */
   {
     name: 'mech-input-door', requires: ['input', 'interaction', 'raycast', 'player', 'physics'],
     async run(t) {
@@ -256,6 +257,35 @@ export default [
       await t.call('waitTicks', 3);
       t.assert(await t.call('getBlock', x - 2, 4, z) !== 'oak_door', 'no door under a ceiling');
       t.assert((await t.call('selected')).count === 2, 'refused door is not used up');
+    },
+  },
+  {
+    name: 'mech-input-painting', requires: ['input', 'interaction', 'raycast', 'player', 'physics'],
+    async run(t) {
+      // kid creative: tap a wall with a painting -> it hangs; tap it with an empty hand -> it comes down (like a block)
+      const p = await start(t);
+      await t.call('setFlying', false);
+      await t.call('waitTicks', 5);
+      const x = Math.floor(p.x), z = Math.floor(p.z) - 4;
+      await t.eval(([x, z]) => {
+        const g = window.__game.game, id = window.__game.blockId;
+        for (let dx = -2; dx <= 2; dx++) for (let y = 4; y <= 6; y++) g.world.setBlock(x + dx, y, z, id('stone_bricks'), 0, { cause: 'test' });
+      }, [x, z]);
+      await t.call('setSlot', 0, 'painting', 1);
+      await t.call('selectSlot', 0);
+      const a = await t.call('aimAt', x + 0.5, 5.2, z + 1.001);
+      await t.call('tapAt', a.x, a.y);
+      await t.call('waitTicks', 2);
+      const hung = (await t.call('entities')).filter((e) => e.type === 'painting');
+      t.assert(hung.length === 1, `tap hangs a painting (${hung.length})`);
+      t.note('picture', hung[0] && hung[0].data.index);
+      await t.call('setSlot', 1, null);
+      await t.call('selectSlot', 1);
+      const b = await t.call('aimAt', hung[0].x, hung[0].y + 0.5, hung[0].z + 0.05);
+      await t.call('tapAt', b.x, b.y);
+      await t.call('waitTicks', 2);
+      t.assert((await t.call('entities')).every((e) => e.type !== 'painting'), 'empty-hand tap takes it down');
+      t.assert(await t.call('getBlock', x, 5, z) === 'stone_bricks', 'the wall behind is untouched');
     },
   },
   {

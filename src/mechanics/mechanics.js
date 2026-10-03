@@ -7,7 +7,7 @@
 //   fluids.js     water + lava flow (pure, accessor based)
 //   explosion.js  1352-ray explosion maths, exposure, damage (pure)
 //   entities.js   falling_block + tnt entity types
-//   uses.js       hooks: doors, gates, beds, cake, TNT, buckets, hoes, bone meal, flint and steel, slabs, snow
+//   uses.js       hooks: doors, gates, beds, cake, TNT, buckets, hoes, bone meal, flint and steel, snow layers
 //   painting.js   painting entity + item (P1)
 //
 // RULES (SPEC §0.3, §8.6): blocks are broken only through game.interaction.breakBlock (explosions pass dropInto
@@ -22,7 +22,7 @@ import { BLOCKS, STATE } from '../data/blocks.js';
 import {
   B_LIQUID, B_OPAQUE, B_SHAPE, ID, SHAPE, connectionState, isReplaceable,
 } from '../core/registry.js';
-import { KID, KID_LOCKED_TIME, colIndex, colKey } from '../core/constants.js';
+import { KID, KID_LOCKED_TIME, colKey } from '../core/constants.js';
 import { dropItem } from '../entities/item_entity.js';
 import { placeTree } from '../world/worldgen.js';
 import { TICK_KIND, TickScheduler } from './scheduler.js';
@@ -89,6 +89,8 @@ export function createMechanicsSystem(game) {
 
   const stats = {
     ticksRun: 0, randomTicks: 0, explosions: 0, fallingSpawned: 0, tntPrimed: 0, lastExplosion: null,
+    /** cumulative ms spent in scheduled ticks / random ticks / leaf-decay searches (perf debugging) */
+    schedMs: 0, randomMs: 0, leafChecks: 0,
   };
 
   /* ------------------------------------------------------------------ scheduling */
@@ -98,6 +100,7 @@ export function createMechanicsSystem(game) {
   }
 
   function onBlockChanged(e) {
+    noteRandomTicked(e.x, e.y, e.z, e.id);
     if (!game.world || !game.world.isOpen || e.cause === 'worldgen') return;
     const a = e.action | 0;
     for (const d of NB) schedule(e.x + d[0], e.y + d[1], e.z + d[2], 1, TICK_KIND.NEIGHBOR, a);
@@ -238,6 +241,33 @@ export function createMechanicsSystem(game) {
     return rtSeed;
   };
   let randomTicksOn = true;
+  // Per column: bitmask of the sections that hold any random-ticked block (grass, crops, leaves, saplings...).
+  // Underground stone and open-air sections are skipped, which halves the random-tick cost. Scanned lazily (a few
+  // columns per tick; unscanned columns tick every non-empty section), bits are added on block changes and the
+  // entry is dropped when the column (re)loads or unloads. Stale bits only cost a few wasted picks.
+  const rtMasks = new Map();
+  let rtScanBudget = 0;
+  function rtMask(col) {
+    const key = colKey(col.cx, col.cz);
+    let m = rtMasks.get(key);
+    if (m !== undefined) return m;
+    if (rtScanBudget <= 0) return col.nonEmptyMask;
+    rtScanBudget--;
+    m = 0;
+    const b = col.blocks;
+    for (let s = 0; s < 8; s++) {
+      if (!(col.nonEmptyMask & (1 << s))) continue;
+      for (let i = s << 12, end = i + 4096; i < end; i++) if (RANDOM_TICKED[b[i] & 0xff]) { m |= 1 << s; break; }
+    }
+    rtMasks.set(key, m);
+    return m;
+  }
+  function noteRandomTicked(x, y, z, id) {
+    if (!RANDOM_TICKED[id & 0xff]) return;
+    const key = colKey(x >> 4, z >> 4);
+    const m = rtMasks.get(key);
+    if (m !== undefined) rtMasks.set(key, m | (1 << (y >> 4)));
+  }
   function randomTicks() {
     const w = game.world;
     if (!randomTicksOn || !w || !w.forEachColumn) return;
@@ -245,17 +275,20 @@ export function createMechanicsSystem(game) {
     const pcx = p ? Math.floor(p.x) >> 4 : 0, pcz = p ? Math.floor(p.z) >> 4 : 0;
     const R = (w.renderDistance || 6) + 1;
     let count = 0;
+    rtScanBudget = 3;
     w.forEachColumn((col) => {
       if (col.state < 2) return; // LIT
       const dx = col.cx - pcx, dz = col.cz - pcz;
       if (dx * dx + dz * dz > R * R) return;
-      const mask = col.nonEmptyMask;
+      const mask = rtMask(col) & col.nonEmptyMask;
+      if (!mask) return;
+      const blocks = col.blocks;
       for (let sy = 0; sy < 8; sy++) {
         if (!(mask & (1 << sy))) continue;
         for (let k = 0; k < RANDOM_TICKS_PER_SECTION; k++) {
           const r = rtRand() & 4095;
-          const lx = r & 15, lz = (r >> 4) & 15, y = (sy << 4) | ((r >> 8) & 15);
-          const raw = col.blocks[colIndex(lx, y, lz)];
+          const lx = r & 15, lz = (r >> 4) & 15, y = (sy << 4) | (r >> 8);
+          const raw = blocks[(sy << 12) | r];   // == colIndex(lx, y, lz)
           const id = raw & 0xff;
           if (RANDOM_TICKED[id]) { count++; randomTick(col.cx * 16 + lx, y, col.cz * 16 + lz, raw); }
         }
@@ -272,9 +305,9 @@ export function createMechanicsSystem(game) {
     if (CROP_IDS.has(id)) { growCrop(x, y, z, st); return; }
     if (SAPLING_KIND.has(id)) { if (lightAt(x, y, z) >= SPREAD_LIGHT && game.rand() < 1 / 7) advanceSapling(x, y, z, 0); return; }
     if (id === ID.farmland) { farmlandTick(x, y, z, st); return; }
-    if (id === ID.sugar_cane || id === ID.cactus) { tallPlantTick(x, y, z, id, st); return; }
+    if (id === ID.sugar_cane || id === ID.cactus) { tallPlantTick(x, y, z, id); return; }
     if (id === ID.grass_block) { grassTick(x, y, z); return; }
-    if (LEAF_IDS.has(id)) { if (!(st & STATE.LEAVES_PERSISTENT) && !logNear(x, y, z, 4)) breakBlock(x, y, z, { by: 'decay' }); }
+    if (LEAF_IDS.has(id)) { if (!(st & STATE.LEAVES_PERSISTENT) && !logNear(x, y, z, LEAF_R)) breakBlock(x, y, z, { by: 'decay' }); }
     if (id === ID.ice || id === ID.snow) meltTick(x, y, z, id);
   }
 
@@ -310,15 +343,18 @@ export function createMechanicsSystem(game) {
     if (!CROP_IDS.has(getRaw(x, y + 1, z) & 0xff)) setBlock(x, y, z, ID.dirt, 0, 'growth', 0);
   }
 
-  function tallPlantTick(x, y, z, id, st) {
+  /**
+   * Sugar cane / cactus: Java counts an age 0..15 in the block state and grows on the 16th random tick. Each age
+   * step is a block change, i.e. a remesh of an unchanged-looking section, many times a minute across a loaded
+   * world (and it kept CORE-D's hot sections from ever settling). Same average pace without the churn: grow with
+   * chance 1/16 per random tick.
+   */
+  function tallPlantTick(x, y, z, id) {
     if ((getRaw(x, y + 1, z) & 0xff) !== AIR || y >= 127) return;
     let h = 1;
     while (h < 3 && (getRaw(x, y - h, z) & 0xff) === id) h++;
     if (h >= 3) return;
-    const age = st & 15;
-    if (age >= 15) {
-      if (setBlock(x, y + 1, z, id, 0, 'growth', 0)) setBlock(x, y, z, id, 0, 'growth', 0);
-    } else setBlock(x, y, z, id, (st & ~15) | (age + 1), 'growth', 0);
+    if (game.rand() < 1 / 16) setBlock(x, y + 1, z, id, 0, 'growth', 0);
   }
 
   function grassTick(x, y, z) {
@@ -334,8 +370,12 @@ export function createMechanicsSystem(game) {
     }
   }
 
-  /** Breadth-first search through leaves for a log within `max` steps (leaf decay). */
-  const LEAF_D = 9, leafSeen = new Uint32Array(LEAF_D * LEAF_D * LEAF_D);
+  /**
+   * Breadth-first search through leaves for a log within `max` steps (leaf decay). Modern Java rule: a leaf stays
+   * while a log is at most 6 steps away through leaves (CORE-B trees have leaves 5 steps out; the old radius 4 ate
+   * them).
+   */
+  const LEAF_R = 6, LEAF_D = 2 * LEAF_R + 1, leafSeen = new Uint32Array(LEAF_D * LEAF_D * LEAF_D);
   let leafStamp = 0;
   const leafQueue = new Int32Array(LEAF_D * LEAF_D * LEAF_D * 4);
   function logNear(x, y, z, max) {
@@ -344,16 +384,17 @@ export function createMechanicsSystem(game) {
     for (const [ox, oz] of [[-max, -max], [max, -max], [-max, max], [max, max]]) {
       if (w.getColumn && !w.getColumn((x + ox) >> 4, (z + oz) >> 4)) return true;
     }
+    stats.leafChecks++;
     leafStamp = (leafStamp + 1) >>> 0 || 1;
     let head = 0, tail = 0;
-    const idx = (dx, dy, dz) => (dx + 4) + LEAF_D * ((dz + 4) + LEAF_D * (dy + 4));
+    const idx = (dx, dy, dz) => (dx + LEAF_R) + LEAF_D * ((dz + LEAF_R) + LEAF_D * (dy + LEAF_R));
     leafSeen[idx(0, 0, 0)] = leafStamp;
     leafQueue[tail++] = 0; leafQueue[tail++] = 0; leafQueue[tail++] = 0; leafQueue[tail++] = 0;
     while (head < tail) {
       const dx = leafQueue[head++], dy = leafQueue[head++], dz = leafQueue[head++], dist = leafQueue[head++];
       for (let k = 1; k < 7; k++) {
         const nx = dx + NB[k][0], ny = dy + NB[k][1], nz = dz + NB[k][2];
-        if (Math.abs(nx) > 4 || Math.abs(ny) > 4 || Math.abs(nz) > 4) continue;
+        if (Math.abs(nx) > LEAF_R || Math.abs(ny) > LEAF_R || Math.abs(nz) > LEAF_R) continue;
         const i = idx(nx, ny, nz);
         if (leafSeen[i] === leafStamp) continue;
         leafSeen[i] = leafStamp;
@@ -634,10 +675,12 @@ export function createMechanicsSystem(game) {
       game.events.on('block:changed', onBlockChanged);
       game.events.on('world:exit', () => reset());
       game.events.on('world:columnUnloaded', (e) => {
+        rtMasks.delete(colKey(e.cx, e.cz));
         for (const t of sched.removeWhere((t) => (t.x >> 4) === e.cx && (t.z >> 4) === e.cz)) parkTick(t);
       });
       game.events.on('world:columnLoaded', (e) => {
         const key = colKey(e.cx, e.cz);
+        rtMasks.delete(key);
         const list = parked.get(key);
         if (!list) return;
         parked.delete(key);
@@ -667,8 +710,11 @@ export function createMechanicsSystem(game) {
       const w = game.world;
       w.beginBatch();
       try {
+        const t0 = performance.now();
         runScheduled();
+        const t1 = performance.now();
         randomTicks();
+        stats.schedMs += t1 - t0; stats.randomMs += performance.now() - t1;
       } finally { w.endBatch(); }
       waterPush();
       sleepTick();
@@ -726,6 +772,7 @@ export function createMechanicsSystem(game) {
 
   function reset() {
     sched.clear();
+    rtMasks.clear();
     parked.clear();
     explosionQueue = [];
     if (sleep && game.player) game.player.sleeping = false;

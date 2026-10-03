@@ -423,7 +423,8 @@ test('farming: hydrated crops grow by random ticks; dry empty farmland turns bac
   g.set(0, 3, 0, 'farmland', 0); g.set(0, 4, 0, 'wheat', 0);
   g.set(3, 3, 0, 'water');
   g.set(8, 3, 8, 'farmland', 0);
-  for (let i = 0; i < 40000 && (g.st(0, 4, 0) < 7 || g.get(8, 3, 8) === ID.farmland); i += 500) g.step(500);
+  // ~1365 ticks between random ticks of one cell, 1/3 growth chance when wet: 7 stages average ~29000 ticks
+  for (let i = 0; i < 100000 && (g.st(0, 4, 0) < 7 || g.get(8, 3, 8) === ID.farmland); i += 500) g.step(500);
   assert.equal(g.st(0, 3, 0), 7, 'farmland near water is wet');
   assert.equal(g.st(0, 4, 0), 7, 'wheat ripened by random ticks');
   assert.notEqual(g.get(8, 3, 8), ID.farmland, 'dry farmland without a crop reverted (to dirt, then maybe grass)');
