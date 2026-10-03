@@ -1,0 +1,122 @@
+/* OWNER LANE: FEATURE-INV. Container screens (inventory, crafting, furnace, chest), recipe book, kid creative
+   picker. Uses the shared kit from styles.css (.bc-panel, .bc-slot, .bc-count, .bc-durability). SPEC §8.2.4, §9. */
+
+.inv-screen { position: absolute; inset: 0; touch-action: none; display: flex; align-items: center; justify-content: center; }
+.inv-screen * { box-sizing: border-box; }
+.inv-layout { display: flex; align-items: stretch; gap: 16px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); }
+.inv-panel { position: relative; display: flex; flex-direction: column; align-items: flex-start; }
+
+.inv-slot { cursor: pointer; touch-action: none; }
+.inv-slot .inv-slot-content { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.inv-slot.inv-drag::before { content: ''; position: absolute; inset: 2px; background: rgba(255, 255, 255, 0.45); pointer-events: none; }
+.inv-slot.inv-big { box-shadow: inset 3px 3px 0 var(--slot-dark), inset -3px -3px 0 var(--slot-light); }
+.inv-slot.inv-out-ready { animation: inv-glow 0.9s ease-in-out infinite; }
+@keyframes inv-glow { 0%, 100% { filter: none; } 50% { filter: brightness(1.25) drop-shadow(0 0 6px #ffd400); } }
+.inv-slot .inv-ghost { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0.35; pointer-events: none; filter: grayscale(1); }
+.inv-slot .inv-ghost.inv-fade { animation: inv-ghostfade 0.5s ease-out forwards; opacity: 1; filter: none; }
+@keyframes inv-ghostfade { 0% { opacity: 1; } 100% { opacity: 0; } }
+
+.inv-grid { display: grid; gap: 0; }
+.inv-section { margin-top: calc(var(--gui) * 3); }
+.inv-gap { height: calc(var(--gui) * 4); }
+.inv-row { display: flex; align-items: center; }
+.inv-col { display: flex; flex-direction: column; }
+.inv-top { display: flex; align-items: center; gap: calc(var(--gui) * 3); width: 100%; }
+.inv-spacer { flex: 1; }
+
+.inv-close {
+  position: absolute; top: -18px; right: -18px; z-index: 3; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: #b03a2e; border: 3px solid #000; border-radius: 8px;
+  box-shadow: inset 3px 3px 0 #e07a6a, inset -3px -3px 0 #6a1a12; cursor: pointer;
+}
+.inv-close:hover { background: #c84a3c; }
+.inv-close .inv-sprite, .inv-btn-icon .inv-sprite { pointer-events: none; }
+
+.inv-btn-icon {
+  display: inline-flex; align-items: center; justify-content: center; padding: 0; cursor: pointer;
+  background: var(--btn); border: 2px solid #000; box-shadow: inset 3px 3px 0 #a8a8a8, inset -3px -4px 0 #3a3a3a; border-radius: 4px;
+}
+.inv-btn-icon:hover { background: var(--btn-hover); }
+.inv-btn-icon.inv-on { background: #4f9a2e; box-shadow: inset 3px 3px 0 #8fd86a, inset -3px -4px 0 #2d5c18; }
+.inv-btn-icon[disabled] { opacity: 0.35; cursor: default; }
+
+.inv-cursor { position: fixed; left: 0; top: 0; transform: translate(-50%, -50%); pointer-events: none; z-index: 10; width: 64px; height: 64px; }
+.inv-cursor .inv-slot-content { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+
+.inv-doll { background: #000; box-shadow: inset 2px 2px 0 var(--slot-dark), inset -2px -2px 0 var(--slot-light); display: flex; align-items: flex-end; justify-content: center; }
+.inv-doll canvas { image-rendering: pixelated; }
+
+/* furnace */
+.inv-furnace { display: flex; align-items: center; gap: calc(var(--gui) * 6); }
+.inv-progress { position: relative; }
+.inv-progress > .inv-sprite { position: absolute; left: 0; top: 0; }
+.inv-progress > .inv-fill { position: absolute; left: 0; top: 0; overflow: hidden; }
+
+/* recipe book */
+.inv-book { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.inv-book-grid { display: grid; gap: 8px; }
+.inv-recipe {
+  position: relative; display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer;
+  background: var(--slot-bg); border: 2px solid #000;
+  box-shadow: inset 3px 3px 0 #b8b8b8, inset -3px -3px 0 #555; border-radius: 4px;
+  animation: inv-breathe 2.6s ease-in-out infinite;
+}
+.inv-recipe:hover { background: var(--btn-hover); }
+.inv-recipe:active { transform: scale(0.94); }
+.inv-recipe .bc-icon, .inv-recipe .inv-sprite { pointer-events: none; }
+.inv-recipe .bc-count { right: 4px; bottom: 2px; }
+.inv-recipe.inv-needs-table { filter: grayscale(0.7) brightness(0.8); animation: none; }
+.inv-recipe .inv-badge { position: absolute; right: 2px; top: 2px; }
+.inv-recipe.inv-nope { animation: inv-nope 0.3s ease-in-out; }
+.inv-recipe.inv-hint { opacity: 0.45; animation: none; cursor: default; }
+@keyframes inv-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+@keyframes inv-nope { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+.inv-pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+.inv-arrow-btn { font-family: var(--font); color: #fff; text-shadow: 2px 2px 0 var(--text-shadow); font-size: 28px; }
+.inv-dots { display: flex; gap: 8px; align-items: center; justify-content: center; min-height: 14px; }
+.inv-dots i { width: 12px; height: 12px; border-radius: 2px; background: #555; border: 2px solid #000; }
+.inv-dots i.inv-on { background: var(--select); }
+
+/* fly-to-slot animation ("fwoop") */
+.inv-fly { position: fixed; z-index: 200; pointer-events: none; transition: transform 260ms cubic-bezier(0.3, 0.7, 0.3, 1), opacity 260ms; }
+
+/* ---------------------------------------------------------------- kid creative picker */
+.inv-picker { display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 16px 20px 18px; }
+.inv-tabs { display: flex; gap: 10px; justify-content: center; }
+.inv-tab {
+  position: relative; padding: 0; display: flex; align-items: center; justify-content: center; cursor: pointer;
+  background: #8b8b8b; border: 3px solid #000; border-radius: 8px;
+  box-shadow: inset 3px 3px 0 #c8c8c8, inset -3px -3px 0 #555; transition: transform 90ms;
+}
+.inv-tab:hover { background: #9aa4cc; }
+.inv-tab.inv-on { background: #c6c6c6; transform: translateY(-6px) scale(1.08); box-shadow: 0 0 0 4px var(--select), inset 3px 3px 0 #fff, inset -3px -3px 0 #777; }
+.inv-tab .bc-icon { pointer-events: none; }
+.inv-pick-body { display: flex; align-items: center; gap: 12px; justify-content: center; }
+.inv-tiles { display: grid; gap: 8px; align-content: start; }
+.inv-tile {
+  position: relative; padding: 0; display: flex; align-items: center; justify-content: center; cursor: pointer;
+  background: var(--slot-bg); border: 2px solid #000; border-radius: 4px;
+  box-shadow: inset 3px 3px 0 var(--slot-dark), inset -3px -3px 0 var(--slot-light);
+}
+.inv-tile:hover { background: #a8b0d8; }
+.inv-tile:active, .inv-tile.inv-pop { transform: scale(0.9); }
+.inv-tile .bc-icon { pointer-events: none; }
+.inv-tile-empty { visibility: hidden; }
+.inv-pick-bottom { display: flex; align-items: center; justify-content: center; gap: 16px; }
+.inv-pick-hotbar { display: flex; padding: 3px; background: rgba(20, 20, 20, 0.35); border: 2px solid #111; border-radius: 3px; }
+.inv-pick-hotbar .inv-hb-slot { position: relative; background: #8b8b8b; box-shadow: inset 3px 3px 0 #373737, inset -3px -3px 0 #fff; border: 1px solid #000; display: flex; align-items: center; justify-content: center; cursor: pointer; touch-action: none; transition: transform 90ms; }
+.inv-pick-hotbar .inv-hb-slot .inv-slot-content { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.inv-pick-hotbar .inv-hb-slot.inv-selected { z-index: 2; transform: translateY(-6px) scale(1.15); box-shadow: 0 0 0 4px var(--select), 0 0 0 6px #000, inset 3px 3px 0 #373737, inset -3px -3px 0 #fff; }
+.inv-pick-hotbar .inv-hb-slot.inv-landed { animation: inv-land 0.35s ease-out; }
+@keyframes inv-land { 0% { filter: brightness(1.8); } 100% { filter: none; } }
+.inv-trash { background: #8a3a2e; box-shadow: inset 3px 3px 0 #c87a6a, inset -3px -4px 0 #4a1a12; }
+.inv-trash:hover { background: #a84a3c; }
+
+/* chest: wooden frame around the chest's own slots */
+.inv-chest-box { padding: calc(var(--gui) * 2); margin: calc(var(--gui) * -1); background: #9e662c; border: 2px solid #3a2410; border-radius: 4px; box-shadow: inset 2px 2px 0 #c8925a, inset -2px -2px 0 #6a4018; }
+
+/* faint "what goes here" pictures in empty armour / fuel slots */
+.inv-slot-bg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0.3; filter: grayscale(1) brightness(1.3); pointer-events: none; }
+.inv-slot[data-item] .inv-slot-bg { display: none; }
+.inv-book-holder { display: flex; align-items: center; }

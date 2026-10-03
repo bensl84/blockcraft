@@ -1,4 +1,5 @@
 // OWNER: FEATURE-INV (foundation written by LEAD; the public API below is FROZEN - extend, don't break).
+// INV additions: setArmor, armorPoints, notify.
 // The player's inventory MODEL (no DOM). UI lives in src/ui/*. SPEC §8.2.
 //
 // Slots 0-8 = hotbar, 9-35 = main. Empty slot = null. ItemStack = {item, count, damage?, data?}.
@@ -40,6 +41,23 @@ export class Inventory {
   }
 
   getSelected() { return this.slots[this.selected] || null; }
+
+  /** Set armour slot k (0 head, 1 chest, 2 legs, 3 feet). Additive (FEATURE-INV). */
+  setArmor(k, stack) {
+    if (k < 0 || k > 3) return;
+    this.armor[k] = stack && stack.count > 0 ? stack : null;
+    this._changed(-1);
+  }
+
+  /** Total armour points worn (HUD armour row, P1). Additive (FEATURE-INV). */
+  armorPoints() {
+    let n = 0;
+    for (const s of this.armor) { const d = s && getItem(s.item); if (d && d.armor) n += d.armor.points; }
+    return n;
+  }
+
+  /** Bump the version and emit 'inventory:changed' after an in-place edit (cursor, grids). Additive. */
+  notify(slot = -1) { this._changed(slot); }
 
   /** Select hotbar slot 0..8. Emits 'player:hotbar' {slot, item}. */
   selectSlot(i) {
