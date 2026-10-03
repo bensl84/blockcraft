@@ -397,6 +397,7 @@ export class ParticleMesh {
     const inst = (n) => { const a = new THREE.InstancedBufferAttribute(new Float32Array(max * n), n); a.setUsage(THREE.DynamicDrawUsage); return a; };
     this.iPos = inst(4); this.iUV = inst(4); this.iCol = inst(4); this.iMisc = inst(4);
     g.setAttribute('iPos', this.iPos); g.setAttribute('iUV', this.iUV); g.setAttribute('iCol', this.iCol); g.setAttribute('iMisc', this.iMisc);
+    this.attrs = [this.iPos, this.iUV, this.iCol, this.iMisc];
     g.instanceCount = 0;
     this.geometry = g;
     const atlas = buildSpriteAtlas();
@@ -472,10 +473,14 @@ export class ParticleMesh {
       C[o] = s.r[i]; C[o + 1] = s.g[i]; C[o + 2] = s.b[i]; C[o + 3] = 1;
       M[o] = s.sky[i]; M[o + 1] = s.block[i]; M[o + 2] = s.rot[i]; M[o + 3] = (s.flags[i] & F_FULLBRIGHT) ? 1 : 0;
     }
-    for (const a of [this.iPos, this.iUV, this.iCol, this.iMisc]) {
-      a.clearUpdateRanges();
-      if (n) { a.addUpdateRange(0, n * 4); a.needsUpdate = true; }
+    if (n || this.lastCount) {
+      for (let k = 0; k < 4; k++) {
+        const a = this.attrs[k];
+        a.clearUpdateRanges();
+        if (n) { a.addUpdateRange(0, n * 4); a.needsUpdate = true; }
+      }
     }
+    this.lastCount = n;
     this.geometry.instanceCount = n;
     this.mesh.visible = n > 0;
   }
