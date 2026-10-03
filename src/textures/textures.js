@@ -1,33 +1,41 @@
-// OWNER LANE: CORE-A (textures). STUB written by LEAD - replace the bodies, keep the exported signatures.
-// Spec: docs/SPEC.md §5.1. Everything here must be ORIGINAL procedural pixel art (no Mojang assets).
+// OWNER LANE: CORE-A (textures). docs/SPEC.md §5.1. Everything here is ORIGINAL procedural pixel art.
 //
 // buildTextures() is PURE (no DOM): it runs in Node unit tests and could run in a worker.
-// buildItemIcons() needs a DOM canvas (browser only).
-//
-// Stub behaviour: every required key gets a flat colour tile (block colour or name hash) with light noise,
-// animated keys get their frame count, crack_N get dark speckles. Icons are flat coloured squares.
+// buildItemIcons() needs a DOM canvas (browser only); the pixels themselves come from the pure
+// paintIconAtlas() in icons.js, so Node tests can check every icon.
 
-import { registerStub } from '../core/stubs.js';
-import { REQUIRED_TEXTURE_KEYS, ANIMATED_TEXTURES, blockDef } from '../core/registry.js';
+import { REQUIRED_TEXTURE_KEYS, ANIMATED_TEXTURES } from '../core/registry.js';
 import { ANIM } from '../core/constants.js';
-import { BLOCKS } from '../data/blocks.js';
-import { ITEM_LIST, getItem } from '../data/items.js';
-import { hashString, hexToRgb, mulberry32 } from '../core/math.js';
-
-registerStub('textures');
-registerStub('icons');
+import { getItem } from '../data/items.js';
+import { hashString, mulberry32 } from '../core/math.js';
+import { PixelCanvas } from './toolkit.js';
+import { TERRAIN } from './tex_terrain.js';
+import { BUILDING } from './tex_building.js';
+import { PLANTS } from './tex_plants.js';
+import { ANIMATED, CUTOUT_KEYS, TRANSLUCENT_ALPHA } from './tex_anim.js';
+import { paintIconAtlas, ICON_COLS } from './icons.js';
 
 export const TEX_SIZE = 16;
 export const ICON_SIZE = 32;   // icon atlas cell size in pixels (16px sprites are drawn 2x; iso blocks drawn at 32)
 
+const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+/** Every static painter by texture key (animated keys live in ANIMATED). */
+export const PAINTERS = Object.freeze({ ...TERRAIN, ...BUILDING, ...PLANTS });
+
+/** Is this key a cutout texture (alpha 0/255 only)? Crack overlays are NOT: they keep alpha 150/70. */
+export function isCutoutKey(key) { return CUTOUT_KEYS.has(key) || /^(wheat|carrots|potatoes)_\d$/.test(key); }
+
 /**
  * Build every block texture as layers of one RGBA8 array.
- * Layer order: REQUIRED_TEXTURE_KEYS sorted, animated keys expanded into ANIM.FRAMES[mode] consecutive layers.
- * @param {{fastLeaves?: boolean, halfAnim?: boolean}} [opts] halfAnim: water/lava with 8 frames for GPUs whose
- *        MAX_ARRAY_TEXTURE_LAYERS is below the normal count (SPEC §5.1); the `animated` map reports the real frames.
- * @returns {import('../core/types.js').TextureSet & {animated: Map<string,{mode:number, frames:number, fps:number}>}}
+ * Layer order: REQUIRED_TEXTURE_KEYS sorted, animated keys expanded into consecutive layers
+ * (water 16 frames @ 8 fps, lava 16 @ 4 fps, fire 8 @ 12 fps; halfAnim: water and lava 8 frames at half fps,
+ * so one loop lasts as long).
+ * @param {{fastLeaves?: boolean, halfAnim?: boolean}} [opts]
+ * @returns {import('../core/types.js').TextureSet & {animated: Map<string,{mode:number, frames:number, fps:number}>, buildMs: number}}
  */
 export function buildTextures(opts = {}) {
+  const t0 = now();
   const S = TEX_SIZE;
   const keys = REQUIRED_TEXTURE_KEYS;
   const index = new Map();
@@ -36,39 +44,38 @@ export function buildTextures(opts = {}) {
   for (const k of keys) {
     index.set(k, count);
     const mode = ANIMATED_TEXTURES[k] || 0;
-    const frames = mode ? ANIM.FRAMES[mode] : 1;
-    if (mode) animated.set(k, { mode, frames, fps: ANIM.FPS[mode] });
+    let frames = mode ? ANIM.FRAMES[mode] : 1;
+    let fps = mode ? ANIM.FPS[mode] : 0;
+    if (mode && opts.halfAnim && (mode === ANIM.WATER || mode === ANIM.LAVA)) { frames >>= 1; fps /= 2; }
+    if (mode) animated.set(k, { mode, frames, fps });
     count += frames;
   }
   const data = new Uint8Array(S * S * 4 * count);
-  const colorFor = (key) => {
-    const b = BLOCKS.find((d) => d && (d.tex === key || (d.tex && typeof d.tex === 'object' && Object.values(d.tex).includes(key)) || (d.texKeys && d.texKeys.includes(key))));
-    if (b && b.color) return hexToRgb(b.color);
-    const h = hashString(key);
-    return [64 + (h & 127), 64 + ((h >> 8) & 127), 64 + ((h >> 16) & 127)];
-  };
+  const stoneSeed = hashString('stone');
+  const pc = new PixelCanvas(S, S);
   for (const k of keys) {
     const base = index.get(k);
-    const frames = animated.has(k) ? animated.get(k).frames : 1;
-    const rgb = k === 'missing' ? [255, 0, 255] : colorFor(k);
-    const crack = k.startsWith('crack_');
-    const cutout = /leaves|glass|sapling|torch|ladder|door|grass$|fern|bush|dandelion|poppy|cornflower|orchid|allium|lily|tulip|cane|wheat|carrots|potatoes|mushroom|fire/.test(k) && !k.startsWith('grass_');
-    for (let f = 0; f < frames; f++) {
-      const rnd = mulberry32(hashString(k) + f);
-      const off = (base + f) * S * S * 4;
-      for (let i = 0; i < S * S; i++) {
-        const x = i % S, y = (i / S) | 0;
-        const n = 0.88 + rnd() * 0.24;
-        let a = 255;
-        if (crack) a = rnd() < 0.08 * (Number(k.slice(6)) + 1) ? 150 : 0;
-        else if (cutout && (x === 0 || y === 0 || x === S - 1 || y === S - 1 || rnd() < 0.15)) a = 0;
-        const o = off + i * 4;
-        data[o] = crack ? 0 : Math.min(255, rgb[0] * n);
-        data[o + 1] = crack ? 0 : Math.min(255, rgb[1] * n);
-        data[o + 2] = crack ? 0 : Math.min(255, rgb[2] * n);
-        data[o + 3] = k.includes('stained_glass') || k === 'water' || k === 'ice' ? 170 : a;
+    const seed = hashString(k);
+    const ctx = { key: k, seed, rng: mulberry32(seed), fastLeaves: !!opts.fastLeaves, stoneSeed };
+    const anim = animated.get(k);
+    if (anim) {
+      const full = ANIM.FRAMES[anim.mode];
+      const step = full / anim.frames;
+      for (let f = 0; f < anim.frames; f++) {
+        pc.data.fill(0);
+        ANIMATED[k](pc, ctx, f * step, full);
+        data.set(pc.data, (base + f) * S * S * 4);
       }
+      continue;
     }
+    pc.data.fill(0);
+    const painter = PAINTERS[k] || ANIMATED[k];
+    if (painter) painter(pc, ctx);
+    else paintMissing(pc);
+    const a = TRANSLUCENT_ALPHA[k];
+    if (a !== undefined) for (let i = 3; i < pc.data.length; i += 4) pc.data[i] = a;
+    if (isCutoutKey(k)) pc.bleed();
+    data.set(pc.data, base * S * S * 4);
   }
   return {
     size: S,
@@ -76,8 +83,14 @@ export function buildTextures(opts = {}) {
     data,
     index,
     animated,
+    buildMs: now() - t0,
     layer(key) { const v = index.get(key); return v === undefined ? index.get('missing') : v; },
   };
+}
+
+/** Magenta/black checkerboard for unknown keys. */
+export function paintMissing(pc) {
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) pc.setRGB(x, y, ((x >> 3) ^ (y >> 3)) ? '#f81cf0' : '#101010');
 }
 
 /**
@@ -105,27 +118,19 @@ export function getTexturePixels(textureSet, key, frame = 0) {
  * @property {(key: string, px: number) => HTMLElement} element  a <span class="bc-icon"> showing the icon at px size
  * @property {(key: string, px: number) => object} style         CSS props {backgroundImage, backgroundPosition, backgroundSize, width, height}
  * @property {(key: string) => Uint8ClampedArray} pixels16       16x16 RGBA sprite (flat items; iso blocks give their front-ish view) for 3D extrusion
+ * @property {(key: string) => boolean} has
+ * @property {number} buildMs
  */
 export function buildItemIcons(textureSet) {
+  const t0 = now();
   const size = ICON_SIZE;
-  const cols = 16;
-  const rows = Math.ceil(ITEM_LIST.length / cols);
+  const atlas = paintIconAtlas(textureSet);
+  const { cols, rows, index, sprite16 } = atlas;
   const canvas = document.createElement('canvas');
   canvas.width = cols * size;
   canvas.height = rows * size;
   const ctx = canvas.getContext('2d');
-  const index = new Map();
-  ITEM_LIST.forEach((it, i) => {
-    index.set(it.key, i);
-    const x = (i % cols) * size, y = Math.floor(i / cols) * size;
-    let color = it.tint || (it.colors && it.colors[0]) || null;
-    if (!color && it.block) { const b = blockDef(BLOCKS.findIndex((d) => d && d.name === it.block)); color = b && b.color; }
-    if (!color) { const h = hashString(it.key); color = `rgb(${80 + (h & 127)},${80 + ((h >> 8) & 127)},${80 + ((h >> 16) & 127)})`; }
-    ctx.fillStyle = '#202020';
-    ctx.fillRect(x + 4, y + 4, size - 8, size - 8);
-    ctx.fillStyle = color;
-    ctx.fillRect(x + 6, y + 6, size - 12, size - 12);
-  });
+  ctx.putImageData(new ImageData(atlas.data, canvas.width, canvas.height), 0, 0);
   const url = canvas.toDataURL('image/png');
   const rect = (key) => {
     const i = index.has(key) ? index.get(key) : 0;
@@ -137,11 +142,13 @@ export function buildItemIcons(textureSet) {
       backgroundImage: `url(${url})`,
       backgroundPosition: `${-r.x * k}px ${-r.y * k}px`,
       backgroundSize: `${canvas.width * k}px ${canvas.height * k}px`,
+      imageRendering: 'pixelated',
       width: px + 'px', height: px + 'px',
     };
   };
   return {
     size, canvas, cols, rows, url, index, rect, style,
+    buildMs: now() - t0,
     element(key, px) {
       const e = document.createElement('span');
       e.className = 'bc-icon';
@@ -150,14 +157,12 @@ export function buildItemIcons(textureSet) {
       return e;
     },
     pixels16(key) {
-      const r = rect(key);
-      const tmp = document.createElement('canvas');
-      tmp.width = 16; tmp.height = 16;
-      const c = tmp.getContext('2d');
-      c.imageSmoothingEnabled = false;
-      c.drawImage(canvas, r.x, r.y, r.w, r.h, 0, 0, 16, 16);
-      return c.getImageData(0, 0, 16, 16).data;
+      const p = sprite16.get(key) || sprite16.get(ITEM_FALLBACK);
+      return new Uint8ClampedArray(p);
     },
     has(key) { return !!getItem(key) && index.has(key); },
   };
 }
+const ITEM_FALLBACK = 'stone';
+
+export { ICON_COLS };
