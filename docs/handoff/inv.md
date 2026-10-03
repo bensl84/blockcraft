@@ -7,7 +7,8 @@ Branch `lane/inv` · worktree `C:\Users\BSLeo\AppData\Roaming\Claude\scratch-wor
 ## 2026-10-03 · Phase 2: merged the real core, verified in real gameplay
 
 `git merge main` (no conflicts; LEAD files untouched) -> merge commit `c26971e`. INV had no stub fallbacks to remove
-(no `registerStub`, no collision/mob fallbacks in INV files).
+(no `registerStub`, no collision/mob fallbacks in INV files). Re-merged `main` at `f50e9b5` (playtest + brightness
+curve) after the fixes -> `2af3be7`, clean; unit 101/101, INV smoke `{"PASS":11,"PENDING":2}`, `inv-play` `{"PASS":47,"SKIP":4}`.
 
 ### Fixes from in-world play (all in INV files)
 
