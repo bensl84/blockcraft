@@ -385,6 +385,9 @@ export function createInputSystem(game) {
         if (input.scheme === 'kid' && document.pointerLockElement) { try { document.exitPointerLock(); } catch { /* ignore */ } }
       });
       game.events.on('world:exit', () => input.releaseAll());
+      // a new or loaded world starts with the kid cursor in the middle of the screen (the next mouse move or
+      // tap places it again), so a previous world's cursor position never decides the first target
+      game.events.on('world:ready', () => { input.aim.x = 0; input.aim.y = 0; input.aimActive = true; });
       window.addEventListener('keydown', onKeyDown);
       window.addEventListener('keyup', onKeyUp);
       window.addEventListener('blur', () => input.releaseAll());

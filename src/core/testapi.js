@@ -98,10 +98,13 @@ export function installTestApi(game) {
     /** {x,y,z,yaw,pitch,onGround,flying,inWater,health,food, vx,vy,vz,sneaking,sprinting,eyeInWater,inLava,onLadder,air,fallDistance,view,collidedH,tick} */
     pos: () => snapshot(),
     teleport: (x, y, z) => { game.player.teleport(x, y, z, 'test'); return true; },
-    /** Absolute look (degrees). Resets the kid auto-pitch timer so it does not fight the test. */
-    setLook: (yawDeg, pitchDeg) => { game.player.yaw = yawDeg * DEG; game.player.pitch = pitchDeg * DEG; manualLook(); return true; },
-    /** Look at a world point; waits 2 frames so targeting updates. -> {yaw, pitch} degrees */
-    lookAt: async (x, y, z) => { const r = lookAtNow(x, y, z); await waitFrames(2); return r; },
+    /**
+     * Absolute look (degrees). Resets the kid auto-pitch timer so it does not fight the test, and re-centres the
+     * kid cursor so the target is the block in the middle of the screen (use aimAt/tapAt for an off-centre aim).
+     */
+    setLook: (yawDeg, pitchDeg) => { game.player.yaw = yawDeg * DEG; game.player.pitch = pitchDeg * DEG; manualLook(); centerAim(); return true; },
+    /** Look at a world point (kid cursor re-centred); waits 2 frames so targeting updates. -> {yaw, pitch} degrees */
+    lookAt: async (x, y, z) => { const r = lookAtNow(x, y, z); centerAim(); await waitFrames(2); return r; },
     /** Put the kid cursor (input.aim, aimActive) on a world point without turning. -> {x, y, onScreen, target} */
     aimAt: async (x, y, z) => {
       const n = worldToNdc(x, y, z);
