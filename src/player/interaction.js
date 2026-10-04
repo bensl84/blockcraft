@@ -56,6 +56,19 @@ export function placementState(id, baseState, hit, yaw, getRaw = null, cell = nu
   const fracY = hit.py - Math.floor(hit.py);
   const topHalf = hit.ny < 0 || (hit.ny === 0 && fracY > 0.5);
   if (shape === SHAPE.SLAB) return (st & ~3) | (topHalf ? STATE.SLAB_TOP : 0);
+  // v1.7 (judge FID-7) shapes
+  if (shape === SHAPE.TRAPDOOR) {
+    // on a wall the hinge is on that wall; on a floor or ceiling it is the far edge (the hatch swings up away from her)
+    const hinge = hit.ny === 0 ? facingOfNormal(-hit.nx, 0, -hit.nz) : yawToFacing(yaw);
+    return (st & ~15) | hinge | (topHalf ? STATE.TRAPDOOR_TOP : 0);
+  }
+  if (shape === SHAPE.LANTERN) return (st & ~1) | (hit.ny < 0 ? STATE.LANTERN_HANGING : 0);
+  if (shape === SHAPE.SIGN) {
+    if (hit.ny < 0) return -1;
+    // on a wall the writing faces away from it; standing, it faces the child
+    if (hit.ny === 0) return (st & ~7) | facingOfNormal(hit.nx, 0, hit.nz) | STATE.SIGN_WALL;
+    return (st & ~7) | yawToFacing(yaw + Math.PI);
+  }
   if (shape === SHAPE.STAIRS) return (st & ~7) | yawToFacing(yaw) | (topHalf ? STATE.STAIRS_UPSIDE_DOWN : 0);
   if (shape === SHAPE.FENCE || shape === SHAPE.PANE) {
     return getRaw && cell ? (st & ~STATE.CONNECT_MASK) | connectionState(getRaw, cell[0], cell[1], cell[2], id) : st;
@@ -606,6 +619,17 @@ export function createInteractionSystem(game) {
     if (def.support === 'wall') {
       const f = state & 3, back = (f + 2) & 3, dx = [0, 1, 0, -1][back], dz = [-1, 0, 1, 0][back];
       if (!isWallSupport(cx + dx, cy, cz + dz)) return false;
+    }
+    if (def.support === 'floor_or_ceiling') {
+      // a hanging lantern needs something solid above; a standing one a solid top below
+      if (state & STATE.LANTERN_HANGING) { if (!B_SOLID[w.getRaw(cx, cy + 1, cz) & 0xff]) return false; }
+      else if (!hasSolidTop(cx, cy - 1, cz)) return false;
+    }
+    if (def.support === 'sign') {
+      if (state & STATE.SIGN_WALL) {
+        const back = ((state & 3) + 2) & 3, dx = [0, 1, 0, -1][back], dz = [-1, 0, 1, 0][back];
+        if (!isWallSupport(cx + dx, cy, cz + dz)) return false;
+      } else if (!hasSolidTop(cx, cy - 1, cz)) return false;
     }
     if (plantInCell) {
       if (blocksBodies(cx, cy, cz, id, state)) return false;

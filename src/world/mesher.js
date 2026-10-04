@@ -17,9 +17,10 @@
 // walls), fire, liquids (corner heights averaged, P1).
 
 import {
-  B_ANIM, B_FILTER, B_LIQUID, B_OPAQUE, B_PASS, B_SHAPE, B_WAVE, PASS, SHAPE, blockDef, faceLayer,
+  B_ANIM, B_FILTER, B_LIQUID, B_OPAQUE, B_PASS, B_SHAPE, B_WAVE, ID, PASS, SHAPE, blockDef, faceLayer,
   getSelectionBoxes,
 } from '../core/registry.js';
+import { POT_PLANTS } from '../data/blocks.js';
 import { FACE_SHADE, PADDED, SECTION_SIZE, WORLD_HEIGHT, colIndex, padIndex } from '../core/constants.js';
 
 /** Size of the padded input arrays (18^3). */
@@ -85,8 +86,11 @@ for (let id = 0; id < 256; id++) {
   T_LEAVES[id] = b.wave === 'leaves' ? 1 : 0;
   T_ROOF[id] = B_FILTER[id] >= 15 && !B_OPAQUE[id] ? 1 : 0;
   T_FLAGS[id] = (B_ANIM[id] << 3) | (B_WAVE[id] << 5);
-  if (b.name === 'glass' || b.name === 'ice' || b.name.endsWith('_stained_glass') || b.shape === 'pane' || b.shape === 'fence') T_CULL_SAME[id] = 1;
+  if (b.name === 'glass' || b.name === 'ice' || b.name.endsWith('_stained_glass') || b.shape === 'pane' || b.shape === 'fence' || b.shape === 'portal') T_CULL_SAME[id] = 1;
 }
+/** Flower pot state (bits 0-3) -> block id of the potted plant (0 = empty). */
+const POT_IDS = new Uint8Array(16);
+POT_PLANTS.forEach((n, i) => { if (n) POT_IDS[i] = ID[n]; });
 
 /* ------------------------------------------------------------------ output buffers (growable scratch) */
 class Buf {
@@ -295,6 +299,21 @@ function setFQ(x0, y0, z0, x1, y1unused, z1, h) {
   FQ[3] = x1; FQ[4] = y0; FQ[5] = z1;
   FQ[6] = x1; FQ[7] = y0 + h; FQ[8] = z1;
   FQ[9] = x0; FQ[10] = y0 + h; FQ[11] = z0;
+}
+
+/** Flower pot (v1.7): the pot box, plus the potted plant as a small cross standing in the soil (no sway). */
+function pot(p, x, y, z, id, state, buf) {
+  box(p, x, y, z, id, state, buf, 5 * PX, 0, 5 * PX, 11 * PX, 6 * PX, 11 * PX);
+  const pid = POT_IDS[state & 15];
+  if (!pid) return;
+  const layer = faceLayer(pid, 0, 2);
+  const flags = PLANT_FACE | (B_ANIM[pid] << 3);
+  flatLight(p);
+  const a = 0.22, b = 0.78, y0 = 4 * PX, h = 0.72;
+  setFQ(a, y0, a, b, 0, b, h);
+  freeQuad(buf, x, y, z, FQ, layer, flags, PLANT_SHADE);
+  setFQ(a, y0, b, b, 0, a, h);
+  freeQuad(buf, x, y, z, FQ, layer, flags, PLANT_SHADE);
 }
 
 function crop(p, x, y, z, id, state, buf) {
@@ -528,13 +547,14 @@ function meshCell(p, x, y, z, id, state, buf) {
     case SHAPE.CACTUS: cactus(p, x, y, z, id, state, buf); break;
     case SHAPE.FENCE: fence(p, x, y, z, id, state, buf); break;
     case SHAPE.GATE: gate(p, x, y, z, id, state, buf); break;
+    case SHAPE.POT: pot(p, x, y, z, id, state, buf); break;
     case SHAPE.BED: {
       const b = getSelectionBoxes(id, state)[0];
       box(p, x, y, z, id, state, buf, b[0], b[1], b[2], b[3], b[4], b[5], 0, state & 3);
       break;
     }
     case SHAPE.NONE: break;
-    default: boxes(p, x, y, z, id, state, buf, getSelectionBoxes(id, state)); break; // slab stairs door layer carpet farmland chest cake pane
+    default: boxes(p, x, y, z, id, state, buf, getSelectionBoxes(id, state)); break; // slab stairs door layer carpet farmland chest cake pane trapdoor lantern sign portal
   }
 }
 

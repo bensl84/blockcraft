@@ -13,6 +13,7 @@ import { TERRAIN } from './tex_terrain.js';
 import { BUILDING } from './tex_building.js';
 import { PLANTS } from './tex_plants.js';
 import { ANIMATED, CUTOUT_KEYS, TRANSLUCENT_ALPHA } from './tex_anim.js';
+import { PALETTE, PALETTE_CUTOUT, LAYER_FALLBACK } from './tex_palette.js';
 import { paintIconAtlas, ICON_COLS } from './icons.js';
 
 export const TEX_SIZE = 16;
@@ -21,17 +22,20 @@ export const ICON_SIZE = 32;   // icon atlas cell size in pixels (16px sprites a
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 /** Every static painter by texture key (animated keys live in ANIMATED). */
-export const PAINTERS = Object.freeze({ ...TERRAIN, ...BUILDING, ...PLANTS });
+export const PAINTERS = Object.freeze({ ...TERRAIN, ...BUILDING, ...PLANTS, ...PALETTE });
 
 /** Is this key a cutout texture (alpha 0/255 only)? Crack overlays are NOT: they keep alpha 150/70. */
-export function isCutoutKey(key) { return CUTOUT_KEYS.has(key) || /^(wheat|carrots|potatoes)_\d$/.test(key); }
+export function isCutoutKey(key) { return CUTOUT_KEYS.has(key) || PALETTE_CUTOUT.has(key) || /^(wheat|carrots|potatoes)_\d$/.test(key); }
 
 /**
  * Build every block texture as layers of one RGBA8 array.
  * Layer order: REQUIRED_TEXTURE_KEYS sorted, animated keys expanded into consecutive layers
  * (water 16 frames @ 8 fps, lava 16 @ 4 fps, fire 8 @ 12 fps; halfAnim: water and lava 8 frames at half fps,
  * so one loop lasts as long).
- * @param {{fastLeaves?: boolean, halfAnim?: boolean}} [opts]
+ * maxLayers (v1.7, SPEC D5): when the set would need more layers than the GPU holds (WebGL2 guarantees 256), keys in
+ * LAYER_FALLBACK share their fallback's layer (concrete looks like wool, ...) until it fits. The renderer first tries
+ * halfAnim, then this.
+ * @param {{fastLeaves?: boolean, halfAnim?: boolean, maxLayers?: number}} [opts]
  * @returns {import('../core/types.js').TextureSet & {animated: Map<string,{mode:number, frames:number, fps:number}>, buildMs: number}}
  */
 export function buildTextures(opts = {}) {
@@ -41,7 +45,18 @@ export function buildTextures(opts = {}) {
   const index = new Map();
   const animated = new Map();
   let count = 0;
+  // layers saved by sharing a fallback's layer (only when maxLayers says the full set does not fit)
+  const aliased = new Map();
+  if (opts.maxLayers > 0) {
+    let need = 0;
+    for (const k of keys) { const m = ANIMATED_TEXTURES[k] || 0; need += m ? (opts.halfAnim && (m === ANIM.WATER || m === ANIM.LAVA) ? ANIM.FRAMES[m] >> 1 : ANIM.FRAMES[m]) : 1; }
+    for (const [k, fb] of Object.entries(LAYER_FALLBACK)) {
+      if (need <= opts.maxLayers) break;
+      if (keys.includes(k) && keys.includes(fb) && !LAYER_FALLBACK[fb]) { aliased.set(k, fb); need--; }
+    }
+  }
   for (const k of keys) {
+    if (aliased.has(k)) continue;
     index.set(k, count);
     const mode = ANIMATED_TEXTURES[k] || 0;
     let frames = mode ? ANIM.FRAMES[mode] : 1;
@@ -53,7 +68,9 @@ export function buildTextures(opts = {}) {
   const data = new Uint8Array(S * S * 4 * count);
   const stoneSeed = hashString('stone');
   const pc = new PixelCanvas(S, S);
+  for (const [k, fb] of aliased) index.set(k, index.get(fb));
   for (const k of keys) {
+    if (aliased.has(k)) continue;
     const base = index.get(k);
     const seed = hashString(k);
     const ctx = { key: k, seed, rng: mulberry32(seed), fastLeaves: !!opts.fastLeaves, stoneSeed };

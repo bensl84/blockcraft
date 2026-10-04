@@ -73,6 +73,7 @@ function isoBoxes(def) {
     case 'stairs': return [[0, 0, 0, 1, 0.5, 1], [0, 0.5, 0, 1, 1, 0.5]];
     case 'carpet': return [[0, 0, 0, 1, P16, 1]];
     case 'layer': return [[0, 0, 0, 1, 2 * P16, 1]];
+    case 'trapdoor': return [[0, 0, 0, 1, 3 * P16, 1]];
     case 'farmland': return [[0, 0, 0, 1, 15 * P16, 1]];
     case 'chest': return [[P16, 0, P16, 15 * P16, 14 * P16, 15 * P16]];
     case 'cake': return [[P16, 0, P16, 15 * P16, 0.5, 15 * P16]];

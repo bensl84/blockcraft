@@ -54,6 +54,10 @@ shapeless('flint_and_steel', 1, ['iron_ingot', 'flint']);
 shaped('bucket', 1, ['I I', ' I '], { I: 'iron_ingot' });
 
 /* ---- building ---- */
+// v1.7 (judge FID-7): a door, fence, gate, slab, stairs and trapdoor for every wood; the specific wood comes first
+// so six birch planks make a birch door, while mixed planks still make an oak one
+shaped('birch_door', 3, ['##', '##', '##'], { '#': 'birch_planks' });
+shaped('spruce_door', 3, ['##', '##', '##'], { '#': 'spruce_planks' });
 shaped('oak_door', 3, ['##', '##', '##'], { '#': '#planks' });
 shaped('ladder', 3, ['S S', 'SSS', 'S S'], { S: 'stick' });
 shaped('oak_slab', 6, ['###'], { '#': 'oak_planks' });
@@ -62,7 +66,23 @@ shaped('stone_brick_slab', 6, ['###'], { '#': 'stone_bricks' });
 shaped('oak_stairs', 4, ['#  ', '## ', '###'], { '#': 'oak_planks' });
 shaped('cobblestone_stairs', 4, ['#  ', '## ', '###'], { '#': 'cobblestone' });
 shaped('oak_fence', 3, ['PSP', 'PSP'], { P: 'oak_planks', S: 'stick' });
+shaped('birch_fence', 3, ['PSP', 'PSP'], { P: 'birch_planks', S: 'stick' });
+shaped('spruce_fence', 3, ['PSP', 'PSP'], { P: 'spruce_planks', S: 'stick' });
+shaped('birch_fence_gate', 1, ['SPS', 'SPS'], { P: 'birch_planks', S: 'stick' });
+shaped('spruce_fence_gate', 1, ['SPS', 'SPS'], { P: 'spruce_planks', S: 'stick' });
 shaped('oak_fence_gate', 1, ['SPS', 'SPS'], { P: '#planks', S: 'stick' });
+for (const [slab, stairs, mat] of [['birch_slab', 'birch_stairs', 'birch_planks'], ['spruce_slab', 'spruce_stairs', 'spruce_planks'],
+  ['stone_slab', 'stone_stairs', 'stone'], ['brick_slab', 'brick_stairs', 'bricks'], ['sandstone_slab', 'sandstone_stairs', 'sandstone']]) {
+  shaped(slab, 6, ['###'], { '#': mat });
+  shaped(stairs, 4, ['#  ', '## ', '###'], { '#': mat });
+}
+shaped('stone_brick_stairs', 4, ['#  ', '## ', '###'], { '#': 'stone_bricks' });
+for (const w of ['oak', 'birch', 'spruce']) shaped(`${w}_trapdoor`, 2, ['###', '###'], { '#': `${w}_planks` });
+shaped('lantern', 1, ['I', 'T'], { I: 'iron_ingot', T: 'torch' });
+shaped('flower_pot', 1, ['B B', ' B '], { B: 'brick' });
+shaped('oak_sign', 3, ['###', '###', ' S '], { '#': '#planks', S: 'stick' });
+shaped('quartz_block', 1, ['QQ', 'QQ'], { Q: 'quartz' });
+shaped('nether_bricks', 4, ['NN', 'NN'], { N: 'netherrack' });
 shaped('glass_pane', 16, ['GGG', 'GGG'], { G: 'glass' });
 shaped('painting', 1, ['SSS', 'SWS', 'SSS'], { S: 'stick', W: '#wool' });
 shaped('bookshelf', 1, ['###', 'BBB', '###'], { '#': '#planks', B: 'book' });
@@ -92,6 +112,8 @@ for (const c of COLORS) {
   shaped(`${c}_bed`, 1, ['WWW', 'PPP'], { W: `${c}_wool`, P: '#planks' }, { group: 'beds' });
   shaped(`${c}_carpet`, 3, ['WW'], { W: `${c}_wool` }, { group: 'colors' });
   shaped(`${c}_stained_glass`, 8, ['GGG', 'GDG', 'GGG'], { G: 'glass', D: `${c}_dye` }, { group: 'colors' });
+  // v1.7: concrete straight from the grid (no powder step): one dye, four sand, four gravel
+  shapeless(`${c}_concrete`, 8, [`${c}_dye`, 'sand', 'sand', 'sand', 'sand', 'gravel', 'gravel', 'gravel', 'gravel'], { group: 'colors' });
 }
 // Dyes from flowers & materials (original Blockcraft mapping where vanilla has no source here).
 shapeless('yellow_dye', 1, ['dandelion']);

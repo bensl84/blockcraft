@@ -47,7 +47,14 @@ test('layer list is exactly REQUIRED_TEXTURE_KEYS in sorted order, animated keys
     next += ts.animated.has(k) ? ts.animated.get(k).frames : 1;
   }
   assert.equal(next, ts.count);
-  assert.ok(ts.count <= 256);
+  // SPEC D5 (v1.7): the full set may pass 256 layers; with half-length water and lava it always fits the WebGL2
+  // minimum without sharing a layer, and maxLayers squeezes it further with LAYER_FALLBACK
+  const half = buildTextures({ halfAnim: true });
+  assert.ok(half.count <= 256, `half-animation set fits 256 layers (${half.count})`);
+  assert.equal(buildTextures({ halfAnim: true, maxLayers: 256 }).count, half.count, 'no layer is shared when it fits');
+  const tight = buildTextures({ halfAnim: true, maxLayers: half.count - 10 });
+  assert.ok(tight.count <= half.count - 10, `fallback sharing fits a smaller limit (${tight.count})`);
+  assert.equal(tight.layer('concrete_white'), tight.layer('wool_white'), 'concrete shares the wool layer when squeezed');
   for (const k of Object.keys(ANIMATED_TEXTURES)) assert.ok(ts.animated.has(k));
   assert.equal(ts.layer('definitely_not_a_key'), ts.layer('missing'));
   assert.equal(TEX_SIZE, 16); assert.equal(ICON_SIZE, 32);

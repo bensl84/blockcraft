@@ -51,7 +51,9 @@ function item(key, props = {}) {
 }
 
 /* ------------------------------ block items (auto) ------------------------------ */
-const ISO_SHAPES = new Set(['cube', 'slab', 'stairs', 'chest', 'farmland', 'cactus', 'fence', 'cake', 'layer', 'carpet', 'gate']);
+const ISO_SHAPES = new Set(['cube', 'slab', 'stairs', 'chest', 'farmland', 'cactus', 'fence', 'cake', 'layer', 'carpet', 'gate', 'trapdoor']);
+/** Shapes whose item is an original sprite named after the block (doors, lantern, flower pot, sign). */
+const SPRITE_SHAPES = new Set(['door', 'lantern', 'pot', 'sign']);
 const ITEM_PRIORITY = { stairs: 'P1', fence: 'P1', gate: 'P1', pane: 'P1', cake: 'P1', carpet: 'P1' };
 /** Per-block-item overrides: bedrock is not offered in the picker (a kid could never remove it), cake stacks to 1. */
 const BLOCK_ITEM_EXTRA = { bedrock: { creative: false }, cake: { stack: 1 } };
@@ -59,7 +61,7 @@ for (const b of BLOCKS) {
   if (!b || b.item === null) continue;
   if (b.item !== undefined && b.item !== b.name) continue; // block picks into another item (defined below)
   let icon;
-  if (b.shape === 'door') icon = 'sprite:' + b.name;
+  if (SPRITE_SHAPES.has(b.shape)) icon = 'sprite:' + b.name;
   else if (ISO_SHAPES.has(b.shape)) icon = 'iso:' + b.name;
   else icon = 'tex:' + (typeof b.tex === 'string' ? b.tex : (b.texKeys ? b.texKeys[0] : b.name));
   item(b.name, {
@@ -68,13 +70,15 @@ for (const b of BLOCKS) {
     ...(BLOCK_ITEM_EXTRA[b.name] || {}),
   });
 }
+function isWooden(name, suffix) { return ['oak', 'birch', 'spruce'].some((w) => name === w + suffix); }
 function blockFuel(b) {
-  if (b.name.endsWith('_log') || b.name.endsWith('_planks') || b.name === 'crafting_table' || b.name === 'chest' || b.name === 'bookshelf' || b.name === 'oak_fence' || b.name === 'oak_stairs' || b.name === 'ladder') return 300;
-  if (b.name === 'oak_slab') return 150;
+  if (b.name.endsWith('_log') || b.name.endsWith('_planks') || b.name === 'crafting_table' || b.name === 'chest' || b.name === 'bookshelf' || b.name === 'ladder') return 300;
+  if (isWooden(b.name, '_fence') || isWooden(b.name, '_stairs') || isWooden(b.name, '_fence_gate') || isWooden(b.name, '_trapdoor')) return 300;
+  if (isWooden(b.name, '_slab')) return 150;
+  if (isWooden(b.name, '_door') || b.name === 'oak_sign') return 200;
   if (b.name.endsWith('_sapling') || b.name.endsWith('_wool')) return 100;
   if (b.name.endsWith('_carpet')) return 67;
   if (b.name === 'coal_block') return 16000;
-  if (b.name === 'oak_door') return 200;
   return undefined;
 }
 
@@ -141,6 +145,7 @@ item('lapis_lazuli', { dye: 'blue' }); // also works as blue dye in recipes
 item('redstone'); item('flint'); item('string'); item('feather'); item('gunpowder'); item('leather');
 item('bone'); item('bone_meal', { use: 'bone_meal', dye: 'white' });
 item('wheat'); item('sugar'); item('clay_ball'); item('brick'); item('paper'); item('book'); item('glowstone_dust');
+item('quartz', { name: 'Nether Quartz' });   // v1.7: nether quartz ore drops it; 4 make a quartz block
 item('bowl', { fuel: 100 });
 item('egg', { stack: 16, use: 'throw', priority: 'P1' });
 item('snowball', { stack: 16, use: 'throw', priority: 'P2' });

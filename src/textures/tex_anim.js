@@ -18,7 +18,7 @@ export const CUTOUT_KEYS = new Set([
 ]);
 
 /** Translucent keys and their constant alpha (SPEC §5.1 item 4). Water's alpha is set by its painter. */
-export const TRANSLUCENT_ALPHA = { ice: 190 };
+export const TRANSLUCENT_ALPHA = { ice: 190, nether_portal: 200 }; // nether_portal: LEAD v1.7 (judge FID-8)
 for (const c of ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black']) TRANSLUCENT_ALPHA['stained_glass_' + c] = 150;
 export const WATER_ALPHA = 175;
 

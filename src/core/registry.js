@@ -218,6 +218,38 @@ function computeBoxes(id, state, forSelection) {
       const h = forSelection ? 1 : 1.5;
       return list((state & 1) === 0 ? box(0, 0, 6 * P, 1, h, 10 * P) : box(6 * P, 0, 0, 10 * P, h, 1));
     }
+    case SHAPE.TRAPDOOR: {
+      // closed: a 3/16 hatch at the bottom (or the top, bit 3) of the cell; open: standing on its hinge edge (bits 0-1)
+      if (state & 4) return list(edgePanel(state & 3, 3 * P));
+      return list((state & 8) ? box(0, 13 * P, 0, 1, 1, 1) : box(0, 0, 0, 1, 3 * P, 1));
+    }
+    case SHAPE.LANTERN:
+      // body 6x7x6 px plus a 4x2x4 cap; hanging (bit 0) lifts it 1 px and adds the 2 px hook to the ceiling
+      return (state & 1)
+        ? list(box(5 * P, P, 5 * P, 11 * P, 8 * P, 11 * P), box(6 * P, 8 * P, 6 * P, 10 * P, 10 * P, 10 * P), box(7 * P, 10 * P, 7 * P, 9 * P, 1, 9 * P))
+        : list(box(5 * P, 0, 5 * P, 11 * P, 7 * P, 11 * P), box(6 * P, 7 * P, 6 * P, 10 * P, 9 * P, 10 * P));
+    case SHAPE.POT: return list(box(5 * P, 0, 5 * P, 11 * P, 6 * P, 11 * P));
+    case SHAPE.SIGN: {
+      if (!forSelection) return EMPTY;
+      const f = state & 3, ns = (f & 1) === 0; // the board runs along X when it faces N or S
+      if (state & 4) {
+        // wall sign: a 2/16 board on the edge behind the writing, 8/16 high
+        const back = (f + 2) & 3;
+        const t = 2 * P, y0 = 4 * P, y1 = 12 * P;
+        switch (back) {
+          case 0: return list(box(0, y0, 0, 1, y1, t));
+          case 1: return list(box(1 - t, y0, 0, 1, y1, 1));
+          case 2: return list(box(0, y0, 1 - t, 1, y1, 1));
+          default: return list(box(0, y0, 0, t, y1, 1));
+        }
+      }
+      // standing sign: a post and an 8/16 high board across the middle of the cell
+      return ns ? list(box(7 * P, 0, 7 * P, 9 * P, 7 * P, 9 * P), box(0, 7 * P, 7 * P, 1, 15 * P, 9 * P))
+        : list(box(7 * P, 0, 7 * P, 9 * P, 7 * P, 9 * P), box(7 * P, 7 * P, 0, 9 * P, 15 * P, 1));
+    }
+    case SHAPE.PORTAL:
+      if (!forSelection) return EMPTY;
+      return list((state & 1) ? box(6 * P, 0, 0, 10 * P, 1, 1) : box(0, 0, 6 * P, 1, 1, 10 * P));
     default: return FULL;
   }
 }

@@ -7,7 +7,8 @@
 //
 // Field reference (defaults in DEFAULTS):
 //   shape        'none'|'cube'|'cross'|'liquid'|'torch'|'slab'|'stairs'|'door'|'bed'|'ladder'|'layer'|
-//                'farmland'|'cactus'|'crop'|'fence'|'fire'|'chest'|'cake'|'carpet'|'gate'|'pane'
+//                'farmland'|'cactus'|'crop'|'fence'|'fire'|'chest'|'cake'|'carpet'|'gate'|'pane'|
+//                'trapdoor'|'lantern'|'pot'|'sign'|'portal' (v1.7, judge FID-7 / FID-8)
 //   pass         render pass: 'opaque'|'cutout'|'translucent'|'none'
 //   solid        has collision (exact boxes come from registry.getCollisionBoxes(id, state))
 //   opaque       full, light-blocking cube: culls neighbour faces, casts AO, blocks sky/block light
@@ -36,7 +37,8 @@
 //   slip         slipperiness (0.6 default, ice 0.98)
 //   liquid       'water'|'lava'|null
 //   flammable    can burn (fire spread is off by default anyway)
-//   support      'floor'|'wall'|'floor_or_wall'|null — breaks (drops) when its support is removed
+//   support      'floor'|'wall'|'floor_or_wall'|'floor_or_ceiling' (lantern)|'sign' (the floor, or the wall behind
+//                a wall sign)|null — breaks (drops) when its support is removed
 //   placeOn      list of block names it may be placed on (plants/crops); null = any solid top
 //   fallMult     fall-damage multiplier when landing on it (hay 0.2, bed 0.5)
 //   contactDamage damage per 10 ticks while touching (cactus 1)
@@ -46,7 +48,8 @@
 import { COLORS, COLOR_HEX, FACE } from '../core/constants.js';
 
 export const SHAPES = Object.freeze(['none', 'cube', 'cross', 'liquid', 'torch', 'slab', 'stairs', 'door', 'bed', 'ladder',
-  'layer', 'farmland', 'cactus', 'crop', 'fence', 'fire', 'chest', 'cake', 'carpet', 'gate', 'pane']); // append only
+  'layer', 'farmland', 'cactus', 'crop', 'fence', 'fire', 'chest', 'cake', 'carpet', 'gate', 'pane',
+  'trapdoor', 'lantern', 'pot', 'sign', 'portal']); // append only
 export const PASSES = Object.freeze(['opaque', 'cutout', 'translucent', 'none']);
 export const SOUND_TYPES = Object.freeze(['stone', 'wood', 'grass', 'dirt', 'gravel', 'sand', 'cloth', 'glass', 'snow', 'metal', 'plant', 'liquid', 'none']);
 export const TOOL_TYPES = Object.freeze(['pickaxe', 'axe', 'shovel', 'hoe', 'sword', 'shears']);
@@ -83,7 +86,21 @@ export const STATE = Object.freeze({
   // log/hay: bits 0-1 axis
   // fire: bits 0-3 age
   // tnt: 0
+  // trapdoor (v1.7): bits 0-1 hinge side (the open hatch stands on that edge), bit 2 open, bit 3 top half
+  TRAPDOOR_OPEN: 4, TRAPDOOR_TOP: 8,
+  // lantern: bit 0 hanging (from the block above)
+  LANTERN_HANGING: 1,
+  // flower pot: bits 0-3 plant (index into POT_PLANTS; 0 = empty)
+  POT_PLANT_MASK: 15,
+  // sign: bits 0-1 facing (the side with the writing), bit 2 on a wall (the board hangs on the edge behind it)
+  SIGN_WALL: 4,
+  // nether portal: bit 0 axis (0 = the sheet runs along X, 1 = along Z)
+  PORTAL_AXIS_Z: 1,
 });
+
+/** Plants a flower pot can hold, by state index (0 = empty). Append only (save format). */
+export const POT_PLANTS = Object.freeze(['', 'dandelion', 'poppy', 'cornflower', 'blue_orchid', 'allium', 'lily_of_the_valley',
+  'orange_tulip', 'pink_tulip', 'oak_sapling', 'birch_sapling', 'spruce_sapling', 'fern', 'dead_bush', 'brown_mushroom', 'red_mushroom']);
 
 const DEFAULTS = Object.freeze({
   shape: 'cube', pass: 'opaque', solid: true, opaque: true, emit: 0, filter: 15,
@@ -295,9 +312,11 @@ def(78, 'hay_block', { axis: true, tex: { end: 'hay_block_top', side: 'hay_block
 /* ------------------------------ 79..86 shapes & specials ------------------------------ */
 // Slabs and stairs: not `opaque` (no face culling / AO) but filter 15, so a slab or stair roof keeps sky light out.
 const ROOF = { filter: 15 };
-def(79, 'oak_slab', { ...ROOF, shape: 'slab', tex: 'oak_planks', hardness: 2, blast: 3, tool: 'axe', sound: 'wood', flammable: true, color: '#ae8a52' });
-def(80, 'cobblestone_slab', { ...ROOF, shape: 'slab', tex: 'cobblestone', hardness: 2, blast: 6, tool: 'pickaxe', level: 1, requiresTool: true, color: '#7c7c7c' });
-def(81, 'stone_brick_slab', { ...ROOF, shape: 'slab', tex: 'stone_bricks', hardness: 2, blast: 6, tool: 'pickaxe', level: 1, requiresTool: true, color: '#808080' });
+/** A double slab is two slabs: it drops two (v1.7). */
+const slabDrop = (name) => (s) => [{ item: name, count: (s & STATE.SLAB_DOUBLE) ? 2 : 1 }];
+def(79, 'oak_slab', { ...ROOF, shape: 'slab', dropFn: slabDrop('oak_slab'), tex: 'oak_planks', hardness: 2, blast: 3, tool: 'axe', sound: 'wood', flammable: true, color: '#ae8a52' });
+def(80, 'cobblestone_slab', { ...ROOF, shape: 'slab', dropFn: slabDrop('cobblestone_slab'), tex: 'cobblestone', hardness: 2, blast: 6, tool: 'pickaxe', level: 1, requiresTool: true, color: '#7c7c7c' });
+def(81, 'stone_brick_slab', { ...ROOF, shape: 'slab', dropFn: slabDrop('stone_brick_slab'), tex: 'stone_bricks', hardness: 2, blast: 6, tool: 'pickaxe', level: 1, requiresTool: true, color: '#808080' });
 def(82, 'oak_stairs', { ...ROOF, shape: 'stairs', tex: 'oak_planks', hardness: 2, blast: 3, tool: 'axe', sound: 'wood', flammable: true, color: '#ae8a52' });
 def(83, 'cobblestone_stairs', { ...ROOF, shape: 'stairs', tex: 'cobblestone', hardness: 2, blast: 6, tool: 'pickaxe', level: 1, requiresTool: true, color: '#7c7c7c' });
 // Fence: state bits 0-3 = connections (STATE.CONNECT_MASK). Collision 1.5 high so animals stay in pens.
@@ -339,6 +358,62 @@ for (const b of BLOCKS) {
 def(140, 'oak_fence_gate', { shape: 'gate', tex: 'oak_planks', hardness: 2, blast: 3, tool: 'axe', sound: 'wood', flammable: true, facing: true, tab: 'building', color: '#ae8a52' });
 // Glass pane: thin glass that connects to neighbours like a fence (bits 0-3). Reuses the glass texture.
 def(141, 'glass_pane', { shape: 'pane', pass: 'cutout', tex: 'glass', hardness: 0.3, sound: 'glass', drops: null, tab: 'building', color: '#c9e6ef' });
+
+/* ------------------------------ 142..182 building palette (v1.7, judge FID-7) ------------------------------ */
+const STONY = { hardness: 2, blast: 6, tool: 'pickaxe', level: 1, requiresTool: true };
+const WOODEN = { hardness: 2, blast: 3, tool: 'axe', sound: 'wood', flammable: true };
+const SANDSTONE_TEX = { top: 'sandstone_top', bottom: 'sandstone_bottom', side: 'sandstone_side' };
+def(142, 'stone_slab', { ...ROOF, ...STONY, shape: 'slab', dropFn: slabDrop('stone_slab'), tex: 'stone', color: '#7e7e7e' });
+def(143, 'brick_slab', { ...ROOF, ...STONY, shape: 'slab', dropFn: slabDrop('brick_slab'), tex: 'bricks', color: '#9c4c3a' });
+def(144, 'sandstone_slab', { ...ROOF, ...STONY, hardness: 0.8, blast: 0.8, shape: 'slab', dropFn: slabDrop('sandstone_slab'), tex: SANDSTONE_TEX, color: '#dccb94' });
+def(145, 'birch_slab', { ...ROOF, ...WOODEN, shape: 'slab', dropFn: slabDrop('birch_slab'), tex: 'birch_planks', color: '#d6c58b' });
+def(146, 'spruce_slab', { ...ROOF, ...WOODEN, shape: 'slab', dropFn: slabDrop('spruce_slab'), tex: 'spruce_planks', color: '#6c4f2f' });
+def(147, 'stone_stairs', { ...ROOF, ...STONY, shape: 'stairs', tex: 'stone', color: '#7e7e7e' });
+def(148, 'brick_stairs', { ...ROOF, ...STONY, shape: 'stairs', tex: 'bricks', color: '#9c4c3a' });
+def(149, 'sandstone_stairs', { ...ROOF, ...STONY, hardness: 0.8, blast: 0.8, shape: 'stairs', tex: SANDSTONE_TEX, color: '#dccb94' });
+def(150, 'stone_brick_stairs', { ...ROOF, ...STONY, shape: 'stairs', tex: 'stone_bricks', color: '#808080' });
+def(151, 'birch_stairs', { ...ROOF, ...WOODEN, shape: 'stairs', tex: 'birch_planks', color: '#d6c58b' });
+def(152, 'spruce_stairs', { ...ROOF, ...WOODEN, shape: 'stairs', tex: 'spruce_planks', color: '#6c4f2f' });
+const doorDef = (wood, color) => ({
+  shape: 'door', pass: 'cutout', hardness: 3, tool: 'axe', sound: 'wood', flammable: true, support: 'floor', tab: 'functional', color,
+  texFn: (s) => ((s & 8) ? wood + '_door_upper' : wood + '_door_lower'), texKeys: [wood + '_door_upper', wood + '_door_lower'],
+  dropFn: () => [{ item: wood + '_door', count: 1 }],
+});
+def(153, 'birch_door', doorDef('birch', '#d8c890'));
+def(154, 'spruce_door', doorDef('spruce', '#5e4428'));
+def(155, 'birch_fence', { ...WOODEN, shape: 'fence', tex: 'birch_planks', color: '#d6c58b' });
+def(156, 'spruce_fence', { ...WOODEN, shape: 'fence', tex: 'spruce_planks', color: '#6c4f2f' });
+def(157, 'birch_fence_gate', { ...WOODEN, shape: 'gate', tex: 'birch_planks', facing: true, tab: 'building', color: '#d6c58b' });
+def(158, 'spruce_fence_gate', { ...WOODEN, shape: 'gate', tex: 'spruce_planks', facing: true, tab: 'building', color: '#6c4f2f' });
+// Trapdoor: a 3/16 hatch on the floor (or the top of its cell); a tap swings it up against its hinge edge.
+const TRAPDOOR = { ...WOODEN, hardness: 3, shape: 'trapdoor', pass: 'cutout', tab: 'functional' };
+def(159, 'oak_trapdoor', { ...TRAPDOOR, tex: 'oak_trapdoor', color: '#a8814b' });
+def(160, 'birch_trapdoor', { ...TRAPDOOR, tex: 'birch_trapdoor', color: '#d8c890' });
+def(161, 'spruce_trapdoor', { ...TRAPDOOR, tex: 'spruce_trapdoor', color: '#5e4428' });
+def(162, 'lantern', {
+  shape: 'lantern', pass: 'cutout', tex: { top: 'lantern_top', bottom: 'lantern_top', side: 'lantern' }, emit: 15, hardness: 3.5,
+  tool: 'pickaxe', sound: 'metal', support: 'floor_or_ceiling', tab: 'functional', color: '#f2b84a',
+});
+def(163, 'flower_pot', {
+  shape: 'pot', pass: 'cutout', tex: 'flower_pot', hardness: 0, sound: 'stone', support: 'floor', tab: 'functional', color: '#a4573a',
+  dropFn: (s) => [{ item: 'flower_pot', count: 1 }, ...(POT_PLANTS[s & 15] ? [{ item: POT_PLANTS[s & 15], count: 1 }] : [])],
+});
+// Sign: decorative (no text), no collision (like Java).
+def(164, 'oak_sign', { ...WOODEN, hardness: 1, shape: 'sign', solid: false, tex: 'oak_sign', support: 'sign', tab: 'functional', color: '#b8925a' });
+COLORS.forEach((c, i) => def(165 + i, c + '_concrete', { ...STONY, tex: 'concrete_' + c, hardness: 1.8, blast: 1.8, tab: 'colors', color: COLOR_HEX[c] }));
+def(181, 'quartz_block', { ...STONY, tex: 'quartz_block', hardness: 0.8, blast: 0.8, color: '#ece6dc' });
+def(182, 'prismarine', { ...STONY, tex: 'prismarine', hardness: 1.5, color: '#63a29a' });
+
+/* ------------------------------ 183..187 the Nether (v1.7, judge FID-8) ------------------------------ */
+def(183, 'netherrack', { tex: 'netherrack', hardness: 0.4, blast: 0.4, tool: 'pickaxe', level: 1, requiresTool: true, tab: 'nature', color: '#6e2a2a' });
+def(184, 'soul_sand', { tex: 'soul_sand', hardness: 0.5, tool: 'shovel', sound: 'sand', tab: 'nature', color: '#54402f' });
+def(185, 'nether_quartz_ore', { ...ORE, tex: 'nether_quartz_ore', level: 1, drops: [{ item: 'quartz', min: 1, max: 2 }], xp: [2, 5], color: '#7a4a44' });
+def(186, 'nether_bricks', { ...STONY, tex: 'nether_bricks', color: '#2c1418' });
+// Portal sheet inside a lit obsidian frame (MECH nether.js). Not minable; breaking the frame removes it.
+def(187, 'nether_portal', {
+  shape: 'portal', pass: 'translucent', solid: false, opaque: false, emit: 11, hardness: -1, blast: 3600000,
+  tex: 'nether_portal', item: null, drops: null, sound: 'glass', color: '#7a2ad8',
+});
 
 /** Highest id in use (+1 = table size needed). */
 export const BLOCK_COUNT = BLOCKS.length;

@@ -114,6 +114,12 @@ export function supportStatus(getRaw, x, y, z) {
     const d = FACING_DIRS[((st & 3) + 2) & 3];
     return hasSolidSide(getRaw(x + d[0], y, z + d[2])) ? 'ok' : 'support';
   }
+  // v1.7: a hanging lantern needs something solid above; a wall sign the wall behind its board
+  if (shape === SHAPE.LANTERN && (st & 1)) return B_SOLID[getRaw(x, y + 1, z) & 0xff] ? 'ok' : 'support';
+  if (shape === SHAPE.SIGN && (st & 4)) {
+    const d = FACING_DIRS[((st & 3) + 2) & 3];
+    return hasSolidSide(getRaw(x + d[0], y, z + d[2])) ? 'ok' : 'support';
+  }
   const bid = below & 0xff;
   if (id === ID.sugar_cane) {
     if (bid === id) return 'ok';

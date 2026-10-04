@@ -63,6 +63,7 @@ export function createRendererSystem(game) {
   let outline = null;
   let preset = null;
   let forcedFastLeaves = false;
+  let fullLayers = 0;        // layer count of the full texture set (SPEC D5 fit)
   let scaler = null;
   let lastFrameAt = 0;
   // Frozen scene (paused, or the title with no world): after FROZEN_FRAMES frames the world is not redrawn - the
@@ -156,8 +157,11 @@ export function createRendererSystem(game) {
       preset = detectPreset(r.gpu.renderer, { touchPrimary: isTouchPrimary() });
       r.quality.preset = preset.preset;
       forcedFastLeaves = !!preset.fastLeaves;
-      const needHalf = r.gpu.maxLayers > 0 && game.textures && r.gpu.maxLayers < game.textures.count;
-      if (needHalf || (forcedFastLeaves && game.settings.fancyLeaves)) rebuildTextures({ halfAnim: needHalf });
+      // SPEC D5: the full set may need more layers than a minimum WebGL2 GPU holds (256); remember the full count
+      // (main.js built the full set) so every later rebuild fits the same way (half water/lava, then fallbacks)
+      fullLayers = game.textures ? game.textures.count : 0;
+      const needFit = r.gpu.maxLayers > 0 && r.gpu.maxLayers < fullLayers;
+      if (needFit || (forcedFastLeaves && game.settings.fancyLeaves)) rebuildTextures();
       r.quality.fastLeaves = forcedFastLeaves || !game.settings.fancyLeaves; // integration: which leaf set is bound
       r.quality.dpr = targetDprMax();
       three.setPixelRatio(r.quality.dpr);
@@ -431,8 +435,9 @@ export function createRendererSystem(game) {
 
   function rebuildTextures(opts = {}) {
     const fast = forcedFastLeaves || !game.settings.fancyLeaves;
-    const half = opts.halfAnim ?? (r.gpu.maxLayers > 0 && game.textures && r.gpu.maxLayers < game.textures.count);
-    const ts = buildTextures({ fastLeaves: fast, halfAnim: !!half });
+    const ml = r.gpu.maxLayers > 0 ? r.gpu.maxLayers : 0;
+    const half = opts.halfAnim ?? (ml > 0 && ml < fullLayers);
+    const ts = buildTextures({ fastLeaves: fast, halfAnim: !!half, maxLayers: ml });
     r.quality.fastLeaves = fast;
     bindTextures(ts);
     game.textures = ts;

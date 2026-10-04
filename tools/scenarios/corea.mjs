@@ -96,13 +96,15 @@ export default [
         Object.assign(c.style, { position: 'fixed', left: '0', top: '0', zIndex: 99999, imageRendering: 'pixelated' });
         c.id = 'corea-tex';
         document.body.appendChild(c);
-        return { keys, count: ts.count, anim: [...ts.animated.entries()], missingLayer: ts.layer('no_such_key') === ts.layer('missing') };
+        const gpuMax = (window.__game.game.renderer.gpu && window.__game.game.renderer.gpu.maxLayers) || 256;
+        return { keys, count: ts.count, gpuMax, anim: [...ts.animated.entries()], missingLayer: ts.layer('no_such_key') === ts.layer('missing') };
       });
       await t.call('waitFrames', 2);
       await t.shot('textures');
       await t.eval(() => document.getElementById('corea-tex').remove());
       t.assert(JSON.stringify(r.keys) === JSON.stringify([...REQUIRED_TEXTURE_KEYS]), 'layer keys are exactly REQUIRED_TEXTURE_KEYS in sorted order');
-      t.assert(r.count <= 256, `layer count within WebGL2 minimum (${r.count})`);
+      // SPEC D5 (v1.7): the bound set fits this GPU; on a 256-layer GPU the renderer uses half-length water/lava
+      t.assert(r.count <= r.gpuMax, `layer count fits the GPU (${r.count} of ${r.gpuMax})`);
       t.assert(r.missingLayer, 'unknown keys map to the missing layer');
       t.note('layers', r.count);
     },

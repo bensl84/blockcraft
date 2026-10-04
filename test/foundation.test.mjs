@@ -154,7 +154,8 @@ test('CONTRACT textures: every required key present, data sized, animated frames
   assert.equal(t.animated.get('water').frames, 16);
   assert.equal(t.animated.get('lava').frames, 16);
   assert.equal(t.animated.get('fire').frames, 8);
-  assert.ok(t.count <= 256, `layer budget: WebGL2 guarantees 256 array layers (${t.count})`);
+  // SPEC D5 (v1.7): WebGL2 guarantees 256 array layers; the full set may pass that, the half-animation set may not
+  assert.ok(buildTextures({ halfAnim: true }).count <= 256, `layer budget: the half-animation set fits 256 array layers (full ${t.count})`);
   bindTextures(t);
   assert.equal(faceLayer(ID.stone, 0, FACE.UP), t.layer('stone'));
   const t2 = buildTextures();
@@ -353,4 +354,45 @@ test('world rules (judge FID-3, FID-11): difficulty never rewrites a switch; sur
   const src = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
   const body = src.slice(src.indexOf('setDifficulty(d) {'), src.indexOf('setRule(key, value) {'));
   assert.ok(body.length > 0 && !/rules\.\w+\s*=/.test(body), 'setDifficulty does not rewrite rules');
+});
+
+test('building palette (judge FID-7): new blocks, shapes, drops, recipes and picker pages', async () => {
+  const { matchRecipe } = await import('../src/inventory/crafting.js');
+  const { POT_PLANTS, STATE } = await import('../src/data/blocks.js');
+  const names = ['stone_slab', 'brick_slab', 'sandstone_slab', 'birch_slab', 'spruce_slab', 'stone_stairs', 'brick_stairs', 'sandstone_stairs',
+    'stone_brick_stairs', 'birch_stairs', 'spruce_stairs', 'birch_door', 'spruce_door', 'birch_fence', 'spruce_fence', 'birch_fence_gate',
+    'spruce_fence_gate', 'oak_trapdoor', 'birch_trapdoor', 'spruce_trapdoor', 'lantern', 'flower_pot', 'oak_sign', 'quartz_block', 'prismarine',
+    ...['white', 'red', 'black'].map((c) => c + '_concrete')];
+  for (const n of names) {
+    assert.ok(BLOCK_BY_NAME.has(n), `${n} block`);
+    assert.ok(ITEMS.has(n), `${n} item`);
+  }
+  // every new item is on a kid picker page
+  const picked = new Set(PICKER_TABS.flatMap((t) => creativePickerItems(t.id).map((d) => d.key)));
+  for (const n of names) assert.ok(picked.has(n), `${n} is in the picker`);
+  // shapes: closed trapdoor 3/16 on the floor or the ceiling, open = an edge panel; lantern hangs 1 px higher
+  const top = (n, s) => getSelectionBoxes(ID[n], s)[0];
+  assert.deepEqual([...top('oak_trapdoor', 0)], [0, 0, 0, 1, 3 / 16, 1]);
+  assert.equal(top('oak_trapdoor', STATE.TRAPDOOR_TOP)[1], 13 / 16);
+  assert.deepEqual([...top('oak_trapdoor', 1 | STATE.TRAPDOOR_OPEN)], [1 - 3 / 16, 0, 0, 1, 1, 1], 'open hatch stands on its east hinge edge');
+  assert.ok(getCollisionBoxes(ID.oak_trapdoor, 0).length === 1, 'a closed hatch can be walked on');
+  assert.equal(getCollisionBoxes(ID.oak_sign, 0).length, 0, 'signs have no collision');
+  assert.ok(getSelectionBoxes(ID.oak_sign, 2 | STATE.SIGN_WALL).length === 1, 'wall sign board');
+  assert.equal(top('lantern', STATE.LANTERN_HANGING)[1], 1 / 16);
+  assert.equal(getCollisionBoxes(ID.nether_portal, 0).length, 0, 'the portal sheet is walk-through');
+  // a double slab drops two; a planted pot drops the pot and the plant
+  assert.deepEqual(rollDrops(ID.stone_slab, STATE.SLAB_DOUBLE, () => 0.5, { type: 'pickaxe', level: 1 }), [{ item: 'stone_slab', count: 2 }]);
+  assert.deepEqual(rollDrops(ID.oak_slab, 0, () => 0.5, null), [{ item: 'oak_slab', count: 1 }]);
+  assert.deepEqual(rollDrops(ID.flower_pot, POT_PLANTS.indexOf('poppy')).map((s) => s.item), ['flower_pot', 'poppy']);
+  // recipes: six birch planks make a birch door; mixed planks still make an oak door; concrete from dye + sand + gravel
+  const g = (rows) => rows.flat().map((k) => (k ? { item: k, count: 1 } : null));
+  const B = 'birch_planks', O = 'oak_planks';
+  assert.equal(matchRecipe(g([[B, B, null], [B, B, null], [B, B, null]]), 3, 3).result.item, 'birch_door');
+  assert.equal(matchRecipe(g([[B, O, null], [B, B, null], [B, B, null]]), 3, 3).result.item, 'oak_door');
+  const conc = matchRecipe(g([['red_dye', 'sand', 'sand'], ['sand', 'sand', 'gravel'], ['gravel', 'gravel', 'gravel']]), 3, 3);
+  assert.equal(conc.result.item, 'red_concrete'); assert.equal(conc.result.count, 8);
+  assert.equal(matchRecipe(g([['iron_ingot', null, null], ['torch', null, null], [null, null, null]]), 3, 3).result.item, 'lantern');
+  assert.equal(matchRecipe(g([['spruce_planks', 'spruce_planks', 'spruce_planks'], ['spruce_planks', 'spruce_planks', 'spruce_planks'], [null, null, null]]), 3, 3).result.item, 'spruce_trapdoor');
+  // the block id space still fits a byte
+  assert.ok(BLOCKS.length <= 256);
 });

@@ -1,15 +1,16 @@
 // OWNER LANE: FEATURE-MECH. Use / place hooks (SPEC §7.4 call order, §8.6 "Registrations", core/hooks.js):
-//   blockUse: oak_door, oak_fence_gate, bed, cake, tnt (with flint and steel)
+//   blockUse: every door, fence gate and trapdoor (v1.7: oak, birch, spruce), flower_pot, bed, cake, tnt (with
+//             flint and steel)
 //   itemUse:  flint_and_steel, bucket, water_bucket, lava_bucket, every hoe, bone_meal
-//   placers:  oak_door, bed, snow (stacking layers, P1). Placers return true only when they placed (CORE-E then swings
+//   placers:  every door, bed, snow (stacking layers, P1). Placers return true only when they placed (CORE-E then swings
 //             and uses up the item), false when refused. Double slabs are CORE-E's own (tryMergeSlab).
 // Every handler passes ctx.action to each change it makes (KID undo groups by it) and returns true when it
 // consumed the press.
 
 import { hooks, registerBlockUse, registerItemUse, registerPlacer } from '../core/hooks.js';
-import { BLOCKS, STATE } from '../data/blocks.js';
+import { BLOCKS, POT_PLANTS, STATE } from '../data/blocks.js';
 import { COLORS, FACE, FACING_DIRS } from '../core/constants.js';
-import { B_LIQUID, ID, isReplaceable, itemPlaces } from '../core/registry.js';
+import { B_LIQUID, B_SHAPE, ID, SHAPE, isReplaceable, itemPlaces } from '../core/registry.js';
 import { yawToFacing } from '../core/math.js';
 import { dropItem } from '../entities/item_entity.js';
 import { AIR, LAVA, hasSolidTop, isSource, B_WASHABLE } from './rules.js';
@@ -28,49 +29,99 @@ export function registerMechHooks(game, mech) {
   const consumeOne = () => { if (!creative() && inv()) inv().consumeSelected(1); };
   const wearTool = () => { if (!creative() && inv()) inv().damageSelected(1); };
 
-  /* ------------------------------------------------------------------ doors */
-  registerPlacer('oak_door', (ctx) => {
-    const { x, y, z } = ctx;
-    if (y < 1 || y > 126) return false;
-    if (!isReplaceable(getRaw(x, y, z) & 0xff) || !isReplaceable(getRaw(x, y + 1, z) & 0xff) || !hasSolidTop(getRaw(x, y - 1, z))) return false;
-    const f = playerFacing();
-    const left = FACING_DIRS[(f + 3) & 3];
-    const l = getRaw(x + left[0], y, z + left[2]);
-    const hinge = (l & 0xff) === ID.oak_door && ((l >>> 8) & 3) === f && !((l >>> 8) & STATE.DOOR_HINGE_RIGHT) ? STATE.DOOR_HINGE_RIGHT : 0;
-    const lower = f | hinge;
-    if (!game.interaction.placeBlock(x, y, z, ID.oak_door, lower, { by: 'player', item: ctx.stack ? ctx.stack.item : 'oak_door', action: ctx.action })) return false;
-    w().setBlock(x, y + 1, z, ID.oak_door, lower | STATE.DOOR_UPPER, { cause: 'cascade', action: ctx.action });
-    return true;
-  });
+  /* ------------------------------------------------------------------ doors, gates, trapdoors (every wood, v1.7) */
+  const ofShape = (shape) => BLOCKS.filter((b) => b && B_SHAPE[b.id] === shape);
+  for (const door of ofShape(SHAPE.DOOR)) {
+    const DID = door.id;
+    registerPlacer(door.name, (ctx) => {
+      const { x, y, z } = ctx;
+      if (y < 1 || y > 126) return false;
+      if (!isReplaceable(getRaw(x, y, z) & 0xff) || !isReplaceable(getRaw(x, y + 1, z) & 0xff) || !hasSolidTop(getRaw(x, y - 1, z))) return false;
+      const f = playerFacing();
+      const left = FACING_DIRS[(f + 3) & 3];
+      const l = getRaw(x + left[0], y, z + left[2]);
+      // a door next to another door (any wood) facing the same way hinges on the other side: a double door
+      const hinge = B_SHAPE[l & 0xff] === SHAPE.DOOR && ((l >>> 8) & 3) === f && !((l >>> 8) & STATE.DOOR_HINGE_RIGHT) ? STATE.DOOR_HINGE_RIGHT : 0;
+      const lower = f | hinge;
+      if (!game.interaction.placeBlock(x, y, z, DID, lower, { by: 'player', item: ctx.stack ? ctx.stack.item : door.name, action: ctx.action })) return false;
+      w().setBlock(x, y + 1, z, DID, lower | STATE.DOOR_UPPER, { cause: 'cascade', action: ctx.action });
+      return true;
+    });
+    registerBlockUse(door.name, (ctx) => {
+      if (!ctx.hit) return false;
+      if (!toggleDoor(ctx.hit.x, ctx.hit.y, ctx.hit.z, ctx.action)) return false;
+      swing();
+      return true;
+    });
+  }
 
   function toggleDoor(x, y, z, action) {
-    const raw = getRaw(x, y, z);
-    if ((raw & 0xff) !== ID.oak_door) return false;
+    const raw = getRaw(x, y, z), id = raw & 0xff;
+    if (B_SHAPE[id] !== SHAPE.DOOR) return false;
     const st = raw >>> 8;
     const ly = (st & STATE.DOOR_UPPER) ? y - 1 : y;
     const lower = getRaw(x, ly, z), upper = getRaw(x, ly + 1, z);
     const open = !((lower >>> 8) & STATE.DOOR_OPEN);
-    if ((lower & 0xff) === ID.oak_door) w().setBlock(x, ly, z, ID.oak_door, (lower >>> 8) ^ STATE.DOOR_OPEN, { cause: 'use', action });
-    if ((upper & 0xff) === ID.oak_door) w().setBlock(x, ly + 1, z, ID.oak_door, (upper >>> 8) ^ STATE.DOOR_OPEN, { cause: 'use', action });
+    if ((lower & 0xff) === id) w().setBlock(x, ly, z, id, (lower >>> 8) ^ STATE.DOOR_OPEN, { cause: 'use', action });
+    if ((upper & 0xff) === id) w().setBlock(x, ly + 1, z, id, (upper >>> 8) ^ STATE.DOOR_OPEN, { cause: 'use', action });
     game.events.emit('door:toggle', { x, y: ly, z, open, kind: 'door' });
     return true;
   }
 
-  registerBlockUse('oak_door', (ctx) => {
-    if (!ctx.hit) return false;
-    if (!toggleDoor(ctx.hit.x, ctx.hit.y, ctx.hit.z, ctx.action)) return false;
-    swing();
-    return true;
-  });
+  for (const gate of ofShape(SHAPE.GATE)) {
+    registerBlockUse(gate.name, (ctx) => {
+      const h = ctx.hit;
+      if (!h) return false;
+      const raw = getRaw(h.x, h.y, h.z);
+      if ((raw & 0xff) !== gate.id) return false;
+      const st = (raw >>> 8) ^ STATE.GATE_OPEN;
+      w().setBlock(h.x, h.y, h.z, gate.id, st, { cause: 'use', action: ctx.action });
+      game.events.emit('door:toggle', { x: h.x, y: h.y, z: h.z, open: !!(st & STATE.GATE_OPEN), kind: 'gate' });
+      swing();
+      return true;
+    });
+  }
 
-  registerBlockUse('oak_fence_gate', (ctx) => {
+  for (const hatch of ofShape(SHAPE.TRAPDOOR)) {
+    registerBlockUse(hatch.name, (ctx) => {
+      const h = ctx.hit;
+      if (!h) return false;
+      const raw = getRaw(h.x, h.y, h.z);
+      if ((raw & 0xff) !== hatch.id) return false;
+      const st = (raw >>> 8) ^ STATE.TRAPDOOR_OPEN;
+      w().setBlock(h.x, h.y, h.z, hatch.id, st, { cause: 'use', action: ctx.action });
+      game.events.emit('door:toggle', { x: h.x, y: h.y, z: h.z, open: !!(st & STATE.TRAPDOOR_OPEN), kind: 'trapdoor' });
+      swing();
+      return true;
+    });
+  }
+
+  /* ------------------------------------------------------------------ flower pot (v1.7) */
+  // A tap with a flower, sapling, fern, dead bush or mushroom plants it (one is used up in survival); a tap on a
+  // planted pot takes the plant back out (into the bag in survival).
+  const POT_INDEX = new Map(POT_PLANTS.map((n, i) => [n, i]).filter(([n]) => n));
+  registerBlockUse('flower_pot', (ctx) => {
     const h = ctx.hit;
     if (!h) return false;
     const raw = getRaw(h.x, h.y, h.z);
-    if ((raw & 0xff) !== ID.oak_fence_gate) return false;
-    const st = (raw >>> 8) ^ STATE.GATE_OPEN;
-    w().setBlock(h.x, h.y, h.z, ID.oak_fence_gate, st, { cause: 'use', action: ctx.action });
-    game.events.emit('door:toggle', { x: h.x, y: h.y, z: h.z, open: !!(st & STATE.GATE_OPEN), kind: 'gate' });
+    if ((raw & 0xff) !== ID.flower_pot) return false;
+    const cur = (raw >>> 8) & STATE.POT_PLANT_MASK;
+    const held = ctx.stack ? ctx.stack.item : null;
+    const want = held ? POT_INDEX.get(held) : undefined;
+    if (!cur && want === undefined) return false;          // empty pot and nothing to plant: normal placement
+    if (!cur) {
+      w().setBlock(h.x, h.y, h.z, ID.flower_pot, want, { cause: 'use', action: ctx.action });
+      consumeOne();
+      sound('block.place.grass', h.x + 0.5, h.y + 0.5, h.z + 0.5);
+    } else {
+      w().setBlock(h.x, h.y, h.z, ID.flower_pot, 0, { cause: 'use', action: ctx.action });
+      if (!creative() && inv()) {
+        const left = inv().add({ item: POT_PLANTS[cur], count: 1 });
+        if (left) dropItem(game, { item: POT_PLANTS[cur], count: 1 }, h.x + 0.5, h.y + 0.6, h.z + 0.5);
+      }
+      sound('block.break.grass', h.x + 0.5, h.y + 0.5, h.z + 0.5);
+    }
+    game.events.emit('pot:changed', { x: h.x, y: h.y, z: h.z, plant: cur ? '' : POT_PLANTS[want] });
     swing();
     return true;
   });

@@ -35,6 +35,18 @@ async function awayAndBack(t, home, cx, cz) {
   return away;
 }
 
+/** Real mouse tap (kid scheme) on a world point. */
+async function tapWorld(t, x, y, z, ms = 80) {
+  const n = await t.call('worldToNdc', x, y, z);
+  const vp = t.page.viewportSize();
+  await t.page.mouse.move(Math.round((n.x + 1) / 2 * vp.width), Math.round((1 - n.y) / 2 * vp.height));
+  await t.call('waitFrames', 2);
+  await t.page.mouse.down();
+  await new Promise((r) => setTimeout(r, ms));
+  await t.page.mouse.up();
+  await t.call('waitTicks', 3);
+}
+
 export default [
   {
     name: 'lead-events-roundtrip',
@@ -377,6 +389,88 @@ export default [
       await t.call('setBlock', x, 5, z - 2, 'stone');
       await t.call('waitFrames', 3);
       t.assert(!(await t.eval(() => window.__game.game.interaction.targetEntity)), 'a stone wall still hides the pig');
+    },
+  },
+  {
+    // Judge FID-7: the bigger building palette - every new block draws, the kid picker offers it, and the new
+    // shapes work with real taps (trapdoor, birch door, flower pot, hanging lantern, wall sign).
+    name: 'lead-building-palette', requires: ['mechanics', 'interaction', 'renderer', 'invui'],
+    async run(t) {
+      await t.call('startWorld', { ...FLAT, rules: { passiveMobs: false } });
+      await t.call('setFlying', false);
+      await t.call('waitTicks', 5);
+      const p = await t.call('pos');
+      const x0 = Math.floor(p.x), y0 = Math.floor(p.y), z0 = Math.floor(p.z);
+      // a showcase: three rows in front of the child (north)
+      const row1 = ['stone_slab', 'brick_slab', 'sandstone_slab', 'birch_slab', 'spruce_slab', 'stone_stairs', 'brick_stairs', 'sandstone_stairs', 'stone_brick_stairs', 'birch_stairs', 'spruce_stairs'];
+      const row3 = ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black'].map((c) => c + '_concrete').concat(['quartz_block', 'prismarine']);
+      await t.eval(({ x0, y0, z0, row1, row3 }) => {
+        const api = window.__game, w = api.game.world;
+        const put = (x, y, z, n, s = 0) => w.setBlock(x, y, z, api.blockId(n), s, { cause: 'test' });
+        row1.forEach((n, i) => put(x0 - 5 + i, y0, z0 - 5, n, n.endsWith('_stairs') ? 2 : 0));
+        put(x0 - 6, y0, z0 - 5, 'stone_slab', 2);                                   // a double slab
+        const r2 = z0 - 7;
+        put(x0 - 6, y0, r2, 'birch_door', 2); put(x0 - 6, y0 + 1, r2, 'birch_door', 2 | 8);
+        put(x0 - 5, y0, r2, 'spruce_door', 2); put(x0 - 5, y0 + 1, r2, 'spruce_door', 2 | 8);
+        put(x0 - 4, y0, r2, 'birch_fence', 2 | 8); put(x0 - 3, y0, r2, 'spruce_fence', 8);
+        put(x0 - 2, y0, r2, 'birch_fence_gate', 0); put(x0 - 1, y0, r2, 'spruce_fence_gate', 4);
+        put(x0, y0, r2, 'oak_trapdoor', 0); put(x0 + 1, y0, r2, 'birch_trapdoor', 2 | 4); put(x0 + 2, y0, r2, 'spruce_trapdoor', 8);
+        put(x0 + 3, y0, r2, 'lantern', 0); put(x0 + 4, y0 + 2, r2, 'oak_planks'); put(x0 + 4, y0 + 1, r2, 'lantern', 1);
+        put(x0 + 5, y0, r2, 'flower_pot', 2); put(x0 + 6, y0, r2, 'flower_pot', 9);
+        put(x0 + 7, y0, r2, 'oak_sign', 2); put(x0 + 8, y0, r2 - 1, 'stone'); put(x0 + 8, y0, r2, 'oak_sign', 2 | 4);
+        row3.forEach((n, i) => put(x0 - 9 + i, y0, z0 - 9, n));
+        return true;
+      }, { x0, y0, z0, row1, row3 });
+      await t.call('setLook', 0, -22);
+      await t.call('waitFrames', 20);
+      await t.shot('lead-palette-showcase');
+      // every new block item has an icon in the atlas (the kid picker pages are pinned by a unit test)
+      const tabs = await t.eval(() => [...window.__game.game.icons.index.keys()]);
+      for (const k of ['birch_door', 'spruce_trapdoor', 'lantern', 'flower_pot', 'oak_sign', 'red_concrete', 'quartz_block', 'stone_brick_stairs', 'spruce_fence_gate']) {
+        t.assert(tabs.includes(k), `${k} has an item icon`);
+      }
+      // real taps: a trapdoor opens and closes; a birch door opens; a poppy goes into a pot; a lantern hangs
+      const tz = z0 - 3;
+      await t.call('setBlock', x0, y0, tz, 'oak_trapdoor', 0);
+      await t.call('setSlot', 0, 'stone', 64); await t.call('selectSlot', 0);
+      await t.call('setLook', 0, -45);
+      await t.call('waitFrames', 3);
+      await tapWorld(t, x0 + 0.5, y0 + 0.19, tz + 0.5);
+      const st1 = await t.call('getState', x0, y0, tz);
+      t.assert((st1 & 4) !== 0, `a tap opens the trapdoor (state ${st1})`);
+      await t.call('setBlock', x0, y0, tz, 'air');
+      // place a birch door with a tap on the ground, then tap it open
+      await t.call('setSlot', 0, 'birch_door', 4);
+      await tapWorld(t, x0 + 0.5, y0, tz + 0.5);
+      const dl = await t.call('getBlock', x0, y0 + 0, tz), du = await t.call('getBlock', x0, y0 + 1, tz);
+      t.assert(dl === 'birch_door' && du === 'birch_door', `a tap places a two-high birch door (${dl}/${du})`);
+      await tapWorld(t, x0 + 0.5, y0 + 0.8, tz + 0.5);
+      t.assert(((await t.call('getState', x0, y0, tz)) & 4) !== 0, 'a tap opens the birch door');
+      await t.call('setBlock', x0, y0 + 1, tz, 'air'); await t.call('setBlock', x0, y0, tz, 'air');
+      // flower pot: place it, then plant a poppy with a tap
+      await t.call('setSlot', 0, 'flower_pot', 4);
+      await tapWorld(t, x0 + 0.5, y0, tz + 0.5);
+      t.assert(await t.call('getBlock', x0, y0, tz) === 'flower_pot', 'a tap places a flower pot');
+      await t.call('setSlot', 0, 'poppy', 4);
+      await tapWorld(t, x0 + 0.5, y0 + 0.3, tz + 0.5);
+      t.assert(await t.call('getState', x0, y0, tz) === 2, 'a poppy tap plants it in the pot');
+      // a lantern tapped onto the underside of a block hangs
+      await t.call('setBlock', x0, y0 + 3, tz, 'oak_planks');
+      await t.call('setLook', 0, 30);
+      await t.call('waitFrames', 3);
+      await t.call('setSlot', 0, 'lantern', 4);
+      await tapWorld(t, x0 + 0.5, y0 + 3, tz + 0.5);
+      const lan = { id: await t.call('getBlock', x0, y0 + 2, tz), st: await t.call('getState', x0, y0 + 2, tz) };
+      t.assert(lan.id === 'lantern' && (lan.st & 1) === 1, `a lantern under a block hangs (${JSON.stringify(lan)})`);
+      // breaking the block above drops the hanging lantern (support)
+      await t.call('setBlock', x0, y0 + 3, tz, 'air');
+      await t.call('runTicks', 3);
+      t.assert(await t.call('getBlock', x0, y0 + 2, tz) === 'air', 'the lantern falls off when its ceiling goes');
+      await t.call('setLook', 0, -22);
+      await t.call('waitFrames', 5);
+      await t.shot('lead-palette-after-taps');
+      const light = await t.call('getLight', x0 + 3, y0, z0 - 7);
+      t.note('lanternLight', light);
     },
   },
   {
