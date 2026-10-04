@@ -499,7 +499,8 @@ export function createMechanicsSystem(game) {
     const harmless = source === 'tnt' && r.tntExplodes === false && opts.breakBlocks === undefined;
     let breakBlocks = opts.breakBlocks ?? ruleBreak;
     if (centreInFluid(getRaw, x, y, z)) breakBlocks = false;
-    const action = newAction();
+    // A TNT blast reuses the action that lit it, so a whole chain (each primed TNT inherits it) undoes in one press.
+    const action = opts.action || newAction();
     const blocks = [];
     let items = 0;
     const w = game.world;
@@ -726,7 +727,8 @@ export function createMechanicsSystem(game) {
 
     /**
      * Explode at (x,y,z) with power (TNT 4, creeper 3). opts: {source: 'tnt'|'creeper'|'test', breakBlocks?:
-     * boolean (default rules.tntExplodes / mobGriefing), fire?: boolean, now?: boolean (ignore the 2-per-tick cap)}.
+     * boolean (default rules.tntExplodes / mobGriefing), fire?: boolean, now?: boolean (ignore the 2-per-tick cap),
+     * action?: number (reuse this undo action, e.g. the one that lit a TNT chain; default a new one)}.
      * ONE action id for all breaks, one batch, drops merged into <= 32 item entities. Emits 'explosion'
      * {x, y, z, power, source, action, count, blocks, harmless}. Returns the number of blocks destroyed
      * (0 when queued because 2 explosions already resolved this tick).

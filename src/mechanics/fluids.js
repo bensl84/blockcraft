@@ -40,9 +40,9 @@ export function lavaMix(acc, x, y, z) {
   for (let d = 0; d < 4 && !touches; d++) touches = B_LIQUID[acc.get(x + DX[d], y, z + DZ[d]) & 0xff] === WATER;
   if (!touches) return false;
   const st = raw >>> 8;
-  if (st === 0) { acc.set(x, y, z, ID.obsidian, 0); return true; }
-  if ((st & 7) <= 4) { acc.set(x, y, z, ID.cobblestone, 0); return true; }
-  return false;
+  // A source hardens into obsidian; ANY flowing lava (even the thin tip of a flow) into cobblestone.
+  acc.set(x, y, z, st === 0 ? ID.obsidian : ID.cobblestone, 0);
+  return true;
 }
 
 /** Can a fluid `id` move into a cell holding `raw` with new state level `lvl`? */

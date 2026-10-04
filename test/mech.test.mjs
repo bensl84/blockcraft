@@ -18,6 +18,7 @@ import { RAY_COUNT, damageOf, explosionCells, impactOf } from '../src/mechanics/
 import { supportStatus, hasSolidTop } from '../src/mechanics/rules.js';
 import { rayCells } from '../src/mechanics/raycells.js';
 import { PICTURES, choosePicture } from '../src/mechanics/painting.js';
+import { UndoLog } from '../src/kid/undo.js';
 
 /* ------------------------------------------------------------------ harness */
 const R = 3; // columns -R..R loaded
@@ -236,6 +237,15 @@ test('lava: slow (30 ticks), 3 blocks, obsidian / cobblestone / stone with water
   h.set(1, 4, 0, 'water');
   h.step(3);
   assert.equal(h.get(0, 4, 0), ID.cobblestone, 'flowing lava + water = cobblestone');
+  // the thin tip of a flow (level 6) hardens too: the classic cobblestone generator (judge FID-9)
+  const tip = makeGame();
+  tip.set(0, 4, 0, 'lava');
+  tip.step(200);
+  assert.equal(tip.get(3, 4, 0), ID.lava); assert.equal(tip.st(3, 4, 0), 6);
+  tip.set(4, 4, 0, 'water');
+  tip.step(40);
+  assert.equal(tip.get(3, 4, 0), ID.cobblestone, 'lava tip (level 6) + water = cobblestone');
+  assert.equal(tip.get(0, 4, 0), ID.lava, 'the source keeps flowing');
   const k = makeGame();
   k.set(0, 4, 0, 'water'); k.set(0, 6, 0, 'lava'); k.set(0, 5, 0, 'air');
   for (let x = -1; x <= 1; x++) for (let z = -1; z <= 1; z++) if (x || z) k.set(x, 6, z, 'stone'); // keep the lava from spreading sideways first
@@ -555,6 +565,34 @@ test('TNT: flint primes (hop + 80 fuse), chain reaction primes the second, both 
   g.step(40);
   assert.equal(ex.length, 2);
   assert.equal(g.entities.ofType('tnt').length, 0);
+  assert.deepEqual(g.errors, []);
+});
+
+test('TNT: a 12-TNT chain lit by one flint tap is ONE undo entry; one undo restores every cell (judge ROB-3)', () => {
+  const g = makeGame({ ground: ID.stone }); // stone top: no grass dying under the pile during the fuse
+  const log = new UndoLog(50);
+  g.events.on('block:changed', (e) => log.record(e, g.tickCount));
+  // the same 3x2x2 pile the judge used, on the flat ground (y 4..5); then snapshot every cell around it
+  for (let i = 0; i < 12; i++) g.set(-1 + (i % 3), 4 + Math.floor(i / 6), -1 + (Math.floor(i / 3) % 2), 'tnt');
+  const before = new Map();
+  for (let x = -12; x <= 12; x++) for (let z = -12; z <= 12; z++) for (let y = 0; y < 14; y++) before.set(`${x},${y},${z}`, g.world.getRaw(x, y, z));
+  const ex = g.log('explosion');
+  const r = g.mechanics.useAt(-1, 4, -1, { item: 'flint_and_steel', action: 777 });
+  assert.ok(r.consumed);
+  g.step(400);
+  assert.equal(ex.length, 12, 'all 12 TNT exploded');
+  assert.equal(g.entities.ofType('tnt').length, 0);
+  assert.equal(new Set(ex.map((e) => e.action)).size, 1, 'every blast in the chain shares one action');
+  assert.equal(log.size, 1, 'one undo entry for the whole chain');
+  let air = 0;
+  for (const [k, v] of before) { const [x, y, z] = k.split(',').map(Number); if (v !== 0 && g.world.getRaw(x, y, z) === 0) air++; }
+  assert.ok(air > 40, `crater has ${air} cells`);
+  const u = log.undo({ getRaw: (x, y, z) => g.world.getRaw(x, y, z), setBlock: (x, y, z, id, st, o) => g.world.setBlock(x, y, z, id, st, o), beginBatch: () => g.world.beginBatch(), endBatch: () => g.world.endBatch() });
+  assert.ok(u.count >= air, `undo restored ${u.count} cells`);
+  for (const [k, v] of before) { const [x, y, z] = k.split(',').map(Number); assert.equal(g.world.getRaw(x, y, z), v, `cell ${k} restored`); }
+  // a separate blast (a creeper, no lighting action) still gets its own action
+  g.mechanics.explode(0.5, 30, 0.5, 3, { source: 'creeper' });
+  assert.notEqual(ex[ex.length - 1].action, ex[0].action);
   assert.deepEqual(g.errors, []);
 });
 
