@@ -1,0 +1,248 @@
+/* OWNER LANE: KID. Kid helper UI (Home, Undo, home arrow, hints, sparkles, fades, exit guard). SPEC §8.5, §9.
+   Uses the shared plate look (.bc-plate-btn). Every hint animation loop is 2.4 s (= HINT.LOOP_TICKS). */
+
+.kid-hidden { display: none !important; }
+.kid-px { display: block; width: 62%; height: 62%; image-rendering: pixelated; pointer-events: none; }
+
+/* ---------------------------------------------------------------- Home / Undo buttons (top left) */
+.kid-layer.kid-off .kid-btn, .kid-layer.kid-off .kid-arrow, .kid-layer.kid-off .kid-hint { display: none; }
+.kid-btn { position: absolute; box-sizing: border-box; cursor: pointer; transition: transform 70ms ease-out; -webkit-user-select: none; user-select: none; }
+.kid-btn.bc-pressed { transform: scale(0.9); }
+.kid-home { left: 24px; top: 24px; width: 80px; height: 80px; }
+.kid-home .kid-px { width: 66%; height: 66%; }
+.kid-undo { left: 116px; top: 28px; width: 72px; height: 72px; }
+.kid-undo.kid-empty { opacity: 0.45; }
+.kid-undo.kid-spin .kid-px { animation: kid-spin 420ms ease-out; }
+.kid-undo.kid-shake { animation: kid-shake 300ms ease-in-out; }
+.kid-btn:hover { background: rgba(40, 60, 110, 0.6); }
+@keyframes kid-spin { from { transform: rotate(0deg); } to { transform: rotate(-360deg); } }
+@keyframes kid-shake { 0%, 100% { translate: 0 0; } 25% { translate: -6px 0; } 75% { translate: 6px 0; } }
+
+/* ---------------------------------------------------------------- home arrow (top centre) */
+.kid-arrow {
+  position: absolute; left: 50%; top: 36px; width: 88px; height: 88px; margin-left: -44px;
+  border-radius: 50%; background: var(--plate); border: 2px solid rgba(255, 255, 255, 0.85); box-sizing: border-box;
+  animation: kid-breathe 2.2s ease-in-out infinite;
+}
+.kid-arrow-house { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; }
+.kid-arrow-house .kid-px { width: 100%; height: 100%; }
+.kid-arrow-rot { position: absolute; inset: 2px; transition: transform 90ms linear; }
+.kid-arrow-tip { position: absolute; left: 50%; top: -30px; width: 48px; height: 32px; margin-left: -24px; filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.4)); }
+.kid-arrow-tip .kid-px { width: 100%; height: 100%; }
+@keyframes kid-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+
+/* ---------------------------------------------------------------- fade + sparkles */
+.kid-fade { position: absolute; inset: 0; background: #f2f7ff; opacity: 0; transition: opacity 140ms linear; pointer-events: none; }
+.kid-sparks { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.kid-spark { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; animation: kid-spark 900ms ease-out forwards; opacity: 0; }
+.kid-spark .kid-px { width: 100%; height: 100%; }
+@keyframes kid-spark {
+  0% { transform: translate(0, 0) scale(0.2) rotate(0deg); opacity: 1; }
+  60% { opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(1.1) rotate(120deg); opacity: 0; }
+}
+
+/* ---------------------------------------------------------------- hint plate */
+.kid-hint {
+  position: absolute; left: 50%; top: 17%; width: 320px; height: 176px; margin-left: -160px;
+  border-radius: 22px; background: rgba(0, 0, 0, 0.72); border: 2px solid rgba(255, 255, 255, 0.85);
+  box-sizing: border-box; overflow: hidden; animation: kid-hint-in 320ms ease-out;
+}
+.kid-layer.kid-arrow-on .kid-hint { top: max(17%, 172px); }
+@media (max-width: 520px), (max-height: 420px) { .kid-hint { transform: scale(0.78); transform-origin: 50% 0; } }
+@keyframes kid-hint-in { from { opacity: 0; translate: 0 -16px; } to { opacity: 1; translate: 0 0; } }
+.kid-pic { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; gap: 26px; }
+.kid-pic .kid-px { width: 100%; height: 100%; }
+
+/* keycap and mini touch plate */
+.kid-key {
+  position: relative; width: 76px; height: 76px; border-radius: 12px; box-sizing: border-box; padding: 14px;
+  background: #ececec; border: 2px solid #1d1d1d; box-shadow: inset 0 -8px 0 #a5a5a5, 0 5px 0 #1d1d1d;
+  display: flex; align-items: center; justify-content: center;
+}
+.kid-key svg rect[fill="#ffffff"] { fill: #2b2b2b; }
+.kid-key-letter { font: bold 46px/1 var(--font); color: #2b2b2b; }
+.kid-key-wide { width: 150px; }
+.kid-space-bar { width: 70%; height: 12px; border: 4px solid #2b2b2b; border-top: none; box-sizing: border-box; }
+.kid-mini-plate {
+  width: 76px; height: 76px; border-radius: 18%; box-sizing: border-box; padding: 12px;
+  background: rgba(0, 0, 0, 0.55); border: 2px solid rgba(255, 255, 255, 0.9); display: flex; align-items: center; justify-content: center;
+}
+.kid-press-wrap { position: relative; }
+.kid-press-wrap .kid-hand { left: 30px; top: 34px; }
+
+.kid-anim-press { animation: kid-press 2.4s infinite; }
+.kid-anim-pressA { animation: kid-pressA 2.4s infinite; }
+.kid-anim-pressB { animation: kid-pressB 2.4s infinite; }
+.kid-anim-holdkey { animation: kid-holdkey 2.4s infinite; }
+@keyframes kid-press {
+  0%, 14% { transform: translateY(0); filter: none; }
+  20%, 62% { transform: translateY(5px); filter: brightness(1.08) sepia(0.6) saturate(2.2) hue-rotate(5deg); }
+  70%, 100% { transform: translateY(0); filter: none; }
+}
+@keyframes kid-pressA {
+  0%, 8% { transform: translateY(0); filter: none; }
+  12%, 38% { transform: translateY(5px); filter: sepia(0.6) saturate(2.2); }
+  42%, 100% { transform: translateY(0); filter: none; }
+}
+@keyframes kid-pressB {
+  0%, 58% { transform: translateY(0); filter: none; }
+  62%, 88% { transform: translateY(5px); filter: sepia(0.6) saturate(2.2); }
+  92%, 100% { transform: translateY(0); filter: none; }
+}
+@keyframes kid-holdkey {
+  0%, 6% { transform: translateY(0); filter: none; }
+  10%, 76% { transform: translateY(5px); filter: sepia(0.6) saturate(2.2); }
+  82%, 100% { transform: translateY(0); filter: none; }
+}
+
+/* finger (fingertip is ~36% from the left, at the top) */
+.kid-hand { position: absolute; width: 54px; height: 54px; pointer-events: none; filter: drop-shadow(2px 3px 0 rgba(0, 0, 0, 0.35)); }
+.kid-anim-handpress { animation: kid-handpress 2.4s infinite; }
+.kid-anim-handhold { animation: kid-handhold 2.4s infinite; }
+@keyframes kid-handpress { 0%, 8% { transform: translate(16px, 22px); } 18%, 62% { transform: translate(0, 0) scale(0.9); } 74%, 100% { transform: translate(16px, 22px); } }
+@keyframes kid-handhold { 0%, 4% { transform: translate(16px, 22px); } 10%, 76% { transform: translate(0, 0) scale(0.9); } 86%, 100% { transform: translate(16px, 22px); } }
+
+/* walk */
+.kid-walk-stage { position: relative; width: 70px; height: 132px; display: flex; flex-direction: column; align-items: center; }
+.kid-chevrons { display: flex; flex-direction: column; align-items: center; }
+.kid-chevrons i { display: block; width: 26px; height: 22px; opacity: 0; animation: kid-chev 2.4s infinite; }
+.kid-chevrons i:nth-child(3) { animation-delay: 0.25s; }
+.kid-chevrons i:nth-child(2) { animation-delay: 0.45s; }
+.kid-chevrons i:nth-child(1) { animation-delay: 0.65s; }
+.kid-chevrons svg rect { fill: #ffd400; }
+@keyframes kid-chev { 0%, 10% { opacity: 0; transform: translateY(10px); } 30% { opacity: 1; } 55% { opacity: 0; transform: translateY(-10px); } 100% { opacity: 0; } }
+.kid-figure { width: 30px; height: 60px; }
+.kid-anim-walk { animation: kid-walk 0.6s steps(2) infinite; }
+@keyframes kid-walk { 0% { transform: translateY(0); } 100% { transform: translateY(-4px); } }
+
+/* turn: top view of a head with a view cone swinging left then right */
+.kid-view { position: relative; width: 96px; height: 96px; }
+.kid-view-head { position: absolute; left: 50%; top: 50%; width: 30px; height: 30px; margin: -15px 0 0 -15px; background: #5a3a1e; border: 3px solid #1d1d1d; box-sizing: border-box; border-radius: 4px; }
+.kid-view-cone {
+  position: absolute; left: 50%; top: 50%; width: 0; height: 0;
+  border-left: 30px solid transparent; border-right: 30px solid transparent; border-bottom: 48px solid rgba(255, 212, 0, 0.75);
+  transform-origin: 50% 100%; transform: translate(-50%, -100%) rotate(0deg);
+}
+.kid-anim-look { animation: kid-look 2.4s infinite; }
+@keyframes kid-look {
+  0%, 10% { transform: translate(-50%, -100%) rotate(0deg); }
+  26%, 40% { transform: translate(-50%, -100%) rotate(-60deg); }
+  52%, 60% { transform: translate(-50%, -100%) rotate(0deg); }
+  76%, 90% { transform: translate(-50%, -100%) rotate(60deg); }
+  100% { transform: translate(-50%, -100%) rotate(0deg); }
+}
+
+/* place: dashed target, the finger taps, a block pops in */
+.kid-target, .kid-place-block, .kid-break-block { position: absolute; left: 50%; top: 46%; width: 76px; height: 76px; transform: translate(-50%, -50%); }
+.kid-target { border: 3px dashed rgba(255, 255, 255, 0.85); border-radius: 6px; box-sizing: border-box; }
+.kid-block { width: 100%; height: 100%; display: block; }
+.kid-anim-pop { animation: kid-pop 2.4s infinite; }
+@keyframes kid-pop {
+  0%, 30% { transform: translate(-50%, -50%) scale(0); opacity: 0; }
+  37% { transform: translate(-50%, -50%) scale(1.18); opacity: 1; }
+  44%, 86% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  96%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+}
+.kid-pic-place .kid-hand, .kid-pic-break .kid-hand { left: calc(50% - 20px); top: 46%; }
+.kid-anim-tap { animation: kid-tap 2.4s infinite; }
+@keyframes kid-tap {
+  0%, 10% { transform: translate(34px, 40px); }
+  22% { transform: translate(0, 0) scale(1); }
+  28% { transform: translate(0, 0) scale(0.84); }
+  34% { transform: translate(0, 0) scale(1); }
+  50%, 100% { transform: translate(34px, 40px); }
+}
+
+/* break: hold the finger down, cracks grow, the block pops away */
+.kid-anim-break { animation: kid-breakblock 2.4s infinite; }
+@keyframes kid-breakblock {
+  0%, 68% { transform: translate(-50%, -50%) scale(1) rotate(0deg); opacity: 1; }
+  76% { transform: translate(-50%, -50%) scale(0.2) rotate(35deg); opacity: 0; }
+  90% { transform: translate(-50%, -50%) scale(0.2); opacity: 0; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+.kid-crack polyline { opacity: 0; }
+.kid-anim-cracks .kid-crack1 { animation: kid-crack1 2.4s infinite; }
+.kid-anim-cracks .kid-crack2 { animation: kid-crack2 2.4s infinite; }
+.kid-anim-cracks .kid-crack3 { animation: kid-crack3 2.4s infinite; }
+@keyframes kid-crack1 { 0%, 24% { opacity: 0; } 26%, 70% { opacity: 1; } 72%, 100% { opacity: 0; } }
+@keyframes kid-crack2 { 0%, 39% { opacity: 0; } 41%, 70% { opacity: 1; } 72%, 100% { opacity: 0; } }
+@keyframes kid-crack3 { 0%, 54% { opacity: 0; } 56%, 70% { opacity: 1; } 72%, 100% { opacity: 0; } }
+.kid-anim-hold { animation: kid-hold 2.4s infinite; }
+@keyframes kid-hold {
+  0%, 4% { transform: translate(34px, 40px); }
+  12%, 70% { transform: translate(0, 0) scale(0.86); }
+  80%, 100% { transform: translate(34px, 40px); }
+}
+.kid-hold-ring {
+  position: absolute; left: 50%; top: 46%; width: 34px; height: 34px; margin: -17px 0 0 -17px;
+  border: 4px solid #ffd400; border-radius: 50%; box-sizing: border-box; opacity: 0;
+}
+.kid-anim-ring { animation: kid-ring 2.4s infinite; }
+@keyframes kid-ring { 0%, 11% { opacity: 0; transform: scale(0.4); } 14% { opacity: 1; } 68% { opacity: 1; transform: scale(1.6); } 72%, 100% { opacity: 0; transform: scale(1.6); } }
+
+/* pick: tap a hotbar box, the yellow frame jumps there */
+.kid-slots { position: relative; display: flex; gap: 4px; margin-top: -10px; }
+.kid-slot { width: 44px; height: 44px; background: #8b8b8b; box-shadow: inset 2px 2px 0 #373737, inset -2px -2px 0 #fff; display: flex; align-items: center; justify-content: center; }
+.kid-slot i { display: block; width: 24px; height: 24px; box-shadow: inset -3px -3px 0 rgba(0, 0, 0, 0.25); }
+.kid-slot-sel { position: absolute; left: -3px; top: -3px; width: 50px; height: 50px; border: 4px solid #ffd400; box-sizing: border-box; animation: kid-sel 2.4s infinite; }
+@keyframes kid-sel { 0%, 40% { transform: translate(0, 0); } 44%, 90% { transform: translate(144px, -4px) scale(1.08); } 96%, 100% { transform: translate(0, 0); } }
+.kid-pic-pick .kid-hand { left: calc(50% + 32px); top: calc(50% + 8px); }
+.kid-anim-pickhand { animation: kid-pickhand 2.4s infinite; }
+@keyframes kid-pickhand {
+  0%, 12% { transform: translate(30px, 34px); }
+  30% { transform: translate(0, 0) scale(1); }
+  38% { transform: translate(0, 0) scale(0.84); }
+  46% { transform: translate(0, 0) scale(1); }
+  62%, 100% { transform: translate(30px, 34px); }
+}
+
+/* fly: press, the kid with wings lifts off */
+.kid-fly-stage { position: relative; width: 90px; height: 140px; }
+.kid-fly-wings { position: absolute; left: 50%; bottom: 10px; width: 72px; height: 72px; margin-left: -36px; }
+.kid-fly-wings .kid-px:first-child { position: absolute; inset: 0; width: 100%; height: 100%; top: -8px; }
+.kid-fly-wings .kid-px:last-child { position: absolute; left: 25%; top: 12px; width: 50%; height: 100%; }
+.kid-anim-rise { animation: kid-rise 2.4s infinite; }
+@keyframes kid-rise {
+  0%, 22% { transform: translateY(0); }
+  50% { transform: translateY(-40px); }
+  60% { transform: translateY(-34px); }
+  80% { transform: translateY(-50px); }
+  92% { transform: translateY(-50px); opacity: 1; }
+  98% { opacity: 0; }
+  100% { transform: translateY(0); opacity: 0; }
+}
+.kid-ground { position: absolute; left: 4px; right: 4px; bottom: 4px; height: 8px; background: #4f9a2e; border-top: 3px solid #8fd86a; }
+
+/* unstuck: hold space / up, the kid pops out of the pit */
+.kid-pic-unstuck { gap: 18px; }
+.kid-hold-bar { position: absolute; left: 50%; bottom: 14px; width: 150px; height: 10px; margin-left: -128px; background: rgba(255, 255, 255, 0.25); border-radius: 5px; overflow: hidden; }
+.kid-hold-bar i { display: block; height: 100%; width: 0; background: #ffd400; }
+.kid-anim-fill { animation: kid-fill 2.4s infinite; }
+@keyframes kid-fill { 0%, 10% { width: 0; } 76% { width: 100%; } 86%, 100% { width: 0; } }
+.kid-unstuck-stage { position: relative; width: 70px; height: 130px; }
+.kid-unstuck-stage > div:first-child { position: absolute; left: 20px; bottom: 6px; width: 30px; height: 60px; }
+.kid-pit { position: absolute; left: 4px; right: 4px; bottom: 0; height: 52px; border: 12px solid #7f7f7f; border-top: none; box-sizing: border-box; }
+.kid-anim-popup { animation: kid-popup 2.4s infinite; }
+@keyframes kid-popup { 0%, 74% { transform: translateY(0); } 82% { transform: translateY(-74px); } 92% { transform: translateY(-64px); } 100% { transform: translateY(0); } }
+
+/* ---------------------------------------------------------------- exit guard (keep playing) */
+.kid-guard { position: absolute; inset: 0; pointer-events: auto; }
+.kid-guard-dim { position: absolute; inset: 0; background: rgba(20, 40, 90, 0.55); }
+.kid-guard-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.kid-keep-play { position: relative; z-index: 1; min-width: 240px; min-height: 140px; font-size: 80px; display: flex; align-items: center; justify-content: center; }
+.kid-guard-sparkles { position: absolute; inset: -40px; pointer-events: none; animation: kid-spin-slow 6s linear infinite; }
+.kid-guard-sparkles .kid-px { position: absolute; width: 40px; height: 40px; }
+.kid-guard-sparkles .kid-px:first-child { left: -6px; top: -6px; }
+.kid-guard-sparkles .kid-px:last-child { right: -6px; bottom: -6px; }
+@keyframes kid-spin-slow { to { transform: rotate(360deg); } }
+.kid-guard-window {
+  position: absolute; right: 24px; bottom: 24px; width: 48px; height: 48px; padding: 10px; box-sizing: border-box;
+  border-radius: 10px; background: rgba(0, 0, 0, 0.35); border: 2px solid rgba(255, 255, 255, 0.5); opacity: 0.7; cursor: pointer;
+}
+.kid-guard-window svg { width: 100%; height: 100%; display: block; }
+
+@media (prefers-reduced-motion: reduce) {
+  .kid-arrow, .kid-guard-sparkles { animation: none; }
+}
