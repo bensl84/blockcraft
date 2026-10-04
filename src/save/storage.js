@@ -13,6 +13,9 @@
 
 import { encodeColumn } from './codec.js';
 import { AutosaveScheduler } from './autosave.js';
+
+/** block:changed causes that are the world changing by itself (not an edit the child waits to see saved). */
+const NATURAL_CAUSES = new Set(['growth', 'melt', 'decay']);
 import { createIdbBackend, createMemoryBackend } from './backends.js';
 import { decodeWorldFile, encodeWorldFile, worldFileName } from './worldfile.js';
 import { cleanWorldName } from '../ui/menu_logic.js';
@@ -82,7 +85,14 @@ export function createSaveSystem(game, opts = {}) {
         else if (game.meta && game.settings.lastWorldId !== game.meta.id) game.setSetting('lastWorldId', game.meta.id);
       });
       ev.on('world:exit', () => { ready = false; sched.reset(); });
-      ev.on('block:changed', () => { if (ready) sched.noteBlockChange(nowMs()); });
+      // Natural background changes (MECH random ticks: growth, melting, leaf decay) happen every few seconds in any
+      // world; if they reset the 2.5 s debounce, the child's own edits would only be saved by the 30 s interval.
+      // They count as soft changes (saved within 30 s); everything else is an edit (LEAD integration).
+      ev.on('block:changed', (e) => {
+        if (!ready) return;
+        if (e && NATURAL_CAUSES.has(e.cause)) sched.noteSoftChange(nowMs());
+        else sched.noteBlockChange(nowMs());
+      });
       for (const name of ['inventory:changed', 'rules:changed', 'mode:changed', 'difficulty:changed', 'player:teleport', 'player:respawn', 'entity:spawn', 'entity:remove']) {
         ev.on(name, () => { if (ready) sched.noteSoftChange(nowMs()); });
       }

@@ -116,6 +116,10 @@ export default [
     name: 'menus-autosave',
     requires: ['menus', 'save'],
     async run(t) {
+      // MECH random ticks change blocks in the background (grass under the gold block turns to dirt), which
+      // re-dirties columns right after a save: switch them off while this checks the save cadence (LEAD integration)
+      await t.eval(() => { const m = window.__game.game.mechanics; if (m && m.setRandomTicks) m.setRandomTicks(false); });
+      try {
       await t.call('startWorld', FLAT);
       const p = await t.call('pos');
       const n0 = await t.call('eventCount', 'save:done');
@@ -135,6 +139,9 @@ export default [
       await t.eval(() => { Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')); delete document.visibilityState; });
       t.assert(await t.call('eventCount', 'save:start') > n2, 'visibilitychange(hidden) saves');
       await t.call('waitFor', "!api.game.save.saving", 2000);
+      } finally {
+        await t.eval(() => { const m = window.__game.game.mechanics; if (m && m.setRandomTicks) m.setRandomTicks(true); });
+      }
     },
   },
   {

@@ -529,8 +529,12 @@ export function generateColumn(seed, cx, cz, preset, out) {
           if (lx < 0 || lx > 15 || lz < 0 || lz > 15 || wy < 1 || wy >= WORLD_HEIGHT) continue;
           const i = colIndex(lx, wy, lz);
           const cur = blocks[i] & 0xff;
-          if (cur === _air || cur === _short_grass || cur === _fern || cur === _grass_block || cur === _dirt || cur === _snow)
+          if (cur === _air || cur === _short_grass || cur === _fern || cur === _grass_block || cur === _dirt || cur === _snow) {
             blocks[i] = (hash32(seed, wx, wy, wz) & 3) === 0 ? _cobblestone : _mossy_cobblestone;
+            // grass under a stone would turn to dirt by itself in the first minutes (MECH random ticks): start as dirt
+            const below = colIndex(lx, wy - 1, lz);
+            if ((blocks[below] & 0xff) === _grass_block) blocks[below] = _dirt;
+          }
         }
       }
     }
@@ -555,7 +559,7 @@ export function generateColumn(seed, cx, cz, preset, out) {
         // sugar cane on the shore (next to open, unfrozen water at sea level)
         // pumpkin / melon patches: one hashed spot per column (about 1 in 40 / 1 in 90 columns)
         const pk = pumpkinAt(seed, x, z, cx, cz, biome);
-        if (pk) { blocks[ai] = pk; continue; }
+        if (pk) { blocks[ai] = pk; blocks[gi] = _dirt; continue; }   // dirt under it: grass under an opaque block decays anyway
         const pv = patchN(x / 11, z / 11);
         const flowers = def.flowers;
         if (flowers.length && flowers[0] !== 'fern' && pv > 0.5 && r < 0.32) {

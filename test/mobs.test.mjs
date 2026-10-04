@@ -536,10 +536,14 @@ test('monsters (P1): zombie hits the player, creeper explodes, skeleton shoots, 
   assert.ok(g.player.health < 20, `zombie attacked (${t} ticks)`);
   g.entities.remove(z, 'test');
   g.player.health = 20; g.step(12);
+  // MECH owns explosions (the creeper's stub-era fallback was removed on merge): a stand-in records the call
+  const blasts = [];
+  g.mechanics = { explode(x, y, z, power, opts) { blasts.push({ power, opts }); g.events.emit('explosion', { x, y, z, power, source: opts.source }); g.survival.damage(6, 'explosion'); return 0; } };
   const c = g.mobs.spawnMob('creeper', 2.5, 4, 0.5);
   for (t = 0; t < 80 && !c.removed; t++) g.step();
   assert.ok(c.removed, 'creeper went off');
   assert.equal(g.events.counts.get('explosion'), 1);
+  assert.deepEqual(blasts.map((b) => [b.power, b.opts.source]), [[3, 'creeper']], 'creeper asks MECH for a power-3 blast');
   assert.ok(g.player.health < 20, 'blast hurt the player');
   g.player.health = 20; g.step(12);
   g.mobs.spawnMob('skeleton', 10.5, 4, 0.5);

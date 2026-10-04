@@ -28,9 +28,11 @@ async function settle(t, quietMs = 400, maxMs = 20000) {
 }
 
 /**
- * Freeze background block changes (MECH random ticks: growth, grass spreading under generated pumpkins...) so a
- * scenario that counts remeshes only sees its own. Returns a restore function. (LEAD integration: cross-lane
- * defect from MECH/FX/AUDIO/KID/INV - cored-daynight and cored-edit flaked with growth ticks on.)
+ * Freeze background block changes (MECH random ticks: growth, melting, leaf decay) so a renderer scenario that
+ * counts remeshes, waits for a quiet renderer (settle) or compares two pictures only sees its own changes.
+ * Returns a restore function. Applied to EVERY scenario in this file (wrapper at the end). LEAD integration:
+ * cross-lane defect from MECH/FX/AUDIO/KID/INV - cored-daynight and cored-edit flaked, and cored-perf's settle()
+ * never went quiet, so the dynamic quality scaler raised the render distance mid-test.
  */
 async function freezeWorld(t) {
   await t.eval(() => { const m = window.__game.game.mechanics; if (m && m.setRandomTicks) m.setRandomTicks(false); });
@@ -58,7 +60,7 @@ const uniform = (t, name) => t.eval((n) => {
   return typeof u === 'number' ? u : u && u.isColor ? [u.r, u.g, u.b] : null;
 }, name);
 
-export default [
+const SCENARIOS = [
   {
     name: 'cored-render', requires: REQ,
     async run(t) {
@@ -84,8 +86,6 @@ export default [
     name: 'cored-daynight', requires: REQ,
     async run(t) {
       await t.call('startWorld', HILLS);
-      const thaw = await freezeWorld(t);
-      try {
       await t.call('setLook', 90, 5); // look west-ish over the hills with sky in view
       await settle(t);
       const before = await t.eval(() => { const s = window.__game.game.renderer.getStats(); return { sets: s.sectionSets, merges: s.merges }; });
@@ -110,7 +110,6 @@ export default [
       t.note('remesh', { before, after });
       t.assert(after.sets === before.sets && after.merges === before.merges, `setTime never remeshes (${JSON.stringify({ before, after })})`);
       await t.call('setTime', 6000);
-      } finally { await thaw(); }
     },
   },
   {
@@ -304,8 +303,6 @@ export default [
     name: 'cored-edit', requires: REQ,
     async run(t) {
       await t.call('startWorld', FLAT);
-      const thaw = await freezeWorld(t);
-      try {
       await settle(t);
       const p = await t.call('pos');
       const bx = Math.floor(p.x) + 1, bz = Math.floor(p.z) - 4;
@@ -333,7 +330,6 @@ export default [
       for (let i = 0; i < b.data.length; i++) diff2 += Math.abs(b.data[i] - c.data[i]);
       t.note('afterCompaction', diff2 / b.data.length);
       t.assert(diff2 / b.data.length < 1, 'compaction does not change the picture');
-      } finally { await thaw(); }
     },
   },
   {
@@ -551,3 +547,11 @@ export default [
     },
   },
 ];
+
+export default SCENARIOS.map((sc) => ({
+  ...sc,
+  async run(t) {
+    const thaw = await freezeWorld(t);
+    try { return await sc.run(t); } finally { await thaw(); }
+  },
+}));

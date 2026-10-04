@@ -585,7 +585,11 @@ export function createMechanicsSystem(game) {
       const impact = impactOf(dist, power, exposure(getRaw, x, y, z, box));
       if (impact > 0) {
         if (!p.flying) push(p, x, y, z, p.eyeHeight || 1.62, impact);
-        if (game.survival) game.survival.damage(damageOf(impact, power), 'explosion', { type: 'explosion', source });
+        let dmg = damageOf(impact, power);
+        // a mob's blast scales with difficulty like Java (easy: half + 1); the player's own TNT does not
+        // (moved here from the creeper's stub-era fallback when the lanes were merged)
+        if (source === 'creeper' && game.meta && game.meta.difficulty === 'easy') dmg = Math.min(dmg, Math.floor(dmg / 2) + 1);
+        if (game.survival) game.survival.damage(dmg, 'explosion', { type: 'explosion', source });
       }
     }
   }

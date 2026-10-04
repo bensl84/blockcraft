@@ -6,11 +6,9 @@
 
 import { Entity, rayBox } from './entity.js';
 import { Mob } from './mob.js';
-import { isStub } from '../core/stubs.js';
 import { B_SOLID, getCollisionBoxes } from '../core/registry.js';
 import { lerp } from '../core/math.js';
 import { daylightAt, randInt, wrapAngle, yawToward } from './mob_ai.js';
-import { explosionDamage } from '../survival/damage.js';
 import { createSimpleMesh } from './mob_render.js';
 
 const DIFF = (g) => (g.meta ? g.meta.difficulty : 'peaceful');
@@ -154,17 +152,9 @@ export class Creeper extends Monster {
     this.persistent = false;
     g.entities.remove(this, 'explode');   // gone before the blast: no loot, no tip-over, no poof (the blast is the effect)
     const breakBlocks = !!(g.meta && g.meta.rules.mobGriefing);
-    if (g.mechanics && !isStub('mechanics')) g.mechanics.explode(x, y, z, power, { source: 'creeper', breakBlocks });
-    else {
-      // MECH still a stub: hurt the player ourselves (same formula) and announce a block-less explosion
-      const p = g.player;
-      const d = Math.hypot(p.x - x, p.y + 0.9 - y, p.z - z);
-      const r = explosionDamage(d, power, 1);
-      // Java scales explosion damage to players by difficulty: easy = dmg / 2 + 1
-      const dmg = g.meta && g.meta.difficulty === 'easy' ? Math.min(r.damage, Math.floor(r.damage / 2) + 1) : r.damage;
-      if (dmg > 0 && g.survival) g.survival.damage(dmg, 'explosion', { entity: this });
-      g.events.emit('explosion', { x, y, z, power, source: 'creeper', action: 0, count: 0, blocks: [] });
-    }
+    // MECH owns explosions: blocks, drops, entity and player damage, the 'explosion' event (the stub-era fallback
+    // that hurt the player here was removed when the mechanics lane was merged)
+    g.mechanics.explode(x, y, z, power, { source: 'creeper', breakBlocks });
   }
   tintNow() {
     if (this.hurtTime > 0 || this.deathTime > 0) return [1, 0, 0, 0.4];
