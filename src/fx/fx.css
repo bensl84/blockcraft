@@ -1,0 +1,44 @@
+/* OWNER LANE: FEATURE-FX. Screen overlays in the FX layer (Z.FX_OVERLAY = 10, under the HUD). None of these
+   take pointer events. SPEC §8.7, §9. */
+#fx-layer > div { position: absolute; inset: 0; pointer-events: none; }
+
+/* soft dark corners, like looking through a camera (always on in first person, very subtle) */
+#fx-layer .fx-vignette {
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 58%, rgba(0, 0, 0, 0.22) 100%);
+  opacity: 0; transition: opacity 0.4s;
+}
+#fx-layer .fx-vignette.on { opacity: 1; }
+
+/* underwater: blue tint (opacity 0.25) with a gentle darker bottom */
+#fx-layer .fx-water {
+  background: linear-gradient(rgba(30, 76, 192, 0.85), rgba(16, 44, 140, 1));
+  opacity: 0; transition: opacity 0.15s;
+}
+#fx-layer .fx-water.on { opacity: 0.25; }
+
+/* eye in lava: warm orange */
+#fx-layer .fx-lava { background: rgb(230, 90, 20); opacity: 0; transition: opacity 0.15s; }
+#fx-layer .fx-lava.on { opacity: 0.6; }
+
+/* hurt: red vignette only (the camera tilt belongs to the player lane) */
+#fx-layer .fx-hurt {
+  background: radial-gradient(ellipse at center, rgba(200, 0, 0, 0) 45%, rgba(200, 0, 0, 0.55) 85%, rgba(160, 0, 0, 0.75) 100%);
+  opacity: 0;
+}
+
+/* fades (sleep, home, respawn) */
+#fx-layer .fx-fade { background: #000; opacity: 0; }
+
+/* kid hold ring: fills while the finger/button is held (350 ms) - instant feedback on pointerdown */
+#fx-layer .fx-ring {
+  inset: auto; width: 88px; height: 88px; margin: -44px 0 0 -44px; border-radius: 50%;
+  --p: 0deg;
+  background: conic-gradient(rgba(255, 255, 255, 0.95) var(--p), rgba(255, 255, 255, 0.18) 0);
+  -webkit-mask: radial-gradient(circle, transparent 46%, #000 48%, #000 68%, transparent 70%);
+  mask: radial-gradient(circle, transparent 46%, #000 48%, #000 68%, transparent 70%);
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9));
+  display: none;
+}
+#fx-layer .fx-ring.on { display: block; }
+#fx-layer .fx-ring.done { animation: fx-ring-pop 0.18s ease-out forwards; }
+@keyframes fx-ring-pop { from { transform: scale(1); opacity: 1; } to { transform: scale(1.35); opacity: 0; } }
