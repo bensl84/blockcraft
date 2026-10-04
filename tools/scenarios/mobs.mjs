@@ -431,4 +431,142 @@ export default [
       t.assert(chick && chick.data.baby, 'baby chicken restored');
     },
   },
+  // ---------------------------------------------------------------- judge round 1 (FID-1, KID-3/6/7, FID-10/12, ROB-8)
+  {
+    name: 'mobs-skeleton-aim', requires: ['mobs', 'survival'],
+    async run(t) {
+      // a player standing still 6, 10 and 14 blocks from a skeleton on Normal takes at least 1 hit per 3 arrows
+      await t.call('startWorld', { preset: 'flat', seed: 777, mode: 'survival', difficulty: 'normal', rules: { passiveMobs: false, hostileMobs: true, daylightCycle: false } });
+      await t.call('setFlying', false);
+      await t.call('setTime', 18000);
+      const res = await t.eval(() => {
+        const g = window.__game.game, p = g.player;
+        const X = Math.floor(p.x) + 0.5, Y = p.y, Z = Math.floor(p.z) + 0.5;
+        const out = [];
+        let hits = 0, arrows = 0;
+        const off = g.events.on('player:hurt', (e) => { if (e.cause === 'arrow') hits++; });
+        const offA = g.events.on('entity:spawn', (e) => { if (e.type === 'arrow') arrows++; });
+        for (const dist of [6, 10, 14]) {
+          for (const e of g.entities.all()) g.entities.remove(e, 'test');
+          hits = 0; arrows = 0;
+          g.player.teleport(X, Y, Z, 'test');
+          g.mobs.spawnMob('skeleton', X, Y, Z - dist, {});
+          for (let i = 0; i < 200; i++) { g.player.health = 20; g.player.food = 20; g.player.teleport(X, Y, Z, 'test'); g.stepTicks(1); }
+          out.push({ dist, arrows, hits });
+        }
+        off(); offA();
+        for (const e of g.entities.all()) g.entities.remove(e, 'test');
+        return out;
+      });
+      t.note('arrows', res);
+      for (const r of res) t.assert(r.arrows >= 3 && r.hits * 3 >= r.arrows, `skeleton at ${r.dist} blocks: ${r.hits} hits from ${r.arrows} arrows (>= 1 per 3)`);
+    },
+  },
+  {
+    name: 'mobs-kid-ride-pet-horse', requires: ['mobs'],
+    async run(t) {
+      await t.call('startWorld', NO_SPAWN);
+      await t.call('setFlying', false);
+      const riding = () => t.eval(() => window.__game.game.player.riding);
+      // KID-3: saddle tap, then a second tap with the saddle still in hand rides the pig
+      const pig = await spawnNear(t, 'pig', 0, -2.5);
+      let r = await t.eval((id) => window.__game.game.mobs.useOn(id, 'saddle'), pig);
+      t.assert(r.data.saddled && await riding() === null, 'first saddle tap saddles only');
+      await t.eval((id) => window.__game.game.mobs.useOn(id, 'saddle'), pig);
+      t.assert(await riding() === pig, 'second saddle tap rides the saddled pig');
+      await t.call('hold', 'descend', 200);
+      t.assert(await riding() === null, 'off the pig');
+      // KID-6: empty-hand pet -> mob:petted, no love, no hurt
+      const ec = await evBase(t, ['mob:petted']);
+      const sheep = await spawnNear(t, 'sheep', 3, -3);
+      r = await t.eval((id) => window.__game.game.mobs.useOn(id, null), sheep);
+      t.assert(r.ok && await ec('mob:petted') === 1 && !(r.data.love > 0) && r.health === 8, 'empty-hand tap pets the sheep');
+      // KID-7: a kid-world horse is tamed by the first mount; Space gets off while it has no saddle
+      const horse = await spawnNear(t, 'horse', -3, -4);
+      r = await t.eval((id) => window.__game.game.mobs.useOn(id, null), horse);
+      t.assert(r.data.tamed && await riding() === horse, 'kid world: first tap tames + mounts the horse');
+      t.assert(await t.eval((id) => window.__game.game.entities.get(id).wishTicks > 0, horse), 'unsaddled tamed horse asks for a saddle');
+      await t.call('hold', 'jump', 200);
+      t.assert(await riding() === null, 'Space gets off an unsaddled horse');
+    },
+  },
+  {
+    name: 'mobs-sheared-dye', requires: ['mobs'],
+    async run(t) {
+      await t.call('startWorld', NO_SPAWN);
+      const id = await spawnNear(t, 'sheep', 0, -3, { color: 'white' });
+      await t.eval((id) => window.__game.game.mobs.useOn(id, 'shears'), id);
+      const r = await t.eval((id) => window.__game.game.mobs.useOn(id, 'blue_dye'), id);
+      t.assert(r.ok && r.data.sheared && r.data.color === 'blue', 'a sheared sheep takes the dye');
+      await t.eval((id) => window.__game.game.entities.get(id).eatGrass(), id);
+      const e = await ent(t, id);
+      t.assert(!e.data.sheared && e.data.color === 'blue', 'its wool grows back blue');
+    },
+  },
+  {
+    name: 'mobs-egg-cap', requires: ['mobs'],
+    async run(t) {
+      // 300 pig-egg uses keep the living mobs <= 64 and the mob tick <= 3 ms
+      await t.call('startWorld', NO_SPAWN);
+      await t.call('setFlying', false);
+      const res = await t.eval(() => {
+        const g = window.__game.game, inv = g.inventory, p = g.player;
+        let refused = 0;
+        const off = g.events.on('mobs:eggRefused', () => refused++);
+        for (let i = 0; i < 300; i++) {
+          inv.set(inv.selected, { item: 'pig_spawn_egg', count: 1 });
+          const hit = { x: Math.floor(p.x) + (i % 9) - 4, y: Math.floor(p.y) - 1, z: Math.floor(p.z) - 3 - (Math.floor(i / 9) % 8), nx: 0, ny: 1, nz: 0, face: 2 };
+          g.mobs.useEgg('pig', { game: g, player: p, stack: inv.getSelected(), slot: inv.selected, hit });
+        }
+        off();
+        const n = g.entities.all().filter((e) => e.def && !e.removed).length;
+        const t0 = performance.now();
+        for (let i = 0; i < 100; i++) { g.entities.tick(g); g.mobs.tick(g); }
+        return { n, refused, tickMs: (performance.now() - t0) / 100 };
+      });
+      t.note('eggCap', res);
+      t.assert(res.n <= 64 && res.n >= 60, `living mobs capped at 64 (${res.n})`);
+      t.assert(res.refused >= 230, `extra eggs refused (${res.refused})`);
+      t.assert(res.tickMs <= 3, `mob tick ${res.tickMs.toFixed(2)} ms <= 3`);
+    },
+  },
+  {
+    name: 'mobs-xp-sources', requires: ['mobs', 'survival', 'interaction'],
+    async run(t) {
+      await t.call('startWorld', { ...SURVIVAL, difficulty: 'peaceful' });
+      await t.call('setFlying', false);
+      const r = await t.eval(() => {
+        const g = window.__game.game, p = g.player, X = Math.floor(p.x), Z = Math.floor(p.z), id = (n) => window.__game.blockId(n);
+        const xp = () => p.xp || 0;
+        const out = {};
+        // diamond ore broken by the player with an iron pickaxe (drops) -> 3-7 XP; by hand (no drops) -> none
+        g.world.setBlock(X, 4, Z - 3, id('diamond_ore'), 0, { cause: 'test' });
+        const x0 = xp();
+        g.interaction.breakBlock(X, 4, Z - 3, { by: 'player', toolDef: { type: 'pickaxe', level: 3, speed: 6 } });
+        g.stepTicks(60);
+        out.diamond = xp() - x0;
+        g.world.setBlock(X, 4, Z - 3, id('diamond_ore'), 0, { cause: 'test' });
+        const x1 = xp();
+        g.interaction.breakBlock(X, 4, Z - 3, { by: 'player', toolDef: null });
+        g.stepTicks(60);
+        out.byHand = xp() - x1;
+        // furnace: 4 raw iron smelted; taking the output pops 0.7 x 4 = 2.8 -> 2 or 3 XP at the player
+        g.world.setBlock(X + 2, 4, Z, id('furnace'), 0, { cause: 'test' });
+        g.world.setBlockEntity(X + 2, 4, Z, { type: 'furnace', input: { item: 'raw_iron', count: 4 }, fuel: { item: 'coal', count: 1 }, output: null, burnTicks: 0, burnTotal: 0, cookTicks: 0, xp: 0 });
+        g.events.emit('block:use', { x: X + 2, y: 4, z: Z, id: id('furnace'), hook: 'furnace' });
+        g.stepTicks(820);
+        const be2 = g.world.getBlockEntity(X + 2, 4, Z);
+        out.smelted = be2 && be2.output ? be2.output.count : 0;
+        const x2 = xp();
+        g.inventory.add(be2.output); be2.output = null;
+        g.stepTicks(60);
+        out.smeltXp = xp() - x2;
+        return out;
+      });
+      t.note('xp', r);
+      t.assert(r.diamond >= 3 && r.diamond <= 7, `diamond ore gives 3-7 XP (${r.diamond})`);
+      t.assert(r.byHand === 0, 'no drops, no XP');
+      t.assert(r.smelted === 4 && (r.smeltXp === 2 || r.smeltXp === 3), `taking 4 iron ingots gives 2-3 XP (${r.smeltXp})`);
+    },
+  },
 ];

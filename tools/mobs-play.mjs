@@ -606,6 +606,161 @@ const SECTIONS = {
   },
 
   /** Performance with the real world: R 8 default world, 24 animals, mob tick and draw calls. */
+  /** Judge round-1 findings, played like a child (real mouse taps, real keys). */
+  async judge1() {
+    await startFlat();
+    const unfreeze = () => ev(() => { for (const e of window.__game.game.entities.all()) if (e.__tick) { e.tick = e.__tick; delete e.__tick; } });
+    // KID-3: saddle a pig, then keep tapping with the saddle still in her hand -> she rides
+    const pig = await spawn('pig', 0, -3);
+    await freezeAll();
+    await face(pig, 2.5);
+    await hotbar(0, 'saddle', 1);
+    await tapEntity(pig);
+    check((await ent(pig)).data.saddled && (await ev(() => window.__game.game.player.riding)) === null, 'KID-3: first saddle tap saddles the pig (no ride yet)');
+    await tapEntity(pig);
+    check((await ev(() => window.__game.game.player.riding)) === pig, 'KID-3: second tap with the saddle still in hand rides the saddled pig');
+    await unfreeze(); await settle(); await shot('judge1-kid3-riding-saddle-in-hand');
+    await key('KeyC', 150);
+    check((await ev(() => window.__game.game.player.riding)) === null, 'KID-3: C gets off again');
+
+    // KID-6: petting with an empty hand (and with a block) -> idle voice, a heart, it looks at her; no love mode
+    await fresh();
+    const sheep = await spawn('sheep', 0, -2.5, { color: 'white' });
+    await freezeAll();
+    await face(sheep, 2.5);
+    await hotbar(0, null);
+    const pet0 = await evCount('mob:petted'), snd0 = await ev(() => window.__game.game.events.recent('mob:sound', 50).filter((e) => e.payload.kind === 'idle').length);
+    await unfreeze();
+    await tapEntity(sheep);
+    const sd = await ent(sheep);
+    check((await evCount('mob:petted')) - pet0 === 1 && !(sd.data.love > 0) && sd.health === 8, 'KID-6: empty-hand tap pets the sheep (event, no love, no hurt)', { love: sd.data.love || 0, health: sd.health });
+    check((await ev(() => window.__game.game.events.recent('mob:sound', 50).filter((e) => e.payload.kind === 'idle').length)) > snd0, 'KID-6: petting plays the idle voice');
+    await settle(4); await shot('judge1-kid6-pet-sheep');
+    const looks = await ev((id) => { const e = window.__game.game.entities.get(id); return { petTicks: e.petTicks, target: e.target }; }, sheep);
+    check(looks.petTicks > 0 && looks.target === null, 'KID-6: the petted sheep stops and looks at her', looks);
+    await call('runTicks', 20);
+    await hotbar(0, 'dirt', 8);
+    const pet1 = await evCount('mob:petted');
+    await tapEntity(sheep);
+    check((await evCount('mob:petted')) - pet1 === 1, 'KID-6: tapping with a block in hand pets too (no block placed behind it)');
+
+    // KID-7: horse in a kid world - tamed on the first tap, saddle picture, Space gets off, then saddle + ride
+    await fresh();
+    const horse = await spawn('horse', 0, -3.5, { coat: 'white' });
+    await freezeAll();
+    await face(horse, 3.5);
+    await hotbar(0, null);
+    await tapEntity(horse);
+    let hd = await ent(horse);
+    check(hd.data.tamed && (await ev(() => window.__game.game.player.riding)) === horse, 'KID-7: first tap with an empty hand tames and mounts the horse (no bucking)', hd.data);
+    await unfreeze(); await call('runTicks', 4); await settle(4);
+    const wish = await ev((id) => { const e = window.__game.game.entities.get(id); return !!(e.wish && e.wishTicks > 0); }, horse);
+    check(wish, 'KID-7: a tamed horse without a saddle shows the floating saddle picture');
+    await shot('judge1-kid7-saddle-picture');
+    await key('Space', 150);
+    check((await ev(() => window.__game.game.player.riding)) === null, 'KID-7: Space gets her off a horse without a saddle');
+    await freezeAll(); await face(horse, 3.5); await unfreeze();
+    await hotbar(0, 'saddle', 1);
+    await tapEntity(horse);   // saddles it (tamed)
+    hd = await ent(horse);
+    check(hd.data.saddled, 'KID-7: saddle tap saddles the tamed horse');
+    await tapEntity(horse);   // and gets on
+    check((await ev(() => window.__game.game.player.riding)) === horse, 'KID-7: tap again rides it');
+    const h0 = await ent(horse);
+    await holdKey('ArrowUp', 2000);
+    const h1 = await ent(horse);
+    check(Math.hypot(h1.x - h0.x, h1.z - h0.z) > 4, 'KID-7: the saddled horse walks forward with the up arrow', +Math.hypot(h1.x - h0.x, h1.z - h0.z).toFixed(1));
+    await key('Space', 150);
+    check((await ev(() => window.__game.game.player.riding)) === horse, 'KID-7: Space jumps a saddled horse (she stays on)');
+    await key('KeyC', 150);
+
+    // FID-10: a sheared sheep takes the dye; its stubble shows the colour and the wool grows back in it
+    await fresh();
+    const s2 = await spawn('sheep', 0, -2.5, { color: 'white' });
+    await freezeAll();
+    await face(s2, 2.5);
+    await hotbar(0, 'shears', 1);
+    await tapEntity(s2);
+    await hotbar(0, 'blue_dye', 4);
+    await tapEntity(s2);
+    let s2d = await ent(s2);
+    check(s2d.data.sheared && s2d.data.color === 'blue', 'FID-10: dyeing a sheared sheep turns it blue', s2d.data);
+    await settle(4); await shot('judge1-fid10-sheared-dyed-blue');
+    await unfreeze();
+    for (let i = 0; i < 12 && (await ent(s2)).data.sheared; i++) await call('runTicks', 400);
+    s2d = await ent(s2);
+    check(!s2d.data.sheared && s2d.data.color === 'blue', 'FID-10: the wool grows back blue', s2d.data);
+    await face(s2, 3); await settle(4); await shot('judge1-fid10-regrown-blue');
+
+    // ROB-8: mashing the pig egg on the ground keeps the creature count capped
+    await fresh();
+    await hotbar(0, 'pig_spawn_egg', 1);
+    await call('setLook', 0, -35); await settle(2);
+    const ref0 = await evCount('mobs:eggRefused');
+    for (let i = 0; i < 300; i++) { await page.mouse.click(400 + ((i * 97) % 480), 430 + ((i * 53) % 180), { delay: 5 }); if (i % 50 === 49) await call('waitTicks', 1); }
+    await call('waitTicks', 10);
+    const mobsNow = await ev(() => window.__game.game.entities.all().filter((e) => e.def && !e.removed).length);
+    check(mobsNow <= 64 && mobsNow >= 40, 'ROB-8: 300 egg taps keep the living mobs at or under 64', mobsNow);
+    check((await evCount('mobs:eggRefused')) - ref0 > 0, 'ROB-8: extra eggs are refused with a puff');
+    const mobMs = await ev(() => {
+      const gm = window.__game.game; const t0 = performance.now(); const n = 200;
+      for (let i = 0; i < n; i++) { gm.entities.tick(gm); gm.mobs.tick(gm); }
+      return (performance.now() - t0) / n;
+    });
+    check(mobMs <= 3, 'ROB-8: mob tick <= 3 ms with the capped herd', +mobMs.toFixed(3));
+    await settle(); await shot('judge1-rob8-capped-pigs');
+
+    // FID-12: XP from ores, breeding and smelting (survival)
+    await call('exitToTitle');
+    await call('startWorld', { preset: 'flat', seed: 1, mode: 'survival', difficulty: 'peaceful', rules: { passiveMobs: false } });
+    await call('setFlying', false); await call('waitTicks', 5); await call('setTime', 6000);
+    const xp = () => ev(() => { const p = window.__game.game.player; return { xp: p.xp || 0, level: p.xpLevel || 0, total: (p.xpTotal || 0) }; });
+    const q = await call('pos');
+    const X = Math.floor(q.x), Z = Math.floor(q.z);
+    // a wall of diamond ore in front of her, mined with an iron pickaxe by holding the mouse
+    await ev(({ X, Z }) => { const gm = window.__game.game, D = window.__game.blockId('diamond_ore'); gm.world.setBlock(X, 4, Z - 2, D, 0, { cause: 'test' }); gm.world.setBlock(X, 5, Z - 2, D, 0, { cause: 'test' }); }, { X, Z });
+    await hotbar(0, 'iron_pickaxe', 1);
+    const xp0 = await xp();
+    await call('lookAt', X + 0.5, 4.5, Z - 1.6);
+    await page.mouse.move(640, 360); await page.mouse.down(); await page.waitForTimeout(3500); await page.mouse.up();
+    await call('runTicks', 60);
+    const xp1 = await xp();
+    check((await call('getBlock', X, 4, Z - 2)) === 'air' && (xp1.xp > xp0.xp || xp1.level > xp0.level), 'FID-12: mining diamond ore with an iron pickaxe gives XP', { before: xp0, after: xp1 });
+    // breeding: two cows + wheat taps -> baby + 1-7 XP
+    const c1 = await spawn('cow', 1.5, -3.5), c2 = await spawn('cow', -1.5, -3.5);
+    await freezeAll();
+    await hotbar(1, 'wheat', 4);
+    await call('lookAt', q.x, 4.6, q.z - 3.5);
+    await tapEntity(c1); await tapEntity(c2);
+    await unfreeze();
+    const xp2 = await xp(), bred0 = await evCount('mob:bred');
+    await call('runTicks', 260);
+    const xp3 = await xp();
+    check((await evCount('mob:bred')) - bred0 === 1 && (xp3.xp > xp2.xp || xp3.level > xp2.level), 'FID-12: breeding two cows gives XP', { before: xp2, after: xp3 });
+    // smelting: 4 raw iron cooked in a furnace, taken out by a click -> 0.7 x 4 = 2.8 XP pops at the player
+    await ev(({ X, Z }) => { const gm = window.__game.game; gm.world.setBlock(X + 2, 4, Z, window.__game.blockId('furnace'), 0, { cause: 'test' }); }, { X, Z });
+    await hotbar(2, null);
+    await call('lookAt', X + 2.5, 4.5, Z + 0.5);
+    await page.mouse.click(640, 360, { delay: 60 });
+    await call('waitFrames', 6);
+    const opened = await call('uiOpen');
+    const be = await ev(({ X, Z }) => { const b = window.__game.game.world.getBlockEntity(X + 2, 4, Z); if (b) { b.input = { item: 'raw_iron', count: 4 }; b.fuel = { item: 'coal', count: 2 }; } return !!b; }, { X, Z });
+    await call('runTicks', 850);
+    const be2 = await ev(({ X, Z }) => { const b = window.__game.game.world.getBlockEntity(X + 2, 4, Z); return b ? { out: b.output, xp: b.xp } : null; }, { X, Z });
+    check(opened === 'furnace' && be && be2 && be2.out && be2.out.count === 4, 'FID-12: furnace opened by a tap and smelted 4 iron', { opened, be2 });
+    const xp4 = await xp();
+    await call('waitFrames', 4);
+    await shot('judge1-fid12-furnace-done');
+    // shift-click the output slot (moves the iron into the inventory)
+    const outSel = await ev(() => { const el = document.querySelector('[data-slot="fo"]') || document.querySelector('[data-sid="fo"]'); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+    if (outSel) { await page.keyboard.down('Shift'); await page.mouse.click(outSel.x, outSel.y, { delay: 40 }); await page.keyboard.up('Shift'); }
+    else await ev(({ X, Z }) => { const b = window.__game.game.world.getBlockEntity(X + 2, 4, Z); window.__game.game.inventory.add(b.output); b.output = null; }, { X, Z });
+    await call('runTicks', 40);
+    const xp5 = await xp();
+    check(xp5.xp + xp5.level * 100 > xp4.xp + xp4.level * 100 && (await ev(() => window.__game.game.inventory.count('iron_ingot'))) === 4, 'FID-12: taking the iron out of the furnace gives the smelting XP', { before: xp4, after: xp5, realClick: !!outSel });
+    await call('closeUI');
+  },
+
   async perf() {
     await call('startWorld', { preset: 'default', seed: 777, mode: 'creative', difficulty: 'peaceful' });
     await call('waitTicks', 40);

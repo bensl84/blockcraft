@@ -9,6 +9,9 @@ import { COLORS } from '../core/constants.js';
 import { ID } from '../core/registry.js';
 import { getItem } from '../data/items.js';
 import { checkRainbow, findStandY, rainbowColor, randInt, rollSheepColor, wrapAngle } from './mob_ai.js';
+import { lerp, lookDir } from '../core/math.js';
+
+const tmpEye = { x: 0, y: 0, z: 0 }, tmpDir = { x: 0, y: 0, z: 0 };
 import { dropItem } from './item_entity.js';
 
 /* ------------------------------------------------------------------ riding helpers */
@@ -24,7 +27,9 @@ export class Pig extends Mob {
     const item = ctx.stack ? ctx.stack.item : null;
     if (this.baby) return false;
     if (item === 'saddle' && !this.data.saddled) { this.data.saddled = true; this.consumeHeld(); this.touch(); this.sound('idle'); return true; }
-    if (this.data.saddled && !(item && this.def.breed.includes(item)) && item !== 'saddle') return this.mount();
+    // an already-saddled pig is ridden with anything that is not its food - the saddle still in her hand too
+    // (Java): a child keeps tapping with the saddle she just used
+    if (this.data.saddled && !(item && this.def.breed.includes(item))) return this.mount();
     return false;
   }
   controlRidden(rider) {
@@ -130,7 +135,7 @@ export class Sheep extends Mob {
     }
     const def = getItem(item);
     if (def && def.use === 'dye' && def.dye) {
-      if (this.data.sheared) return true;
+      // a sheared sheep takes the dye too: its wool grows back in the new colour (Java / Bedrock)
       const cfg = this.def.rainbow;
       const hist = (this.data.dyes = Array.isArray(this.data.dyes) ? this.data.dyes : []);
       hist.push({ color: def.dye, tick: g.tickCount });
@@ -348,6 +353,34 @@ export class Horse extends Mob {
     if (!(d.jump > 0)) d.jump = def.jump[0] + (r() + r() + r()) / 3 * (def.jump[1] - def.jump[0]);
     if (!(d.temper >= 0)) d.temper = 0;
     this.rideTicks = 0;
+    this.wishTicks = 0;     // > 0: show the floating saddle picture (a tamed horse without a saddle)
+  }
+  /** Tamed: hearts, the tame sound, mob:tamed; a tamed horse without a saddle shows the saddle picture for 4 s. */
+  tameHorse() {
+    const g = this.game, d = this.data;
+    d.tamed = true; d.owner = 'player'; this.touch();
+    this.sound('tame');
+    // FX shows the taming hearts above the event position. She is (getting) on the horse's back, so hearts above
+    // the horse would sit on her camera and fill the screen: the position is moved 3 blocks along her view instead.
+    let hx = this.x, hy = this.y, hz = this.z;
+    const p = g.player;
+    if (p && p.getEyePos) {
+      const e = p.getEyePos(tmpEye), dv = lookDir(p.yaw, p.pitch, tmpDir);
+      hx = e.x + dv.x * 3; hz = e.z + dv.z * 3; hy = e.y + dv.y * 3 - 0.4 - this.height - 0.2;
+    }
+    g.events.emit('mob:tamed', { id: this.id, type: this.type, x: hx, y: hy, z: hz });
+    if (!d.saddled) this.wantSaddle(80);
+  }
+  /** Ask for a saddle: the floating saddle picture + 'mobs:needSaddle' (KID may show its own hint). */
+  wantSaddle(ticks) {
+    if (this.wishTicks <= 0) this.game.events.emit('mobs:needSaddle', { id: this.id, type: this.type, x: this.x, y: this.y, z: this.z });
+    this.wishTicks = Math.max(this.wishTicks, ticks);
+  }
+  tickTimers() {
+    super.tickTimers();
+    if (this.wishTicks > 0) this.wishTicks--;
+    // riding a tamed horse that has no saddle: keep showing what it needs
+    if (this.data.tamed && !this.data.saddled && this.rider()) this.wishTicks = Math.max(this.wishTicks, 2);
   }
   canBreed() { return !!this.data.tamed; }
   acceptsWhileRidden(stack) {
@@ -367,22 +400,23 @@ export class Horse extends Mob {
       this.consumeHeld(); this.sound('eat'); this.touch();
       return true;
     }
-    if (item === 'saddle' && d.tamed && !d.saddled) { d.saddled = true; this.consumeHeld(); this.touch(); return true; }
+    if (item === 'saddle' && d.tamed && !d.saddled) { d.saddled = true; this.wishTicks = 0; this.consumeHeld(); this.touch(); this.sound('idle'); return true; }
+    // kid worlds (animals can't die): no bucking rodeo - the horse is tamed the first time she gets on
+    if (!d.tamed && this.kidSafe) this.tameHorse();
+    else if (d.tamed && !d.saddled) this.wantSaddle(80);
     return this.mount();
   }
   controlRidden(rider) {
     const g = this.game, d = this.data;
     this.riddenAccel = false;
-    if (wantsDismount(g, false)) { this.dismount(); this.think(); return; }
+    // Space gets off a horse without a saddle (it can't be ridden properly yet); a saddled horse jumps instead
+    if (wantsDismount(g, !d.saddled)) { this.dismount(); this.think(); return; }
     if (!d.tamed) {
       // taming by riding (SPEC §2.6): every 30 ticks either it accepts the rider or bucks (+5 temper)
       this.think();
       if (++this.rideTicks % 30 === 0) {
-        if (this.grand() * 100 < d.temper) {
-          d.tamed = true; d.owner = 'player'; this.touch();
-          this.particles('heart', 7); this.sound('tame');
-          g.events.emit('mob:tamed', { id: this.id, type: this.type, x: this.x, y: this.y, z: this.z });
-        } else {
+        if (this.grand() * 100 < d.temper) this.tameHorse();
+        else {
           d.temper = Math.min(100, d.temper + (this.def.temperPerAttempt || 5));
           this.sound('angry');
           this.dismount();
@@ -405,6 +439,40 @@ export class Horse extends Mob {
   getSeat() { return { x: this.x, y: this.y + 0.6 * (this.baby ? 0.5 : 1), z: this.z, yaw: this.yaw }; }
   skinVariant() { return { coat: this.data.coat }; }
   fillPose(v) { v.saddled = !!this.data.saddled; }
+  /** The saddle picture: a real saddle item bobbing above the horse's head, in view of the rider. */
+  render(game, alpha) {
+    super.render(game, alpha);
+    const want = this.wishTicks > 0 && this.data.tamed && !this.data.saddled && this.deathTime === 0;
+    if (!want) { this.disposeWish(game); return; }
+    if (!this.wish) {
+      if (!game.fx || !game.fx.makeItemMesh || !game.renderer || !game.renderer.addObject) return;
+      this.wish = game.fx.makeItemMesh('saddle');
+      if (!this.wish) return;
+      game.renderer.addObject(this.wish);
+    }
+    const t = this.age + alpha, o = this.wish, k = this.baby ? 0.5 : 1;
+    const p = game.player, ridden = p && p.riding === this.id && p.getEyePos;
+    const bob = Math.sin(t * 0.15) * 0.06;
+    if (ridden) {
+      // ridden: 2.2 blocks along her view, a little above the middle of the screen
+      const e = p.getEyePos(tmpEye, true), d = lookDir(p.yaw, p.pitch + 0.16, tmpDir);
+      o.position.set(e.x + d.x * 2.2, e.y + d.y * 2.2 + bob, e.z + d.z * 2.2);
+    } else {
+      const yaw = this.prevYaw + wrapAngle(this.yaw - this.prevYaw) * alpha;
+      o.position.set(lerp(this.prevX, this.x, alpha) - Math.sin(yaw) * 1.5 * k, lerp(this.prevY, this.y, alpha) + 2.35 * k + bob, lerp(this.prevZ, this.z, alpha) - Math.cos(yaw) * 1.5 * k);
+    }
+    o.rotation.set(0, t * 0.06, 0);
+    o.scale.setScalar(ridden ? 1.0 : 1.4);
+    const m = o.material;
+    if (m && m.uniforms && m.uniforms.uLightSky) { m.uniforms.uLightSky.value = 15; if (m.uniforms.uLightBlock) m.uniforms.uLightBlock.value = 15; }
+  }
+  disposeWish(game) {
+    if (!this.wish) return;
+    if (game.renderer) game.renderer.removeObject(this.wish);
+    if (game.fx && game.fx.disposeItemMesh) game.fx.disposeItemMesh(this.wish);
+    this.wish = null;
+  }
+  dispose(game) { super.dispose(game); this.disposeWish(game); }
 }
 
 export const ANIMAL_CLASSES = { pig: Pig, cow: Cow, sheep: Sheep, chicken: Chicken, wolf: Wolf, cat: Cat, horse: Horse };

@@ -11,6 +11,8 @@ import { MODELS, faceRects, packModel } from './mob_models.js';
 function rgb(hex) { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
 function shade(hex, k) { const c = rgb(hex); return c.map((v) => Math.max(0, Math.min(255, Math.round(v * k)))); }
 function mix(a, b, t) { const x = rgb(a), y = rgb(b); return x.map((v, i) => Math.round(v + (y[i] - v) * t)); }
+/** [r, g, b] -> '#rrggbb'. */
+function hex(c) { return '#' + c.map((v) => v.toString(16).padStart(2, '0')).join(''); }
 
 /** Smooth value noise in [0,1) over pixel coordinates (cell = scale px). */
 function vn(x, y, scale, seed) {
@@ -126,7 +128,8 @@ const PAINT = {
           f.set(2, 4, '#e59a9c'); f.set(3, 4, '#e59a9c'); f.set(2, 5, '#b57a74'); f.set(3, 5, '#b57a74');
         }
         break;
-      case 'body': f.fur(face, 0.04, 3); break;
+      // the body only shows once sheared: short stubble in the wool colour, so a dyed sheared sheep shows its new colour
+      case 'body': f.fur(hex(mix(face, woolHex, 0.45)), 0.05, 2); break;
       default:
         f.fur(face, 0.04, 2);
         if (f.face === 'down') f.fill('#4a3a30'); else { f.rowFill(f.h - 1, '#5a463a'); }

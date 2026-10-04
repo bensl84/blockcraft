@@ -21,8 +21,11 @@ import {
 } from './mob_ai.js';
 import { applyPose, createMobMesh, createSimpleMesh, entityLight, setMobLight, setMobTint, setMobSkin } from './mob_render.js';
 import { dropItem } from './item_entity.js';
+import { getItem } from '../data/items.js';
 
 const HEAD_LIMIT = 50 * Math.PI / 180;
+/** Item uses that keep their own behaviour when tapped on an animal (everything else pets it). */
+const NO_PET_USES = new Set(['eat', 'drink', 'spawn_egg', 'bow', 'throw', 'boat', 'bucket', 'water_bucket', 'lava_bucket', 'flint_and_steel']);
 const TURN_RATE = 0.35;           // max body turn per tick (radians, ~20 degrees)
 const tmpBox = {};
 
@@ -75,6 +78,7 @@ export class Mob extends Entity {
     this.killedByPlayer = false;
     this.fireTicks = 0;
     this.eating = 0;
+    this.petTicks = 0; this.petCooldown = 0;
     // render state
     this.limbSwing = 0; this.limbAmount = 0; this.prevLimbAmount = 0;
     this.headYaw = 0; this.headPitch = 0; this.prevHeadYaw = 0;
@@ -149,6 +153,8 @@ export class Mob extends Entity {
     if (this.panicTicks > 0) this.panicTicks--;
     if (this.eating > 0) this.eating--;
     if (this.fireTicks > 0) this.fireTicks--;
+    if (this.petTicks > 0) this.petTicks--;
+    if (this.petCooldown > 0) this.petCooldown--;
     if (--this.nextIdleSound <= 0) {
       this.nextIdleSound = 120 + Math.floor(this.rand() * 280);
       if (this.distToPlayer() < 16 && !this.data.sitting) this.sound('idle');
@@ -183,6 +189,7 @@ export class Mob extends Entity {
     if (this.eating > 0) { this.target = null; return; }
     if (this.panicTicks > 0) { this.thinkPanic(); return; }
     if (this.data.leashed && this.thinkLeash()) return;
+    if (this.petTicks > 0 && this.thinkPetted()) return;
     if (this.thinkSpecial()) return;
     if (this.data.love > 0 && !this.baby && this.thinkMate()) return;
     if (this.thinkTempt()) return;
@@ -191,6 +198,13 @@ export class Mob extends Entity {
   }
   /** Subclass hook (wolf follow, monsters chase...). Return true when it took control this tick. */
   thinkSpecial() { return false; }
+  /** Just petted: stand still and look at the child for a moment. */
+  thinkPetted() {
+    const p = this.game.player;
+    if (!p || p.dead) return false;
+    this.target = null; this.lookAt = p;
+    return true;
+  }
 
   thinkPanic() {
     this.speedMod = SPAWN.PANIC_SPEED_MOD;
@@ -567,6 +581,7 @@ export class Mob extends Entity {
     if (this.deathTime > 0) return false;
     if (item === this.type + '_spawn_egg') {
       const g = this.game;
+      if (g.mobs && g.mobs.eggRoom && !g.mobs.eggRoom()) { g.mobs.refuseEgg(this.x, this.y + this.height, this.z); return true; }
       if (g.mobs && g.mobs.spawnMob) {
         const b = g.mobs.spawnMob(this.type, this.x, this.y, this.z, { ...this.babyOpts(this), baby: true });
         if (b) b.touch();
@@ -577,7 +592,31 @@ export class Mob extends Entity {
     if (this.interactLeash(ctx)) return true;
     if (this.interactSpecial(ctx)) return true;
     if (item && this.def.breed && this.def.breed.includes(item)) return this.feed(ctx);
+    if (this.canPet(ctx)) return this.pet();
     return false;
+  }
+  /**
+   * Petting (kid feedback): a tap with an empty hand - or with something that has no use on an animal (a block, a
+   * tool, a dye on a cow) - on a passive or tamed animal. Food, eggs, buckets, bows... keep their own use.
+   */
+  canPet(ctx) {
+    if (this.category === 'monster' || this.deathTime > 0 || this.angryTicks > 0) return false;
+    const s = ctx.stack;
+    if (!s) return true;
+    const d = getItem(s.item);
+    return !d || !d.use || !NO_PET_USES.has(d.use);
+  }
+  /** Idle voice, a heart or two, turn to look at the child; a short cooldown, never love mode. Always consumes the tap. */
+  pet() {
+    if (this.petCooldown > 0) return true;
+    this.petCooldown = 15;
+    this.petTicks = 40;
+    this.target = null;
+    this.lookTicks = 40; this.lookTarget = 'player';
+    this.sound('idle');
+    this.particles('heart', 1 + (this.rand() < 0.5 ? 1 : 0));
+    this.game.events.emit('mob:petted', { id: this.id, type: this.type, x: this.x, y: this.y, z: this.z });
+    return true;
   }
   /** Subclass hook for shears, dye, bucket, bone, saddle, riding, sitting. */
   interactSpecial(ctx) { return false; }
