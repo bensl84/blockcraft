@@ -21,6 +21,7 @@ import { MusicPlayer, composePiece, renderPianoSamples, SAMPLE_NOTES } from './m
 import { makeImpulse } from './reverb.js';
 import { SOUNDS, blockSoundName, resolveSound } from './sounds.js';
 import { wireAudioEvents } from './wiring.js';
+import { createAmbience } from './ambience.js';
 
 const MAX_STARTS_PER_FRAME = 6;    // new voices per ~frame (16 ms window; prio > 0 exempt): node creation costs main-
 const FRAME_WINDOW_MS = 16;        // thread time (~0.3-1 ms per voice on a weak CPU), so a burst cannot stall a frame.
@@ -128,8 +129,11 @@ export function createAudioSystem(game) {
   let graph = null;
   let music = null;
   let wiring = null;
+  let ambience = null;
   let wantMusic = false;     // music requested (world running) - honoured once unlocked
   let wantMusicDelay;        // undefined = SPEC first-piece gap
+  let wantTitle = false;     // title-screen music requested
+  let wantTitleDelay;        // undefined = 1 s
   let night = false;
   let hiddenSuspended = false;
   let errors = 0;
@@ -214,20 +218,37 @@ export function createAudioSystem(game) {
       music.prepare(Off);
     }
     if (wantMusic) { music.start(wantMusicDelay); wantMusicDelay = undefined; }
+    else if (wantTitle) {
+      setNight(false); // the title is always the bright day mood
+      music.start(wantTitleDelay, { title: true });
+      wantTitleDelay = undefined;
+    }
   }
 
   function onRunning() {
     sys.unlocked = true;
     applySettings();
+    // first gesture on the title screen: a soft title piece (wantTitle is set by wiring on game:state 'title')
+    if (!wantMusic && !wantTitle && game.state === 'title') wantTitle = true;
     startMusicNow(); // renders the piano samples once (OfflineAudioContext) right after the first gesture
   }
 
   const musicApi = {
-    start(delay) { wantMusic = true; wantMusicDelay = delay; if (running()) startMusicNow(); },
-    stop(fade = 1.5) { wantMusic = false; wantMusicDelay = undefined; if (music) music.stop(fade); },
+    start(delay) { wantMusic = true; wantTitle = false; wantMusicDelay = delay; if (running()) startMusicNow(); },
+    stop(fade = 1.5) { wantMusic = false; wantTitle = false; wantMusicDelay = undefined; if (music) music.stop(fade); },
+    /** Soft title-screen music (about 6 dB under the in-world level), honoured once unlocked. */
+    title(delay) {
+      wantMusic = false; wantTitle = true; wantTitleDelay = delay;
+      if (running()) startMusicNow();
+    },
     setNight,
     duck,
   };
+
+  function logPlay(name, t, gain, pan = 0) {
+    const entry = { name, t: Math.round(t * 1000) / 1000, tick: game.tickCount | 0, gain: Math.round(gain * 1000) / 1000, pan: Math.round(pan * 100) / 100 };
+    if (log.length < LOG_MAX) log.push(entry); else { log[logHead] = entry; logHead = (logHead + 1) % LOG_MAX; }
+  }
 
   /** Shared play implementation. opts: {x, y, z, volume, pitch, prio, ...recipe params}. */
   function play(name, opts = {}) {
@@ -243,7 +264,7 @@ export function createAudioSystem(game) {
     let gain = def.vol * (def.trim || 1) * (Number.isFinite(opts.volume) ? Math.max(0, Math.min(2, opts.volume)) : 1);
     let pan = 0;
     if (def.range > 0 && Number.isFinite(opts.x) && Number.isFinite(opts.y) && Number.isFinite(opts.z)) {
-      spatial(listener.x, listener.y, listener.z, listener.yaw, opts.x, opts.y, opts.z, def.range, 3, sp);
+      spatial(listener.x, listener.y, listener.z, listener.yaw, opts.x, opts.y, opts.z, def.range, def.ref || 3, sp);
       if (sp.gain < 0.01) return null; // out of earshot: no voice at all
       gain *= sp.gain;
       pan = Math.abs(sp.pan) > 0.02 ? sp.pan : 0;
@@ -261,8 +282,7 @@ export function createAudioSystem(game) {
       warn(`play ${key}`, err);
       return null;
     }
-    const entry = { name: key, t: Math.round(t * 1000) / 1000, tick: game.tickCount | 0, gain: Math.round(gain * 1000) / 1000, pan: Math.round(pan * 100) / 100 };
-    if (log.length < LOG_MAX) log.push(entry); else { log[logHead] = entry; logHead = (logHead + 1) % LOG_MAX; }
+    logPlay(key, t, gain, pan);
     return table.add(key, t, v.end, { out: v.outNode, panner: v.panner, sources: v.sources });
   }
 
@@ -272,9 +292,13 @@ export function createAudioSystem(game) {
     unlocked: false,
 
     init() {
+      ambience = createAmbience(game, {
+        ctx: () => (running() ? ctx : null), dest: () => (graph ? graph.sfxIn : null), play, rand,
+        log: (name, gain) => { if (ctx) logPlay(name, ctx.currentTime, gain); },
+      });
       wiring = wireAudioEvents(game, {
         play, playBlock: (...a) => sys.playBlock(...a), stopVoice: (rec, fade) => { if (rec) killVoice(rec, fade); },
-        music: musicApi, setMuffle, applySettings, now, rand,
+        music: musicApi, setMuffle, applySettings, now, rand, ambience,
       });
       const gesture = () => { if (!running()) sys.unlock(); };
       window.addEventListener('pointerdown', gesture, true);
@@ -347,6 +371,8 @@ export function createAudioSystem(game) {
       s.unknown = { ...unknown };
       s.music = music ? music.stats() : { ready: false, enabled: false, playing: false, wanted: wantMusic };
       s.music.wanted = wantMusic;
+      s.music.wantedTitle = wantTitle;
+      s.ambience = ambience ? ambience.stats() : null;
       s.night = night;
       s.sampleRate = ctx ? ctx.sampleRate : 0;
       s.muffleHz = graph ? Math.round(graph.muffle.frequency.value) : 0;
@@ -355,7 +381,7 @@ export function createAudioSystem(game) {
       return s;
     },
 
-    tick() { if (wiring) wiring.tick(); },
+    tick() { if (wiring) wiring.tick(); if (ambience && running()) ambience.tick(); },
 
     frame() {
       // listener = camera pose (position AND yaw: the third-person front view looks back at the player, so left/right
@@ -377,10 +403,12 @@ export function createAudioSystem(game) {
         const g = busGains(game.settings);
         if (g.master > 0 && g.music > 0) music.update(ctx.currentTime);
       }
+      if (ambience) ambience.frame();
     },
 
     dispose() {
       if (wiring) wiring.dispose();
+      if (ambience) ambience.dispose();
       for (const r of table.clear()) { killVoice(r, 0.01); disconnect(r); }
       if (ctx) ctx.close().catch(() => {});
       ctx = null; graph = null; music = null;
@@ -424,7 +452,7 @@ export function createAudioSystem(game) {
       const g = buildGraph(off, gns, { reverb: false });
       let gain = def.vol * (def.trim || 1) * (Number.isFinite(opts.volume) ? opts.volume : 1), pan = 0;
       if (def.range > 0 && Number.isFinite(opts.x)) {
-        spatial(0, 0, 0, 0, opts.x, opts.y || 0, opts.z || 0, def.range, 3, sp);
+        spatial(0, 0, 0, 0, opts.x, opts.y || 0, opts.z || 0, def.range, def.ref || 3, sp);
         gain *= sp.gain; pan = sp.pan;
       }
       startVoice(off, g, key, def, opts, gain, pan, r, at);
@@ -458,14 +486,14 @@ export function createAudioSystem(game) {
       if (!running()) return null;
       const an = graph.analyser;
       const buf = new Float32Array(an.fftSize);
-      let peak = 0;
+      let peak = 0, s2 = 0, n2 = 0;
       const t0 = performance.now();
       while (performance.now() - t0 < ms) {
         an.getFloatTimeDomainData(buf);
-        for (let i = 0; i < buf.length; i++) { const a = Math.abs(buf[i]); if (a > peak) peak = a; }
+        for (let i = 0; i < buf.length; i++) { const a = Math.abs(buf[i]); if (a > peak) peak = a; s2 += a * a; n2++; }
         await new Promise((res) => setTimeout(res, 10));
       }
-      return { peakDb: toDb(peak), voices: table.stats(ctx.currentTime).byName };
+      return { peakDb: toDb(peak), rmsDb: round1(toDb(Math.sqrt(s2 / Math.max(1, n2)))), voices: table.stats(ctx.currentTime).byName };
     },
 
     /**

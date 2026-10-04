@@ -241,7 +241,7 @@ export default [
       t.assert(playing, `live music plays notes (${JSON.stringify(m)})`);
       await t.call('exitToTitle');
       const after = await t.eval(() => window.__game.audioStats().music);
-      t.assert(after.enabled === false && after.wanted === false, 'music stops on exit to title');
+      t.assert(after.wanted === false && (after.enabled === false || after.title === true), `world music stops on exit to title; the soft title music takes over (${JSON.stringify(after)})`);
     },
   },
   {
@@ -402,6 +402,71 @@ export default [
       t.assert(heard, 'mobs emit mob:sound within 30 s');
       const s = await t.call('audioStats');
       t.assert(s.started > 0, 'and the audio lane voices them');
+    },
+  },
+  {
+    // Judge POL-6: a soft title piece after the first gesture on the title (about 6 dB under the in-world level),
+    // faded out when a world starts; the world keeps its own 20-40 s first-piece schedule.
+    name: 'audio-title-music', requires: ['audio'],
+    async run(t) {
+      if ((await t.eval(() => window.__game.state())) !== 'title') await t.call('exitToTitle');
+      await gesture(t);
+      const ok = await t.waitFor(() => { const m = window.__game.audioStats().music; return m.title && m.notesPlayed > 0; }, null, 8000);
+      const m = await t.eval(() => window.__game.audioStats().music);
+      t.note('title', { title: m.title, level: m.level, notes: m.notesPlayed, mode: m.mode });
+      t.assert(ok, `title music plays after the first gesture (${JSON.stringify(m)})`);
+      t.assert(m.level === 0.5, `title music is -6 dB under the world level (${m.level})`);
+      await t.call('startWorld', FLAT);
+      const w = await t.eval(() => window.__game.audioStats().music);
+      t.assert(!w.title && w.wanted && w.level === 1, `world music replaces the title music (${JSON.stringify(w)})`);
+      t.assert(w.nextIn === null || (w.nextIn >= 15 && w.nextIn <= 40.5), `first world piece 20-40 s away (${w.nextIn})`);
+    },
+  },
+  {
+    // Judge POL-5: rain is heard (and muffled under a roof), a lit furnace crackles, caves have quiet air + drips.
+    name: 'audio-ambience', requires: ['audio', 'world', 'fx'],
+    async run(t) {
+      await gesture(t);
+      await t.call('startWorld', { preset: 'default', seed: 12345, mode: 'creative', difficulty: 'peaceful' }); // deep enough for a cave
+      await t.call('setSetting', 'musicVolume', 0);
+      await t.eval(() => window.__game.game.audio.recent(true));
+      await t.eval(() => window.__game.game.fx.setWeather(1));
+      const rain = await t.waitFor(() => { const a = window.__game.audioStats().ambience; return a && a.rainBed && a.rain > 0.02; }, null, 8000);
+      const open = await t.eval(() => window.__game.audioStats().ambience);
+      t.assert(rain, `rain bed plays while it rains (${JSON.stringify(open)})`);
+      const p = await t.call('pos');
+      const x = Math.floor(p.x), y = Math.floor(p.y), z = Math.floor(p.z);
+      for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) await t.call('setBlock', x + dx, y + 3, z + dz, 'oak_planks');
+      const roofed = await t.waitFor((r) => { const a = window.__game.audioStats().ambience; return a.covered && a.rain < r * 0.5; }, open.rain, 5000);
+      t.assert(roofed, 'under a roof the rain is quieter');
+      await t.eval(() => window.__game.game.fx.setWeather(0));
+      await t.call('setBlock', x + 2, y, z - 2, 'furnace_lit');
+      const crackle = await t.waitFor(() => window.__game.game.audio.recent().some((r) => r.name === 'furnace.crackle'), null, 10000);
+      t.assert(crackle, 'a lit furnace crackles');
+      for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let dy = 0; dy < 4; dy++) await t.call('setBlock', x + dx, 20 + dy, z + dz, 'air');
+      await t.call('setFlying', true);
+      await t.call('teleport', x + 0.5, 20, z + 0.5);
+      const cave = await t.waitFor(() => { const a = window.__game.audioStats().ambience; return a.cave === 1 && a.caveBed; }, null, 6000);
+      t.assert(cave, `cave air underground (${JSON.stringify(await t.eval(() => window.__game.audioStats().ambience))})`);
+      await t.call('setSetting', 'musicVolume', 0.35);
+    },
+  },
+  {
+    // Judge POL-7: priming TNT (flint and steel / fire) is the fuse hiss and the ignite, never a block break crunch.
+    name: 'audio-tnt-prime', requires: ['audio', 'mechanics', 'world'],
+    async run(t) {
+      await gesture(t);
+      await t.call('startWorld', FLAT);
+      const p = await t.call('pos');
+      const x = Math.floor(p.x), y = Math.floor(p.y), z = Math.floor(p.z) - 3;
+      await t.call('setBlock', x, y, z, 'tnt');
+      await t.eval(() => window.__game.game.audio.recent(true));
+      await t.eval(([x, y, z]) => window.__game.game.mechanics.primeTnt(x, y, z, 80, { by: 'tnt' }), [x, y, z]);
+      await t.call('sleep', 200);
+      const log = (await t.eval(() => window.__game.game.audio.recent(true))).map((r) => r.name);
+      t.note('log', log);
+      t.assert(log.includes('tnt.fuse'), `fuse hiss (${log})`);
+      t.assert(!log.some((n) => n.startsWith('block.break.')), `no block break sound (${log})`);
     },
   },
 ];
