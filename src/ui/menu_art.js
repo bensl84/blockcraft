@@ -225,6 +225,19 @@ const ICON_DEFS = {
     fillPoly(g, [[15, 4.5], [8, 8], [8, 15.5], [15, 12]], '#6b4a30');
   },
   flat(g) { fillRect(g, 0, 9, 16, 2, '#5aa733'); fillRect(g, 0, 11, 16, 5, '#8c6545'); fillRect(g, 6, 5, 4, 4, '#c99a5b'); },
+  /** two windows, the front one showing a little world (ROB-2: "open in another window") */
+  windows(g) {
+    fillRect(g, 0, 1, 10, 9, '#9fb4c8'); fillRect(g, 0, 1, 10, 2, '#5d7896'); fillRect(g, 1, 4, 8, 5, '#d6e4f0');
+    fillRect(g, 5, 6, 11, 9, '#9fb4c8'); fillRect(g, 5, 6, 11, 2, '#5d7896');
+    fillRect(g, 6, 9, 9, 3, '#8fd3ff'); fillRect(g, 6, 12, 9, 1, '#5aa733'); fillRect(g, 6, 13, 9, 1, '#8c6545');
+  },
+  /** a treasure chest with a red cross: saving is off (ROB-5 banner for the parent) */
+  nosave(g) {
+    fillRect(g, 1, 4, 14, 4, '#a8733c'); fillRect(g, 1, 8, 14, 7, '#8a5a2b'); fillRect(g, 1, 7, 14, 1, '#5a3a1b');
+    fillRect(g, 7, 6, 2, 3, '#e3b23c');
+    fillPoly(g, [[6, 1], [8, 0], [16, 10], [14, 12]], '#d8382a');
+    fillPoly(g, [[14, 0], [16, 2], [8, 12], [6, 10]], '#d8382a');
+  },
 };
 
 /** Paint an icon definition (16x16 shape grid) into an 18x18 canvas (1 px margin for the outline) with bevel shading. */

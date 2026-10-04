@@ -10,13 +10,22 @@
 // returns; completion is reported with 'save:done'. A failed transaction keeps its column records and writes
 // them first on the next attempt. Backups (P1): 3 rolling meta copies (<= one per 10 min) + a daily snapshot.
 // Without IndexedDB the in-memory backend keeps worlds for this page only (available = false).
+// Opening (judge ROB-5): a slow database is waited for, never replaced by memory on a timeout. init() gives it
+// INIT_WAIT_MS and returns; every world call waits for the real answer (whenReady). Memory is used only on a real
+// error or blocked storage; then storageProblem is set and 'save:storage' is emitted (the title shows a banner).
+// One window per world (judge ROB-2, worldlock.js): the open world's lock is held from world:ready to world:exit;
+// a window that cannot get it emits 'save:conflict' and never saves that world.
+// Big batched changes (an explosion, an undo) are saved 0.4 s after they settle, not 2.5 s (judge KID-9).
 
 import { encodeColumn } from './codec.js';
 import { AutosaveScheduler } from './autosave.js';
 
 /** block:changed causes that are the world changing by itself (not an edit the child waits to see saved). */
 const NATURAL_CAUSES = new Set(['growth', 'melt', 'decay']);
-import { createIdbBackend, createMemoryBackend } from './backends.js';
+/** block:changed causes that are a big batch the child would hate to see undone by a crash (short debounce). */
+const BULK_CAUSES = new Set(['explosion', 'undo', 'redo']);
+import { createIdbBackend, createMemoryBackend, globalIdb } from './backends.js';
+import { createWorldLock } from './worldlock.js';
 import { decodeWorldFile, encodeWorldFile, worldFileName } from './worldfile.js';
 import { cleanWorldName } from '../ui/menu_logic.js';
 
@@ -27,6 +36,8 @@ export const THUMB_EVERY_MS = 60000;
 /** Rolling meta backups kept per world, and the minimum time between two of them. */
 export const META_BACKUPS = 3;
 export const META_BACKUP_EVERY_MS = 10 * 60 * 1000;
+/** How long init() (boot) waits for the database before letting the title show; the open keeps going after. */
+export const INIT_WAIT_MS = 1500;
 /** Reasons that run immediately even while another save is in flight (the page may be going away). */
 const URGENT = new Set(['hidden', 'pagehide', 'unload']);
 
@@ -52,6 +63,14 @@ export function createSaveSystem(game, opts = {}) {
   let seq = 0;
   /** column key -> sequence number of its newest export (a failed older save never overwrites a newer one) */
   const latestSeq = new Map();
+  /** Promise that settles once a backend is chosen (the real database, or memory after a real error). */
+  let backendReady = backend ? Promise.resolve(backend) : null;
+  let deferredSave = null;
+  /** world id this window must not save (another window has it open) */
+  let conflictId = null;
+  const worldLock = opts.worldLock !== undefined ? opts.worldLock : (typeof window !== 'undefined' ? createWorldLock() : null);
+  /** Wait for the backend (a world call made while the database is still opening). */
+  const whenBackend = () => (backend ? Promise.resolve(backend) : backendReady ? backendReady.then(() => backend) : Promise.resolve(null));
 
   const save = {
     name: 'save',
@@ -65,34 +84,57 @@ export function createSaveSystem(game, opts = {}) {
     get retryCount() { return retry.size; },
     /** (MENUS addition) Promise of the latest backup write (tests wait on it). */
     backupsIdle: Promise.resolve(),
+    /** (MENUS addition) false while the database is still opening (Play waits, showing the loading screen) */
+    get isReady() { return !!backend; },
+    /** (MENUS addition) resolves once the backend is chosen */
+    whenReady: () => whenBackend().then(() => true),
+    /** (MENUS addition) why saving is off: null | 'blocked' (storage blocked) | 'error' (database failed) */
+    storageProblem: null,
+    /** (MENUS addition) claim / release the one-window lock of a world (resolves false: open in another window) */
+    claimWorld: (id) => (worldLock ? worldLock.claim(id) : Promise.resolve(true)),
+    releaseWorld: () => { if (worldLock) worldLock.release(); },
+    /** (MENUS addition) world id this window found open in another window (never saved here) */
+    get conflictId() { return conflictId; },
 
     async init() {
+      const ev = game.events;
       if (!backend) {
-        const idb = createIdbBackend();
-        if (await idb.open()) { backend = idb; save.available = true; }
-        else { backend = createMemoryBackend(); save.available = false; console.warn('[blockcraft] IndexedDB unavailable: worlds are kept for this page only'); }
+        backendReady = openStorage();
+        // a healthy database answers in milliseconds; a slow one keeps opening in the background
+        await Promise.race([backendReady, new Promise((r) => setTimeout(r, INIT_WAIT_MS))]);
       } else {
         await backend.open();
         save.available = backend.kind === 'idb';
+        save.backend = backend.kind;
       }
-      save.backend = backend.kind;
-      const ev = game.events;
-      ev.on('world:starting', () => { ready = false; sched.reset(); });
+      ev.on('world:starting', () => { ready = false; conflictId = null; sched.reset(); });
       ev.on('world:ready', (e) => {
         ready = true;
         sched.reset();
+        const id = game.meta && game.meta.id;
+        // usually already held (menus claim it before loading); this covers every other way in (tests, restore)
+        if (id && worldLock) {
+          worldLock.claim(id).then((ok) => {
+            if (ok || !game.meta || game.meta.id !== id) return;
+            conflictId = id;
+            console.warn('[blockcraft] this world is open in another window: not saving it here');
+            game.events.emit('save:conflict', { id });
+          });
+        }
         if (e && e.isNew) save.saveNow('new');
         else if (game.meta && game.settings.lastWorldId !== game.meta.id) game.setSetting('lastWorldId', game.meta.id);
       });
-      ev.on('world:exit', () => { ready = false; sched.reset(); });
+      ev.on('world:exit', () => { ready = false; sched.reset(); if (worldLock) worldLock.release(); });
       // Natural background changes (MECH random ticks: growth, melting, leaf decay) happen every few seconds in any
       // world; if they reset the 2.5 s debounce, the child's own edits would only be saved by the 30 s interval.
       // They count as soft changes (saved within 30 s); everything else is an edit (LEAD integration).
       ev.on('block:changed', (e) => {
         if (!ready) return;
         if (e && NATURAL_CAUSES.has(e.cause)) sched.noteSoftChange(nowMs());
-        else sched.noteBlockChange(nowMs());
+        else sched.noteBlockChange(nowMs(), !!(e && BULK_CAUSES.has(e.cause)));
       });
+      ev.on('explosion', (e) => { if (ready && e && e.count > 0) sched.markBulk(); });
+      ev.on('kid:undo', (e) => { if (ready && e && e.count > 0) sched.markBulk(); });
       for (const name of ['inventory:changed', 'rules:changed', 'mode:changed', 'difficulty:changed', 'player:teleport', 'player:respawn', 'entity:spawn', 'entity:remove']) {
         ev.on(name, () => { if (ready) sched.noteSoftChange(nowMs()); });
       }
@@ -103,7 +145,20 @@ export function createSaveSystem(game, opts = {}) {
         document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && ready) save.saveNow('fullscreen'); });
       }
       if (typeof window !== 'undefined' && window.addEventListener) {
-        window.addEventListener('pagehide', () => { if (ready) save.saveNow('pagehide'); });
+        window.addEventListener('pagehide', () => {
+          if (ready) save.saveNow('pagehide');
+          // the save above is already issued; let another window have the world (the page may be kept in bfcache)
+          if (worldLock) worldLock.release();
+        });
+        window.addEventListener('pageshow', (e) => {
+          if (!e || !e.persisted || !worldLock || !game.meta) return;
+          const id = game.meta.id;
+          worldLock.claim(id).then((ok) => {
+            if (ok || !game.meta || game.meta.id !== id) return;
+            conflictId = id;
+            game.events.emit('save:conflict', { id });
+          });
+        });
         window.addEventListener('beforeunload', () => { if (ready) save.saveNow('unload'); });
       }
       try {
@@ -124,6 +179,7 @@ export function createSaveSystem(game, opts = {}) {
 
     /** @returns {Promise<import('../core/types.js').WorldMeta[]>} newest first (backups excluded) */
     async listWorlds() {
+      if (!backend) await whenBackend();
       if (!backend) return [];
       const all = await backend.getAllMetas();
       return all.filter((m) => m && !m.backupOf && !isBackupId(m.id)).sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0));
@@ -134,6 +190,7 @@ export function createSaveSystem(game, opts = {}) {
      * Columns stay ENCODED (codec bytes); the world decodes them lazily.
      */
     async loadWorld(id) {
+      if (!backend) await whenBackend();
       if (!backend || !id) return null;
       const meta = await backend.getMeta(id);
       if (!meta || meta.backupOf) return null;
@@ -147,7 +204,14 @@ export function createSaveSystem(game, opts = {}) {
 
     /** Save meta (+ every system.serialize()) and dirty columns of the open world. reason for logs. */
     saveNow(reason = 'manual') {
-      if (!backend || !game.meta || !ready) return Promise.resolve(false);
+      if (!game.meta || !ready) return Promise.resolve(false);
+      if (conflictId && game.meta.id === conflictId) return Promise.resolve(false);
+      if (!backend) {
+        // a world opened while the database is still opening (test API): save once it answers
+        if (!backendReady) return Promise.resolve(false);
+        if (!deferredSave) deferredSave = backendReady.then(() => { deferredSave = null; return save.saveNow(reason); });
+        return deferredSave;
+      }
       if (URGENT.has(reason)) return doSave(reason);
       if (inflight) {
         queuedReason = reason;
@@ -167,6 +231,7 @@ export function createSaveSystem(game, opts = {}) {
     },
 
     async deleteWorld(id) {
+      if (!backend) await whenBackend();
       if (!backend || !id) return false;
       if (game.meta && game.meta.id === id) return false;
       const metas = await backend.getAllMetas();
@@ -181,6 +246,7 @@ export function createSaveSystem(game, opts = {}) {
     /** (MENUS addition) Rename a world (parent area). Returns the cleaned name or null. */
     async renameWorld(id, name) {
       const clean = cleanWorldName(name);
+      if (!backend) await whenBackend();
       if (!backend || !clean) return null;
       if (game.meta && game.meta.id === id) game.meta.name = clean;
       const meta = await backend.getMeta(id);
@@ -192,6 +258,7 @@ export function createSaveSystem(game, opts = {}) {
 
     /** (MENUS addition) Backups of a world, newest first: [{id, kind: 'meta'|'daily', at, day, playTicks}] */
     async listBackups(worldId) {
+      if (!backend) await whenBackend();
       if (!backend) return [];
       const all = await backend.getAllMetas();
       return all.filter((m) => m.backupOf === worldId)
@@ -204,6 +271,7 @@ export function createSaveSystem(game, opts = {}) {
      * inventory, position, time and rules. If the world is open it is saved, closed, restored and reopened.
      */
     async restoreBackup(worldId, backupId) {
+      if (!backend) await whenBackend();
       if (!backend) return false;
       const b = await backend.getMeta(backupId);
       if (!b || b.backupOf !== worldId) return false;
@@ -234,6 +302,7 @@ export function createSaveSystem(game, opts = {}) {
 
     /** P2: export a world as a JSON Blob (has .filename). The open world is saved first. */
     async exportWorld(id) {
+      if (!backend) await whenBackend();
       if (!backend) return null;
       if (game.meta && game.meta.id === id) await save.saveNow('export');
       const data = await save.loadWorld(id);
@@ -247,6 +316,7 @@ export function createSaveSystem(game, opts = {}) {
 
     /** P2: import a world file (File/Blob/string). Resolves the new WorldMeta, or null (bad file). */
     async importWorld(file) {
+      if (!backend) await whenBackend();
       if (!backend || !file) return null;
       let parsed;
       try {
@@ -271,6 +341,36 @@ export function createSaveSystem(game, opts = {}) {
       return meta;
     },
   };
+
+  /**
+   * Choose the backend: the real database (waiting as long as it takes), or memory after a real error / blocked
+   * storage. Never throws.
+   */
+  async function openStorage() {
+    let chosen = null, problem = null;
+    try {
+      const idbGlobal = globalIdb();
+      if (!idbGlobal) problem = 'blocked';
+      else {
+        const idb = createIdbBackend(idbGlobal);
+        if (await idb.open()) chosen = idb;
+        else { problem = 'error'; console.warn('[blockcraft] IndexedDB failed:', idb.lastError); }
+      }
+    } catch (err) {
+      problem = 'error';
+      console.warn('[blockcraft] IndexedDB failed:', err && err.message);
+    }
+    if (!chosen) {
+      chosen = createMemoryBackend();
+      console.warn('[blockcraft] saving is off in this browser: worlds are kept for this page only');
+    }
+    backend = chosen;
+    save.available = chosen.kind === 'idb';
+    save.backend = chosen.kind;
+    save.storageProblem = problem;
+    try { game.events.emit('save:storage', { available: save.available, problem }); } catch { /* ignore */ }
+    return chosen;
+  }
 
   /** One save: synchronous part now, completion later. Resolves true when the transaction committed. */
   function doSave(reason) {

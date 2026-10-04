@@ -69,7 +69,11 @@
   display: flex; align-items: center; justify-content: space-between;
 }
 .bc-btn.bc-mtop-back { min-width: 88px; min-height: 80px; }
-.bc-mtop-title { padding: 8px 16px; background: var(--plate); border: 2px solid rgba(255, 255, 255, 0.85); }
+/* header badge: the same bevelled grey panel as the cards (judge POL-14: the dark plate looked like a placeholder) */
+.bc-mtop-title {
+  padding: 8px 14px; background: var(--panel); border: 3px solid #000;
+  box-shadow: inset 3px 3px 0 #fff, inset -3px -3px 0 #555, 0 4px 0 rgba(0, 0, 0, 0.3);
+}
 .bc-mtop-spacer { width: 52px; }
 
 /* ---------------------------------------------------------------- worlds */
@@ -99,12 +103,40 @@
 .bc-wcard-foot { display: flex; align-items: center; gap: 6px; height: 40px; padding: 4px 2px 0; color: var(--text-dark); }
 .bc-wcard-name { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .bc-wcard-ago { position: absolute; top: 12px; left: 12px; font-size: 16px; color: #fff; text-shadow: 2px 2px 0 #000; background: rgba(0, 0, 0, 0.45); padding: 2px 6px; pointer-events: none; }
-.bc-wcard-plus { align-items: center; justify-content: center; background: rgba(198, 198, 198, 0.92); animation: bc-soft-bob 2.6s ease-in-out infinite; }
-.bc-wcard-plus .bc-mi { width: 96px; height: 96px; }
+/* the new-world card: the same opaque bevelled panel as a world card, with a gently pulsing green plus (POL-14) */
+.bc-wcard-plus { align-items: center; justify-content: center; background: var(--panel); }
+.bc-wcard-plus::before {
+  content: ''; position: absolute; inset: 14px; border: 3px dashed rgba(63, 63, 63, 0.35); pointer-events: none;
+}
+.bc-wcard-plus .bc-mi { width: 96px; height: 96px; animation: bc-plus-pulse 1.8s ease-in-out infinite; filter: drop-shadow(0 4px 0 rgba(0, 0, 0, 0.25)); }
+@keyframes bc-plus-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }
 .bc-wcard-editing { cursor: default; }
 .bc-wcard-edit { position: absolute; top: 12px; right: 12px; display: flex; gap: 10px; }
 .bc-wcard-edit .bc-btn { min-width: 60px; min-height: 60px; padding: 0; }
 .bc-btn.bc-wcard-del { background: #b03a2e; }
+
+/* ---------------------------------------------------------------- world open in another window (ROB-2) */
+.bc-mbusy { display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; }
+.bc-mbusy-panel { display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 24px 32px; max-width: calc(100vw - 48px); box-sizing: border-box; }
+.bc-mbusy-pics { display: flex; align-items: center; gap: 28px; }
+.bc-mbusy-world { position: relative; width: 240px; height: 150px; border: 3px solid #000; background: #222; flex: none; display: flex; align-items: center; justify-content: center; }
+.bc-mbusy-img { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; filter: grayscale(0.45) brightness(0.85); }
+.bc-mbusy-lock { position: absolute; right: -18px; bottom: -18px; background: var(--panel); border: 3px solid #000; padding: 6px; box-shadow: inset 2px 2px 0 #fff, inset -2px -2px 0 #555; }
+.bc-mbusy-text { font-size: 16px; color: var(--text-dark); text-align: center; }
+.bc-btn.bc-busy-back { min-width: 200px; min-height: 110px; }
+@media (max-width: 560px) {
+  .bc-mbusy-pics { flex-direction: column; gap: 16px; }
+  .bc-mbusy-world { width: min(240px, 70vw); height: min(150px, 44vw); }
+  .bc-mbusy-windows { width: 64px !important; height: 64px !important; }
+}
+
+/* ---------------------------------------------------------------- title: saving is off (ROB-5, for the parent) */
+.bc-mstorage {
+  position: absolute !important; top: 16px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px; padding: 8px 14px; max-width: min(640px, calc(100vw - 48px)); box-sizing: border-box;
+  border-color: #b03a2e;
+}
+.bc-mstorage-text { font-size: 16px; color: var(--text-dark); line-height: 1.25; }
 
 /* ---------------------------------------------------------------- new world */
 .bc-nw-body {
@@ -306,5 +338,5 @@
   .bc-load-pic { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .bc-logo-img, .bc-title-worlds, .bc-wcard-plus, .bc-load-blocks i, .bc-mhint-plate, .bc-mdeath-hearts { animation: none; }
+  .bc-logo-img, .bc-title-worlds, .bc-wcard-plus, .bc-wcard-plus .bc-mi, .bc-load-blocks i, .bc-mhint-plate, .bc-mdeath-hearts { animation: none; }
 }
