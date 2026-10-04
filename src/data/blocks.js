@@ -69,6 +69,7 @@ export const STATE = Object.freeze({
   // bed: bits 0-1 facing (toward the head), bit 2 = head part, bit 3 = occupied, bits 4-7 colour index (COLORS)
   BED_HEAD: 4, BED_OCCUPIED: 8, BED_COLOR_SHIFT: 4,
   // ladder / chest / furnace / jack_o_lantern: bits 0-1 facing
+  // chest (v1.7, double chest): bit 2 = the other half is at facing+1 (clockwise), bit 3 = at facing+3
   // layer (snow): bits 0-2 = layers - 1 (0 => 1/8 tall)
   // farmland: bits 0-2 moisture 0..7 (7 = wet)
   // crop (wheat/carrots/potatoes): bits 0-2 age 0..7
@@ -96,6 +97,7 @@ export const STATE = Object.freeze({
   SIGN_WALL: 4,
   // nether portal: bit 0 axis (0 = the sheet runs along X, 1 = along Z)
   PORTAL_AXIS_Z: 1,
+  CHEST_PAIR_CW: 4, CHEST_PAIR_CCW: 8,
 });
 
 /** Plants a flower pot can hold, by state index (0 = empty). Append only (save format). */

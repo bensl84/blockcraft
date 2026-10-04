@@ -19,6 +19,7 @@ import { getItem } from '../data/items.js';
 import { dropItem } from '../entities/item_entity.js';
 import { CONTAINER_BLOCKS, containerStacks, normalizeContainer, tickFurnace } from '../inventory/containers.js';
 import { buildContainerScreen } from './inv_screens.js';
+import { chestPartner } from '../mechanics/rules.js';
 import { buildPicker } from './inv_picker.js';
 
 const KINDS = ['inventory', 'creative', 'crafting', 'furnace', 'chest'];
@@ -137,20 +138,25 @@ export function createInventoryUISystem(game) {
     if (kind === 'creative') {
       screen = buildPicker({ game, close, openInventory: () => game.ui.open('inventory') });
     } else {
-      let be = null, detached = false, pos = null;
+      let be = null, detached = false, pos = null, pair = null;
       if (kind === 'chest' || kind === 'furnace') {
         const r = containerAt(kind, opts);
         be = r.be; detached = r.detached; pos = r.pos;
+        if (kind === 'chest' && pos) pair = doubleChest(pos, be);
+        if (pair) be = pair.view;
       }
+      const screenRef = {};
       screen = buildContainerScreen({
         game, kind, be,
         book: kind === 'inventory' || kind === 'crafting' ? !game.isCreative() : false,
         close,
-        onDirty: () => { if (pos && game.world) game.world.setBlockEntity(pos.x, pos.y, pos.z, be); },
+        onDirty: () => { writeBack(screenRef.s || { pos, be, pair }); },
         dropStack: (stack, thrown) => dropFromPlayer(stack, thrown),
       });
       screen.detached = detached;
       screen.pos = pos;
+      screen.pair = pair;
+      screenRef.s = screen;
     }
     invui.screen = screen;
     layer.appendChild(screen.root);
@@ -163,7 +169,7 @@ export function createInventoryUISystem(game) {
     try { s.returnAll(); } finally {
       if (s.ctl) s.ctl.dispose();
       s.root.remove();
-      if (s.pos && s.be && game.world) game.world.setBlockEntity(s.pos.x, s.pos.y, s.pos.z, s.be);
+      writeBack(s);
     }
     relockSoon();
   }
@@ -181,6 +187,41 @@ export function createInventoryUISystem(game) {
       if (game.ui.current || game.state !== 'playing' || game.input.pointerLocked) return;
       game.input.requestPointerLock();
     }, 0);
+  }
+
+  /**
+   * Double chest (v1.7, judge FID-7): when the chest at pos has a partner (MECH pairs them, rules.chestPartner), one
+   * 54-slot view over both halves - the half on the left as you face the front is the top three rows. Each half keeps
+   * its own 27-slot block entity (save format unchanged); writeBack copies the view into both.
+   */
+  function doubleChest(pos, be) {
+    const w = game.world;
+    const getRaw = (x, y, z) => w.getRaw(x, y, z);
+    const p = chestPartner(getRaw, pos.x, pos.y, pos.z);
+    if (!p) return null;
+    const other = { x: p.x, y: pos.y, z: p.z };
+    const old = w.getBlockEntity(other.x, other.y, other.z);
+    const obe = normalizeContainer(old, 'chest');
+    if (obe !== old) w.setBlockEntity(other.x, other.y, other.z, obe);
+    // facing the chest's front, the other half is on your right when it is counter-clockwise of the facing (bit 3):
+    // then this half is the left one, and the left half fills the top rows
+    const selfFirst = ((getRaw(pos.x, pos.y, pos.z) >>> 8) & 8) !== 0;
+    const a = selfFirst ? { pos, be } : { pos: other, be: obe }, b = selfFirst ? { pos: other, be: obe } : { pos, be };
+    const view = { type: 'chest', items: [...a.be.items, ...b.be.items] };
+    return { a, b, view };
+  }
+
+  /** Store a container screen's data back into the world (both halves of a double chest). */
+  function writeBack(s) {
+    if (!s || !game.world) return;
+    const pr = s.pair;
+    if (pr) {
+      const n = pr.a.be.items.length;
+      for (let i = 0; i < n; i++) { pr.a.be.items[i] = pr.view.items[i]; pr.b.be.items[i] = pr.view.items[n + i]; }
+      for (const h of [pr.a, pr.b]) game.world.setBlockEntity(h.pos.x, h.pos.y, h.pos.z, h.be);
+      return;
+    }
+    if (s.pos && s.be) game.world.setBlockEntity(s.pos.x, s.pos.y, s.pos.z, s.be);
   }
 
   /** Block entity for a chest/furnace screen: existing one at the cell, else a new one stored there. */
@@ -212,7 +253,16 @@ export function createInventoryUISystem(game) {
   function onBroken(e) {
     if (!e) return;
     const s = invui.screen;
-    if (s && s.pos && s.pos.x === e.x && s.pos.y === e.y && s.pos.z === e.z) {
+    const atHalf = (h) => h && h.pos.x === e.x && h.pos.y === e.y && h.pos.z === e.z;
+    if (s && s.pair && (atHalf(s.pair.a) || atHalf(s.pair.b))) {
+      // one half of an open double chest broke: keep the other half's items, forget the broken one's (they drop)
+      const keep = atHalf(s.pair.a) ? s.pair.b : s.pair.a;
+      const n = keep.be.items.length, off = keep === s.pair.a ? 0 : n;
+      for (let i = 0; i < n; i++) keep.be.items[i] = s.pair.view.items[off + i];
+      game.world.setBlockEntity(keep.pos.x, keep.pos.y, keep.pos.z, keep.be);
+      s.pair = null; s.pos = null;
+      game.ui.close();
+    } else if (s && s.pos && s.pos.x === e.x && s.pos.y === e.y && s.pos.z === e.z) {
       // the container under an open screen was broken: close without writing the block entity back
       s.pos = null;
       game.ui.close();

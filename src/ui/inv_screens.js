@@ -34,21 +34,23 @@ const bookTile = (S) => Math.max(64, Math.round(S * 1.2));
  * size (down to MIN_SLOT) for which the panel, the recipe book beside it and the close button stay on screen
  * (landscape phones such as 667x375: every slot, the hotbar row and the close button must be reachable).
  */
-export function slotSizeFor(kind, base, gui, vw, vh, book, headPx = 0) {
+export function slotSizeFor(kind, base, gui, vw, vh, book, headPx = 0, rows = 3) {
   const fits = (S) => {
     const u = Math.max(2, Math.round(S / 18));
     let topH, topW;
     if (kind === 'inventory') { topH = 4 * S; topW = Math.round(2.2 * S) + 4 * S + 31 * u + 9 * gui + 56; }
     else if (kind === 'crafting') { topH = 3 * S; topW = 3 * S + 22 * u + Math.round(S * 26 / 18) + 15 * gui + 56; }
     else if (kind === 'furnace') { topH = Math.max(Math.round(S * 26 / 18), 2 * S + 18 * u); topW = 0; }
-    else { topH = 3 * S + 2 * gui + 4 + headPx; topW = 0; }
+    else { topH = rows * S + 2 * gui + 4 + headPx; topW = 0; }
     const panelH = topH + 4 * S + 17 * gui;              // + player rows, section margin, hotbar gap, padding, border
     const panelW = Math.max(9 * S, topW) + 10 * gui + 4;
     const bookW = book ? 3 * bookTile(S) + 16 + 10 * gui + 16 : 0;
     return panelH <= vh - MARGIN.top - MARGIN.bottom && panelW + bookW <= vw - 2 * MARGIN.side;
   };
-  let S = Math.max(MIN_SLOT, Math.round(base));
-  while (S > MIN_SLOT && !fits(S)) S--;
+  // a double chest (6 rows) may go a little smaller on a landscape phone so its 10 rows still fit (v1.7)
+  const min = rows > 3 ? MIN_SLOT - 4 : MIN_SLOT;
+  let S = Math.max(min, Math.round(base));
+  while (S > min && !fits(S)) S--;
   return S;
 }
 
@@ -97,7 +99,8 @@ export function buildContainerScreen(ctx) {
   const gui = cssPx('--gui', 3);
   // the chest has no free top-right corner (its grid is 9 wide): a header row keeps the close button off slot k8
   const headPx = kind === 'chest' ? Math.max(0, closePx - CLOSE_OVERHANG - 5 * gui) + 6 : 0;
-  const S = slotSizeFor(kind, Math.round(cssPx('--slot', 54)), gui, window.innerWidth, window.innerHeight, !!(ctx.book && craftKind(kind)), headPx);
+  const chestN = kind === 'chest' && be && Array.isArray(be.items) ? be.items.length : 27;   // 54 for a double chest
+  const S = slotSizeFor(kind, Math.round(cssPx('--slot', 54)), gui, window.innerWidth, window.innerHeight, !!(ctx.book && craftKind(kind)), headPx, Math.ceil(chestN / 9));
   const px = iconPx(S, 0.9);
   const u = Math.max(2, Math.round(S / 18));      // px per GUI unit inside the panel
 
@@ -216,7 +219,7 @@ export function buildContainerScreen(ctx) {
     const hot = P(0, 9), main = P(9, 36);
     if (sid[0] === 'p') {
       const i = Number(sid.slice(1));
-      if (kind === 'chest') { quickMove(s, range(0, 27).map((k) => ctl.slots.get('k' + k).slot)); return; }
+      if (kind === 'chest') { quickMove(s, range(0, chestN).map((k) => ctl.slots.get('k' + k).slot)); return; }
       if (kind === 'furnace') {
         if (smeltingResult(st.item) && quickMove(s, [ctl.slots.get('fi').slot])) return;
         if (fuelTicks(st.item) > 0 && quickMove(s, [ctl.slots.get('ff').slot])) return;
@@ -302,7 +305,7 @@ export function buildContainerScreen(ctx) {
     top = el('div', { class: 'inv-top inv-furnace' }, [el('div', { class: 'inv-spacer' }), col, arrow, bigOut('fo', fieldSlot(be, 'output', { output: true })), el('div', { class: 'inv-spacer' })]);
   } else if (kind === 'chest') {
     const g = el('div', { class: 'inv-grid', style: { gridTemplateColumns: `repeat(9, ${S}px)` } });
-    for (let k = 0; k < 27; k++) g.appendChild(add('k' + k, arraySlot(be.items, k)));
+    for (let k = 0; k < chestN; k++) g.appendChild(add('k' + k, arraySlot(be.items, k)));
     // header: a small chest picture ("this is the chest") in a strip the close button can overhang without
     // covering a slot; below it the wooden frame around the chest's own slots
     const head = el('div', { class: 'inv-chest-head', style: { height: headPx + 'px' } });

@@ -396,3 +396,27 @@ test('building palette (judge FID-7): new blocks, shapes, drops, recipes and pic
   // the block id space still fits a byte
   assert.ok(BLOCKS.length <= 256);
 });
+
+test('double chest (judge FID-7): pairing, partner check and the joined boxes', async () => {
+  const { chestPairFor, chestPartner } = await import('../src/mechanics/rules.js');
+  const { STATE } = await import('../src/data/blocks.js');
+  const m = new Map();
+  const getRaw = (x, y, z) => m.get(`${x},${y},${z}`) || 0;
+  const put = (x, y, z, id, st) => m.set(`${x},${y},${z}`, id | (st << 8));
+  // facing south (2): clockwise side is west (3), counter-clockwise east (1)
+  put(5, 1, 5, ID.chest, 2);
+  const pr = chestPairFor(getRaw, 4, 1, 5, 2);          // new chest just west... its CW side (3) is x=3, CCW (1) is x=5
+  assert.deepEqual(pr, { x: 5, z: 5, self: STATE.CHEST_PAIR_CCW, other: STATE.CHEST_PAIR_CW });
+  assert.equal(chestPairFor(getRaw, 4, 1, 5, 0), null, 'a different facing does not join');
+  put(4, 1, 5, ID.chest, 2 | pr.self); put(5, 1, 5, ID.chest, 2 | pr.other);
+  assert.deepEqual(chestPartner(getRaw, 4, 1, 5), { x: 5, z: 5 });
+  assert.deepEqual(chestPartner(getRaw, 5, 1, 5), { x: 4, z: 5 });
+  assert.equal(chestPairFor(getRaw, 6, 1, 5, 2), null, 'a third chest does not join a double chest');
+  m.delete('5,1,5');
+  assert.equal(chestPartner(getRaw, 4, 1, 5), null, 'the other half is gone');
+  // the two halves meet at their shared edge
+  const a = getSelectionBoxes(ID.chest, 2 | STATE.CHEST_PAIR_CCW)[0], b = getSelectionBoxes(ID.chest, 2 | STATE.CHEST_PAIR_CW)[0];
+  assert.equal(a[3], 1, 'the west half reaches its east edge');
+  assert.equal(b[0], 0, 'the east half reaches its west edge');
+  assert.deepEqual([...getSelectionBoxes(ID.chest, 2)[0]], [1 / 16, 0, 1 / 16, 15 / 16, 14 / 16, 15 / 16], 'a single chest is unchanged');
+});

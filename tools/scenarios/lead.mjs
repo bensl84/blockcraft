@@ -558,6 +558,51 @@ export default [
     },
   },
   {
+    // Judge FID-7 (last item): two chests side by side make one double chest - 54 slots on one screen, each half
+    // keeps its own 27 in the save, and breaking one half leaves a single chest with its items.
+    name: 'lead-double-chest', requires: ['mechanics', 'interaction', 'invui'],
+    async run(t) {
+      await t.call('startWorld', { ...FLAT, rules: { passiveMobs: false } });
+      await t.call('setFlying', false);
+      await t.call('waitTicks', 5);
+      const p = await t.call('pos');
+      const x0 = Math.floor(p.x), y0 = Math.floor(p.y), z0 = Math.floor(p.z) - 3;
+      await t.call('setSlot', 0, 'chest', 8); await t.call('selectSlot', 0);
+      await t.call('setLook', 0, -35);
+      await t.call('waitFrames', 3);
+      await tapWorld(t, x0 + 0.5, y0, z0 + 0.5);
+      await tapWorld(t, x0 + 1.5, y0, z0 + 0.5);
+      const st = [await t.call('getState', x0, y0, z0), await t.call('getState', x0 + 1, y0, z0)];
+      t.assert(await t.call('getBlock', x0, y0, z0) === 'chest' && await t.call('getBlock', x0 + 1, y0, z0) === 'chest', 'two chests placed with taps');
+      t.assert((st[0] & 12) && (st[1] & 12) && (st[0] & 3) === (st[1] & 3), `they joined into a double chest (states ${st})`);
+      await t.call('waitFrames', 5);
+      await t.shot('lead-double-chest-world');
+      // a tap opens one 54-slot screen
+      await t.call('setSlot', 0, null);
+      await tapWorld(t, x0 + 1, y0 + 0.5, z0 + 0.9);
+      t.assert(await t.call('uiOpen') === 'chest', 'the chest screen opened');
+      const ids = await t.eval(() => window.__game.game.invui.screen.slotIds().filter((s) => s[0] === 'k').length);
+      t.assert(ids === 54, `54 chest slots (${ids})`);
+      await t.eval(() => { const g = window.__game.game; g.inventory.cursor = { item: 'diamond', count: 5 }; g.invui.screen.clickSlot('k40'); g.inventory.cursor = { item: 'emerald', count: 2 }; g.invui.screen.clickSlot('k3'); });
+      await t.shot('lead-double-chest-open');
+      await t.call('closeUI');
+      const halves = await t.eval(({ x0, y0, z0 }) => {
+        const w = window.__game.game.world, it = (be) => (be && be.items ? be.items.map((s, i) => (s ? i + ':' + s.item : '')).filter(Boolean) : null);
+        return [it(w.getBlockEntity(x0, y0, z0)), it(w.getBlockEntity(x0 + 1, y0, z0))];
+      }, { x0, y0, z0 });
+      t.note('halves', halves);
+      const flat = halves.flat().filter(Boolean);
+      t.assert(halves.every((h) => Array.isArray(h)) && flat.includes('3:emerald') && flat.includes('13:diamond'), `each half keeps its own 27 slots (${JSON.stringify(halves)})`);
+      // break the half with the diamonds: the other one is a single chest again and keeps the emeralds
+      const dIdx = halves[0] && halves[0].includes('13:diamond') ? 0 : 1;
+      await t.eval(({ x, y, z }) => window.__game.game.interaction.breakBlock(x, y, z, { by: 'player' }), { x: x0 + dIdx, y: y0, z: z0 });
+      await t.call('runTicks', 3);
+      const left = { st: await t.call('getState', x0 + (1 - dIdx), y0, z0) };
+      left.items = await t.eval(({ x, y, z }) => { const be = window.__game.game.world.getBlockEntity(x, y, z); return be ? be.items.filter(Boolean).map((s) => s.item) : null; }, { x: x0 + (1 - dIdx), y: y0, z: z0 });
+      t.assert((left.st & 12) === 0 && left.items && left.items.includes('emerald'), `the other half is a single chest with its items (${JSON.stringify(left)})`);
+    },
+  },
+  {
     // Judge KID-12: an event payload that carries a live mob (player:hurt's source) used to make events() walk the
     // whole game: the Playwright process ran out of memory. Now the copy is bounded and the mob is a small stub.
     name: 'lead-events-live-payload', requires: ['mobs', 'survival'],

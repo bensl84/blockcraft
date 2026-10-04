@@ -13,7 +13,7 @@ import { COLORS, FACE, FACING_DIRS } from '../core/constants.js';
 import { B_LIQUID, B_SHAPE, ID, SHAPE, isReplaceable, itemPlaces } from '../core/registry.js';
 import { yawToFacing } from '../core/math.js';
 import { dropItem } from '../entities/item_entity.js';
-import { AIR, LAVA, hasSolidTop, isSource, B_WASHABLE } from './rules.js';
+import { AIR, LAVA, chestPairFor, hasSolidTop, isSource, B_WASHABLE } from './rules.js';
 import { rayCells } from './raycells.js';
 
 export const HOES = ['wooden_hoe', 'stone_hoe', 'iron_hoe', 'golden_hoe', 'diamond_hoe'];
@@ -95,6 +95,21 @@ export function registerMechHooks(game, mech) {
       return true;
     });
   }
+
+  /* ------------------------------------------------------------------ double chest (v1.7, judge FID-7) */
+  // A chest placed beside a single chest that faces the same way joins it (not while sneaking, like Java).
+  registerPlacer('chest', (ctx) => {
+    const { x, y, z } = ctx;
+    const f = ctx.state & 3;
+    const pair = ctx.sneaking ? null : chestPairFor(getRaw, x, y, z, f);
+    const st = f | (pair ? pair.self : 0);
+    if (!game.interaction.placeBlock(x, y, z, ID.chest, st, { by: 'player', item: ctx.stack ? ctx.stack.item : 'chest', action: ctx.action })) return false;
+    if (pair) {
+      const o = getRaw(pair.x, y, pair.z);
+      w().setBlock(pair.x, y, pair.z, ID.chest, ((o >>> 8) & 3) | pair.other, { cause: 'cascade', action: ctx.action, keepBlockEntity: true });
+    }
+    return true;
+  });
 
   /* ------------------------------------------------------------------ flower pot (v1.7) */
   // A tap with a flower, sapling, fern, dead bush or mushroom plants it (one is used up in survival); a tap on a

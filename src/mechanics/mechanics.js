@@ -28,7 +28,7 @@ import { placeTree } from '../world/worldgen.js';
 import { TICK_KIND, TickScheduler } from './scheduler.js';
 import {
   AIR, B_NEEDS_SUPPORT, CROP_IDS, FLOWER_IDS, GRAVITY_IDS, LAVA, LEAF_IDS, LOG_IDS, SAPLING_KIND, WATER,
-  canFallThrough, effectiveLight, hasSolidTop, supportStatus,
+  canFallThrough, chestPartner, effectiveLight, hasSolidTop, supportStatus,
 } from './rules.js';
 import { FLUID_PARAMS, flowVector, fluidTick, lavaMix } from './fluids.js';
 import { centreInFluid, damageOf, explosionCells, exposure, impactOf } from './explosion.js';
@@ -162,6 +162,11 @@ export function createMechanicsSystem(game) {
     if (shape === SHAPE.FENCE || shape === SHAPE.PANE) {
       const bits = connectionState(getRaw, x, y, z, id);
       if ((st & STATE.CONNECT_MASK) !== bits) setBlock(x, y, z, id, (st & ~STATE.CONNECT_MASK) | bits, 'cascade');
+      return;
+    }
+    // a double chest whose other half went back to a single chest (v1.7)
+    if (id === ID.chest && (st & 12) && !chestPartner(getRaw, x, y, z)) {
+      game.world.setBlock(x, y, z, id, st & 3, { cause: 'cascade', action: curAction, keepBlockEntity: true });   // keep its items
       return;
     }
     if (id === ID.grass_block) {

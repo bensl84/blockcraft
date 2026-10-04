@@ -139,6 +139,32 @@ export function supportStatus(getRaw, x, y, z) {
   return hasSolidTop(below) ? 'ok' : 'support';
 }
 
+/**
+ * Double chests (v1.7, judge FID-7). The half at (x,y,z) is paired when its pair bit points at a chest with the
+ * same facing whose own pair bit points back. Returns the partner's {x, z} or null.
+ */
+export function chestPartner(getRaw, x, y, z) {
+  const raw = getRaw(x, y, z), st = raw >>> 8;
+  if ((raw & 0xff) !== ID.chest || !(st & 12)) return null;
+  const f = st & 3, d = (st & 4) ? (f + 1) & 3 : (f + 3) & 3;
+  const px = x + FACING_DIRS[d][0], pz = z + FACING_DIRS[d][2];
+  const o = getRaw(px, y, pz), os = o >>> 8;
+  if ((o & 0xff) !== ID.chest || (os & 3) !== f) return null;
+  return (os & ((st & 4) ? 8 : 4)) ? { x: px, z: pz } : null;
+}
+/**
+ * Where a chest placed at (x,y,z) facing f pairs up: the first single chest beside it (clockwise side first) that
+ * faces the same way. Returns {x, z, self, other} (the pair bits for the new and the old chest) or null.
+ */
+export function chestPairFor(getRaw, x, y, z, f) {
+  for (const [d, self, other] of [[(f + 1) & 3, 4, 8], [(f + 3) & 3, 8, 4]]) {
+    const px = x + FACING_DIRS[d][0], pz = z + FACING_DIRS[d][2];
+    const o = getRaw(px, y, pz);
+    if ((o & 0xff) === ID.chest && ((o >>> 8) & 3) === f && !((o >>> 8) & 12)) return { x: px, z: pz, self, other };
+  }
+  return null;
+}
+
 /** Effective light 0..15 at a cell: max(sky darkened at night, block). raw = world.getLight value. */
 export function effectiveLight(lightRaw, night) {
   const sky = Math.max(0, (lightRaw >> 4) - (night ? 11 : 0));

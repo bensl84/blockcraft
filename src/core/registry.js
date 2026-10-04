@@ -208,7 +208,13 @@ function computeBoxes(id, state, forSelection) {
     case SHAPE.CARPET: return list(box(0, 0, 0, 1, P, 1));
     case SHAPE.FARMLAND: return list(box(0, 0, 0, 1, 15 * P, 1));
     case SHAPE.CACTUS: return list(box(P, 0, P, 15 * P, forSelection ? 1 : 15 * P, 15 * P));
-    case SHAPE.CHEST: return list(box(P, 0, P, 15 * P, 14 * P, 15 * P));
+    case SHAPE.CHEST: {
+      // a double chest (v1.7): each half reaches the edge it shares with the other, so the two read as one chest
+      let x0 = P, z0 = P, x1 = 15 * P, z1 = 15 * P;
+      const pd = (state & 4) ? ((state & 3) + 1) & 3 : (state & 8) ? ((state & 3) + 3) & 3 : -1;
+      if (pd === 0) z0 = 0; else if (pd === 1) x1 = 1; else if (pd === 2) z1 = 1; else if (pd === 3) x0 = 0;
+      return list(box(x0, 0, z0, x1, 14 * P, z1));
+    }
     case SHAPE.CAKE: { const b = Math.min(6, state & 7); return list(box((1 + 2 * b) * P, 0, P, 15 * P, 0.5, 15 * P)); }
     case SHAPE.FENCE: return connectedBoxes(state, 6 * P, 10 * P, forSelection ? 1 : 1.5);
     case SHAPE.PANE: return connectedBoxes(state, 7 * P, 9 * P, 1);
