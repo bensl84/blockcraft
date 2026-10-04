@@ -258,7 +258,7 @@ export class PlayerAvatar {
 
   update(dt) {
     const g = this.game, p = g.player;
-    const show = !!(g.meta && p && p.view && !p.dead && (g.state === 'playing' || g.state === 'paused'));
+    const show = !!(g.meta && p && p.view && !p.dead && !p.sleeping && (g.state === 'playing' || g.state === 'paused'));
     this.mesh.visible = show;
     if (!show) return;
     const x = p.renderX ?? p.x, y = p.renderY ?? p.y, z = p.renderZ ?? p.z;

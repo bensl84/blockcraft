@@ -245,7 +245,8 @@ export class GhostBlock {
     const geo = this.geometryFor(pl.id, pl.state);
     if (this.mesh.geometry !== geo) this.mesh.geometry = geo;
     this.mesh.position.set(pl.x + 0.5, pl.y + 0.01, pl.z + 0.5);
-    this.material.uniforms.uAlpha.value = (0.35 + Math.sin(this.time * 4) * 0.08) * near;
+    // steady 38-46 % with a slow pulse (the ghost material lifts the texture toward white and skips world light)
+    this.material.uniforms.uAlpha.value = (0.42 + Math.sin(this.time * 2.5) * 0.04) * near;
     this.material.uniforms.uLightSky.value = 15;
     this.material.uniforms.uLightBlock.value = 15;
     this.mesh.visible = true;

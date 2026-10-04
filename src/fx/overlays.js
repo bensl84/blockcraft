@@ -19,10 +19,14 @@ export class Overlays {
     // eye inside an opaque block: that block's texture fills the screen, darkened (LEAD integration, kid lane
     // cross-lane defect 4: the camera used to see through the world with a huge outline)
     this.inBlock = el('div', { class: 'fx-inblock' });
+    // the burning player: animated flames licking up the lower screen (two mirrored sheets of the fire texture)
+    this.fireL = el('div', { class: 'fx-fire-sheet' });
+    this.fireR = el('div', { class: 'fx-fire-sheet r' });
+    this.fire = el('div', { class: 'fx-fire' }, [this.fireL, this.fireR]);
     this.hurt = el('div', { class: 'fx-hurt' });
     this.fadeEl = el('div', { class: 'fx-fade' });
     this.ring = el('div', { class: 'fx-ring' });
-    this.root.append(this.vignette, this.water, this.lava, this.inBlock, this.hurt, this.fadeEl, this.ring);
+    this.root.append(this.vignette, this.water, this.lava, this.inBlock, this.fire, this.hurt, this.fadeEl, this.ring);
     this.limiter = new FlashLimiter(3);
     this.fadeLevel = 0;
     this.fadeTimer = 0;
@@ -30,6 +34,9 @@ export class Overlays {
     this.underwater = false;
     this.inLava = false;
     this.inBlockURL = '';
+    this.burning = false;
+    this.fireStrip = null;   // {url, frames, fps} from burning.js fireStripURL()
+    this.fireFrame = -1;
     this.ringState = null;   // {id, x, y, t0, done}
   }
 
@@ -42,6 +49,30 @@ export class Overlays {
     this.inBlockURL = url;
     if (url) this.inBlock.style.backgroundImage = `url(${url})`;
     this.inBlock.classList.toggle('on', !!url);
+  }
+  /**
+   * First-person fire while the player burns. strip = {url, frames, fps} (a vertical strip of fire frames);
+   * call every frame with the current time so the flames animate at the texture's own frame rate.
+   */
+  setBurning(on, strip, nowMs = performance.now()) {
+    on = !!(on && strip && strip.url);
+    if (on && strip !== this.fireStrip) {
+      this.fireStrip = strip;
+      const size = `100% ${strip.frames * 100}%`;
+      for (const d of [this.fireL, this.fireR]) { d.style.backgroundImage = `url(${strip.url})`; d.style.backgroundSize = size; }
+      this.fireFrame = -1;
+    }
+    if (on !== this.burning) { this.burning = on; this.fire.classList.toggle('on', on); }
+    if (!on) return;
+    const n = Math.max(1, this.fireStrip.frames);
+    const f = Math.floor(nowMs / 1000 * (this.fireStrip.fps || 12)) % n;
+    if (f === this.fireFrame) return;
+    this.fireFrame = f;
+    const pos = n > 1 ? (f / (n - 1)) * 100 : 0;
+    this.fireL.style.backgroundPositionY = pos + '%';
+    // the right sheet runs half a cycle behind so the two sides never flicker in step
+    const f2 = (f + (n >> 1)) % n;
+    this.fireR.style.backgroundPositionY = (n > 1 ? (f2 / (n - 1)) * 100 : 0) + '%';
   }
   setVignette(on) { this.vignette.classList.toggle('on', !!on); }
 
@@ -104,7 +135,7 @@ export class Overlays {
   }
 
   clearAll() {
-    this.setUnderwater(false); this.setInLava(false); this.setInBlock(''); this.ringCancel();
+    this.setUnderwater(false); this.setInLava(false); this.setInBlock(''); this.setBurning(false); this.ringCancel();
     try { if (this.hurtAnim) this.hurtAnim.cancel(); } catch { /* ignore */ }
   }
 }

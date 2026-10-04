@@ -5,6 +5,8 @@
 //   blockfx.js    mining crack overlay and the kid ghost block
 //   overlays.js   underwater / lava tint, red hurt vignette (flash-safe), fades, kid hold ring
 //   weather.js    rain and snow (P2)
+//   burning.js    flames on burning mobs / the third-person player, and the first-person fire overlay strip
+//   sleepview.js  the lying-down camera while sleeping in a bed
 //   ../render/celestial.js  sun, 8 moon phases, stars, drifting blocky clouds
 //
 // FX samples the renderer's array texture (renderer.uniforms.uTex), reads frozen fields (player.*, interaction.mining/target, input.aim*) and listens to SPEC §6 events.
@@ -22,6 +24,8 @@ import { PlayerAvatar, SkinTexture, ViewModel } from './avatar.js';
 import { CrackOverlay, GhostBlock } from './blockfx.js';
 import { Overlays } from './overlays.js';
 import { Weather } from './weather.js';
+import { EntityFire, fireStripURL } from './burning.js';
+import { SleepView } from './sleepview.js';
 import { Celestial } from '../render/celestial.js';
 
 const TORCH_ID = ID.torch, FIRE_ID = ID.fire, LAVA_ID = ID.lava, LIT_FURNACE_ID = ID.furnace_lit;
@@ -31,7 +35,8 @@ const AMBIENT_R = 12;
 /** @returns {object} FX system (game.fx) */
 export function createFxSystem(game) {
   let ready = false;
-  let texRef, shared, hook, sim, pmesh, items, skin, viewModel, avatar, crack, ghost, overlays, weather, celestial;
+  let texRef, shared, hook, sim, pmesh, items, skin, viewModel, avatar, crack, ghost, overlays, weather, celestial, entityFire, sleepView;
+  let fireStrip = null, fireStripFor = null;
   let worldMats, vmMats;
   const ambientRng = mulberry32(0xa3b1e7);
   const tntTracked = new Map();     // entity id -> fuse ticks seen
@@ -39,6 +44,7 @@ export function createFxSystem(game) {
   const deathPos = new Map();
   let lastExternalFade = -1e9;
   let prevInWater = false;
+  let bubbleWait = 4;
   const viewer = { x: 0, y: 0, z: 0 };
   const tmpEye = { x: 0, y: 0, z: 0 }, tmpDir = { x: 0, y: 0, z: 0 };
 
@@ -58,11 +64,15 @@ export function createFxSystem(game) {
       ambientTick(w);
       trackEntities();
       const p = game.player;
-      // breathing bubbles while the eye is under water
-      if (p && p.eyeInWater && game.tickCount % 5 === 0) {
-        p.getEyePos(tmpEye); p.getLookDir(tmpDir);
-        sim.spawn('bubble', tmpEye.x + tmpDir.x * 0.6, tmpEye.y - 0.1, tmpEye.z + tmpDir.z * 0.6, { count: 1, spread: 0.15 }, w);
-      }
+      // breathing bubbles while the eye is under water: a small one every 10-20 ticks, 1.2 blocks ahead and a
+      // little below the eye (closer, they were big grey rings in the middle of the view)
+      if (p && p.eyeInWater) {
+        if (--bubbleWait <= 0) {
+          bubbleWait = 10 + Math.floor(ambientRng() * 11);
+          p.getEyePos(tmpEye); p.getLookDir(tmpDir);
+          sim.spawn('bubble', tmpEye.x + tmpDir.x * 1.2, tmpEye.y + tmpDir.y * 1.2 - 0.3, tmpEye.z + tmpDir.z * 1.2, { count: 1, spread: 0.12 }, w);
+        }
+      } else bubbleWait = 4;
       // dust from the face being mined
       const m = game.interaction && game.interaction.mining;
       const t = game.interaction && game.interaction.target;
@@ -81,6 +91,8 @@ export function createFxSystem(game) {
       crack.update((stage) => (game.textures ? game.textures.layer('crack_' + stage) : 0));
       ghost.update(dt);
       weather.update(dt);
+      entityFire.update(dt, game.state === 'playing' ? alpha : 1);
+      sleepView.apply(dt);
       fx.weather.rain = weather.state.rain; fx.weather.target = weather.state.target; fx.weather.snow = weather.state.snow;
       celestial.update(dt, weather.state.rain);
       updateOverlays();
@@ -139,15 +151,16 @@ export function createFxSystem(game) {
         underwater: overlays.underwater, inBlock: !!overlays.inBlockURL, flashes: overlays.flashes, fade: overlays.fadeLevel,
         sky: { ...celestial.state }, clouds: celestial.clouds.visible, cloudQuads: celestial.flat ? celestial.flatCloudQuads : celestial.cloudQuads, flatClouds: celestial.flat, stars: celestial.starCount,
         weather: { ...weather.state }, ring: !!overlays.ringState,
+        burning: entityFire.count, playerFire: !!overlays.burning, sleepView: sleepView.active,
       };
     },
 
     /** Internals for tests/debugging (not a stable API). */
-    get debug() { return { sim, pmesh, items, viewModel, avatar, crack, ghost, overlays, weather, celestial, texRef }; },
+    get debug() { return { sim, pmesh, items, viewModel, avatar, crack, ghost, overlays, weather, celestial, texRef, entityFire, sleepView }; },
 
     dispose() {
       if (!ready) return;
-      pmesh.dispose(); viewModel.dispose(); avatar.dispose(); crack.dispose(); ghost.dispose(); weather.dispose(); celestial.dispose();
+      pmesh.dispose(); viewModel.dispose(); avatar.dispose(); crack.dispose(); ghost.dispose(); weather.dispose(); celestial.dispose(); entityFire.dispose();
       items.disposeAll(); skin.dispose(); texRef.dispose();
       for (const m of [worldMats.atlas, worldMats.color, vmMats.atlas, vmMats.color, crack.material, ghost.material]) m.dispose();
       ready = false;
@@ -172,9 +185,11 @@ export function createFxSystem(game) {
     viewModel = new ViewModel(game, shared, items, vmMats, skin);
     avatar = new PlayerAvatar(game, shared, items, skin);
     crack = new CrackOverlay(game, createAtlasMaterial(shared, texRef, 'crack'));
-    ghost = new GhostBlock(game, createAtlasMaterial(shared, texRef, 'lit', { transparent: true, alpha: 0.35 }));
+    ghost = new GhostBlock(game, createAtlasMaterial(shared, texRef, 'ghost', { transparent: true, alpha: 0.42 }));
     weather = new Weather(game, shared);
     celestial = new Celestial(game);
+    entityFire = new EntityFire(game, shared, texRef);
+    sleepView = new SleepView(game);
     fx.weather = { rain: 0, target: 0, snow: false };
     overlays = typeof document !== 'undefined' && game.uiRoot ? new Overlays(game) : nullOverlays();
     subscribe();
@@ -190,6 +205,7 @@ export function createFxSystem(game) {
     r.addObject(pmesh.mesh);
     r.addObject(crack.mesh);
     r.addObject(ghost.mesh);
+    r.addObject(entityFire.mesh);
     avatar.attach(r);
     weather.attach(r);
     celestial.attach(r);
@@ -267,15 +283,22 @@ export function createFxSystem(game) {
     ev.on('item:broken', (e) => crumbs(e.item, 12));
     ev.on('kid:home', () => { if (performance.now() - lastExternalFade > 1000) overlays.pulse(160, 80, 320); });
     ev.on('player:respawn', () => { if (performance.now() - lastExternalFade > 1000) overlays.pulse(0, 120, 600); });
+    // sleeping: lie down on the pillow (sleepview.js) while the screen darkens slowly - to black for a real
+    // night's sleep, only half way for the kid nap so the starry sky shows; waking dips to black, stands up
+    // under the black and fades back in
     ev.on('sleep:start', (e) => {
-      overlays.fade(0.95, 600).then(() => { if (e && e.nap) overlays.fade(0.4, 700); });
+      sleepView.start();
+      if (e && e.nap) overlays.fade(0.45, 1500); else overlays.fade(1, 2000);
     });
-    ev.on('sleep:end', () => { overlays.fade(1, 250).then(() => overlays.fade(0, 700)); });
+    ev.on('sleep:end', () => {
+      sleepView.wake();
+      overlays.fade(1, 250).then(() => { sleepView.stop(); return overlays.fade(0, 700); });
+    });
     ev.on('settings:changed', (e) => { if (e.key === 'skin') skin.refresh(); });
     ev.on('world:ready', (e) => { weather.reset(e.meta); prevInWater = false; });
     ev.on('world:exit', () => {
       sim.clear(); tntTracked.clear(); mobPos.clear(); deathPos.clear(); crack.evt = null;
-      overlays.clearAll(); overlays.fade(0, 0); weather.reset(null);
+      overlays.clearAll(); overlays.fade(0, 0); weather.reset(null); sleepView.stop();
     });
     ev.on('game:state', (e) => { if (e.to !== 'playing') overlays.ringCancel(); });
   }
@@ -368,6 +391,18 @@ export function createFxSystem(game) {
         }
       });
     }
+    // smoke rising off anything that burns (the flames themselves are EntityFire quads)
+    if (game.tickCount % 3 === 0) {
+      ents.forEach((e) => {
+        if (!(e.fireTicks > 0) || e.removed) return;
+        const wd = e.width || 0.6, h = e.height || 1.8;
+        sim.spawn('smoke', e.x + (ambientRng() - 0.5) * wd, e.y + h * (0.5 + ambientRng() * 0.6), e.z + (ambientRng() - 0.5) * wd, { count: 1, spread: 0.05, size: 0.16 }, game.world);
+      });
+      const p = game.player;
+      if (p && p.view && p.fireTicks > 0 && !p.dead && !(game.isCreative && game.isCreative())) {
+        sim.spawn('smoke', p.x + (ambientRng() - 0.5) * 0.6, p.y + 1 + ambientRng() * 0.9, p.z + (ambientRng() - 0.5) * 0.6, { count: 1, spread: 0.05, size: 0.16 }, game.world);
+      }
+    }
     for (const [id, n] of tntTracked) {
       const e = ents.get(id);
       if (!e) { tntTracked.delete(id); continue; }
@@ -399,6 +434,10 @@ export function createFxSystem(game) {
     overlays.setInBlock(inWorld ? inBlockURL() : '');
     overlays.setInLava(inWorld && eyeLava);
     overlays.setVignette(inWorld);
+    // the burning player in first person: flames up the lower screen (not in creative, not while dead)
+    const burning = inWorld && p.fireTicks > 0 && !p.view && !p.dead && !(game.isCreative && game.isCreative());
+    if (burning && fireStripFor !== game.textures) { fireStrip = fireStripURL(game.textures); fireStripFor = game.textures; }
+    overlays.setBurning(burning, fireStrip);
     overlays.updateRing();
   }
 
@@ -454,6 +493,7 @@ function nullOverlays() {
   return {
     underwater: false, inLava: false, inBlockURL: '', flashes: 0, fadeLevel: 0, ringState: null,
     setUnderwater(v) { this.underwater = v; }, setInLava(v) { this.inLava = v; }, setInBlock(u) { this.inBlockURL = u || ''; }, setVignette() {},
+    burning: false, setBurning(v, strip) { this.burning = !!(v && strip && strip.url); },
     hurtFlash() { this.flashes++; return true; }, fade(to) { this.fadeLevel = to; return Promise.resolve(); }, pulse() { return Promise.resolve(); },
     ringDown() {}, ringMove() {}, ringUp() {}, ringCancel() {}, updateRing() {}, clearAll() {},
   };

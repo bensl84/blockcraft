@@ -4,6 +4,28 @@ Branch `lane/fx` · worktree `C:\Users\BSLeo\AppData\Roaming\Claude\scratch-work
 
 <!-- newest first: date · what changed · commands run + results (copy the PASS/FAIL lines) · remaining · blockers · spec conflicts -->
 
+## 2026-10-04 · Fixer round 1: judge findings FID-2, FID-13, POL-4, POL-9, POL-15
+
+`git merge main` fast-forwarded. All changes are inside FX files (src/fx/*, test/fx.test.mjs, tools/scenarios/fx.mjs);
+nothing outside the lane was touched. Before/after shots in `.tmp/fix/` (scripts `.tmp/fxv/fire.mjs`, `misc.mjs`;
+"before" = a build of the merged main in `.tmp/build-before`).
+
+| Finding | Fix | Verified |
+|---|---|---|
+| FID-2 / POL-9 burning shows no flames | new `src/fx/burning.js`: `EntityFire` draws two camera-facing animated fire quads (the block texture's own 8 fire frames, full bright, one instanced draw) over every entity with `fireTicks > 0` and over the third-person player model; smoke puffs rise off burning things every 3 ticks; `overlays.js` + `fx.css`: first-person fire (two mirrored sheets of the fire strip rising from the bottom corners, 12 fps) while `player.fireTicks > 0`, not in creative, not dead | real lava under the feet then out: overlay on (`after-01-player-burning.png`), V key third person (`after-02-...-3p.png`), zombie + skeleton in the 06:00 sun burn with flames (`after-03-monsters-burning.png`, `smoke-fx-fx-burning-mobs.png`); new scenario `fx-burning` PASS; unit test `burning entities` |
+| FID-13 sleeping cuts to black | new `src/fx/sleepview.js`: on `sleep:start` the camera glides (0.7 s) to the pillow (bed top + 0.22, on the head half) looking along the bed toward the foot, 14 degrees up; screen fades to black over 2 s (kid nap: to 0.45 over 1.5 s so the stars show); on `sleep:end` it dips to black, stands back up under the black, fades in over 0.7 s. FX frame runs after the player lane's and before the renderer, so only `renderer.camera` is overridden while asleep (player yaw/pitch/position untouched). Hand and third-person body hidden while asleep | tap on a bed at night (kid tap): `after-31-sleep-0.5s.png` shows the blanket and the night sky from the pillow, then darkening, black, morning; scenario `fx-sleep-view` PASS (camera at the pillow, fade > 0.9, then standing + fade 0); unit test `sleeping camera` |
+| POL-4 big grey bubble squares | bubbles every 10-20 ticks, 1.2 blocks ahead along the full look ray and 0.3 below the eye; size 0.05; new particle flag `F_NOFOG` + `F_FULLBRIGHT` (shader skips light and fog); bubble sprite rim light blue | ocean at y 39: `before-20-underwater.png` (dark 40-70 px rings) vs `after-20-underwater.png` (small pale ring); unit test `breathing bubbles` |
+| POL-15 murky ghost | `fxmat.js` new atlas mode `'ghost'`: texture lifted 40 % toward white, no world light, "lighten" blend (src ONE, dst 1-a), alpha 0.42 +- 0.04 slow pulse | seed 12345, setTime(12000), setLook(90,5), kid cursor on the spruce: `z-ghost-cmp.png` (left before: dark brown glass, right after: pale block) |
+
+Commands: `node build.mjs --dev --out .tmp/build-fx` ok; `npm run test:unit` 234/234 pass; `node tools/smoke.mjs --tag fx`:
+159 PASS, 5 SKIP, 3 FAIL (audio-catalog, audio-music, mobs-gallery: all `ENOSPC: no space left on device` writing
+screenshots - drive C: was at 0 bytes free, filled by something outside this worktree). Re-run once space came back:
+`--scenario audio-catalog,audio-music,mobs-gallery,fx-burning,fx-sleep-view,fx-overlays,fx-crack-ghost,fx-inworld-break,fx-particles-kinds`
+-> `{"PASS":10}`, page-errors PASS.
+
+Remaining: no touchscreen-hardware check; nap (kid default) path fades to 0.45 instead of black - covered by code
+reading and the mech-sleep scenario, not separately screenshotted.
+
 ## 2026-10-03 · Phase 2: merged the real core, verified in-world, fixed what looked wrong
 
 `git merge main` into `lane/fx` (merge commits `ea295cf` and `2f79d28` for main's later "classic brightness curve"

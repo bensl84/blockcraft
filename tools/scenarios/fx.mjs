@@ -391,4 +391,77 @@ export default [
       await t.shot('fx-inworld-drop');
     },
   },
+  {
+    // FID-2 / POL-9: anything burning shows flames - the player's screen (first person), the player model (third
+    // person) and burning monsters in daylight; smoke rises off them. Real lava sets the player alight.
+    name: 'fx-burning',
+    requires: [],
+    async run(t) {
+      await t.call('startWorld', { ...FLAT, mode: 'survival', difficulty: 'normal' });
+      await t.call('setTime', 6000);
+      const p = await t.call('pos');
+      const px = Math.floor(p.x), py = Math.floor(p.y), pz = Math.floor(p.z);
+      await t.call('setBlock', px, py, pz, 'lava');
+      await t.call('waitTicks', 12);
+      await t.call('setBlock', px, py, pz, 'air');
+      await t.call('waitTicks', 3);
+      const fire = await t.eval(() => window.__game.game.player.fireTicks);
+      t.assert(fire > 0, `standing in lava sets the player on fire (fireTicks ${fire})`);
+      await t.call('waitFrames', 3);
+      let s = await fxStats(t);
+      t.assert(s.playerFire, 'first-person flames over the lower screen while burning');
+      t.assert(await t.eval(() => document.querySelector('#fx-layer .fx-fire').classList.contains('on')), 'fire overlay element shown');
+      await t.shot('fx-burning-1p');
+      await t.page.keyboard.press('KeyV');
+      await t.call('waitFrames', 5);
+      s = await fxStats(t);
+      t.assert(!s.playerFire && s.burning >= 1, `third person: flames on the player model, not the screen (${s.burning})`);
+      await t.shot('fx-burning-3p');
+      await t.page.keyboard.press('KeyV'); await t.page.keyboard.press('KeyV');
+      await t.eval(() => { window.__game.game.player.fireTicks = 0; });
+      await t.call('waitFrames', 3);
+      t.assert(!(await fxStats(t)).playerFire, 'flames go out with the fire');
+      // monsters burning in the morning sun
+      await t.call('setRandomSeed', 7);
+      await t.call('spawn', 'zombie', px + 0.5, py, pz - 6.5);
+      await t.call('spawn', 'skeleton', px + 2.5, py, pz - 6.5);
+      await t.call('lookAt', px + 1.5, py + 1, pz - 6.5);
+      await t.call('waitFor', '(() => { let n = 0; window.__game.game.entities.forEach((e) => { if (e.fireTicks > 0) n++; }); return n >= 2; })()', 4000);
+      await t.call('waitFrames', 3);
+      s = await fxStats(t);
+      t.note('burning', s.burning);
+      t.assert(s.burning >= 2, `burning monsters get flames (${s.burning})`);
+      await t.shot('fx-burning-mobs');
+      await t.call('setMode', 'creative');
+      await t.call('setTime', 18000);
+    },
+  },
+  {
+    // FID-13: sleeping lies down on the pillow (camera low, along the bed) while the screen darkens, then stands
+    // back up under the wake-up fade.
+    name: 'fx-sleep-view',
+    requires: [],
+    async run(t) {
+      await t.call('startWorld', { ...FLAT, mode: 'survival' });
+      await t.call('setRule', 'daylightCycle', true);
+      await t.call('setTime', 14000);
+      const p = await t.call('pos');
+      const bx = Math.floor(p.x), by = Math.floor(p.y), bz = Math.floor(p.z) - 3;
+      await t.call('setBlock', bx, by, bz, 'bed', 0);
+      await t.call('setBlock', bx, by, bz - 1, 'bed', 4);
+      const r = await t.eval(([x, y, z]) => window.__game.game.mechanics.trySleep(x, y, z), [bx, by, bz]);
+      t.assert(r && r.ok, `sleep starts (${JSON.stringify(r)})`);
+      await t.call('sleep', 900);
+      const cam = await t.eval(() => { const c = window.__game.game.renderer.camera; return { y: c.position.y, z: c.position.z, s: window.__game.game.fx.stats() }; });
+      t.note('camera', { y: cam.y, z: cam.z });
+      t.assert(cam.s.sleepView, 'lying-down view active');
+      t.assert(Math.abs(cam.y - (by + 0.78)) < 0.1 && cam.z < bz && cam.z > bz - 1, `camera on the pillow (${cam.y.toFixed(2)}, z ${cam.z.toFixed(2)})`);
+      t.assert(cam.s.fade > 0.9, 'screen darkening toward black');
+      await t.shot('fx-sleep-view');
+      t.assert(await t.call('waitFor', '!window.__game.game.player.sleeping', 8000), 'wakes up');
+      await t.call('sleep', 1300);
+      const s = await fxStats(t);
+      t.assert(!s.sleepView && s.fade === 0, `standing again, fade gone (${s.fade})`);
+    },
+  },
 ];

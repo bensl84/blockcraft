@@ -6,7 +6,9 @@ import assert from 'node:assert/strict';
 
 import { buildTextures } from '../src/textures/textures.js';
 import { ID, bindTextures, faceLayer } from '../src/core/registry.js';
-import { ParticleSim, MAX_PARTICLES, PARTICLE_KINDS, lightAround } from '../src/fx/particles.js';
+import { ParticleSim, MAX_PARTICLES, PARTICLE_KINDS, PARTICLE_FLAGS, lightAround } from '../src/fx/particles.js';
+import { burningEntities, fireFrames, MAX_BURNING } from '../src/fx/burning.js';
+import { bedCameraPose } from '../src/fx/sleepview.js';
 import {
   SPRITE, SPRITE_ATLAS_SIZE, SPRITE_CELL, SPRITE_COLS, buildCloudGeometry, buildCloudMap, buildMoonTexture, buildSpriteAtlas,
   buildSunTexture, buildWeatherTexture, buildFlatCloudGeometry, CLOUD_MAP_SIZE,
@@ -311,4 +313,64 @@ test('flash limiter: at most 3 flashes in any second', () => {
   assert.equal(n, 3);
   assert.equal(f.allow(1500), false);
   assert.equal(f.allow(2001), true, 'allowed again a second later');
+});
+
+test('breathing bubbles are small, full bright and unfogged (POL-4)', () => {
+  const sim = new ParticleSim();
+  const water = { getRaw: () => ID.water, getBlock: () => ID.water, getLight: () => 0x70 };
+  sim.spawn('bubble', 0.5, 40.5, 0.5, { count: 20, spread: 0 }, water);
+  assert.equal(sim.count, 20);
+  for (let i = 0; i < sim.count; i++) {
+    assert.ok(sim.size[i] <= 0.05 * 1.3 + 1e-6, `bubble size ${sim.size[i]}`);
+    assert.ok(sim.flags[i] & PARTICLE_FLAGS.F_FULLBRIGHT, 'full bright');
+    assert.ok(sim.flags[i] & PARTICLE_FLAGS.F_NOFOG, 'not fogged');
+  }
+});
+
+test('burning entities: mobs with fireTicks, the third-person player outside creative (FID-2 / POL-9)', () => {
+  const mobs = [
+    { id: 1, type: 'zombie', x: 10, y: 64, z: 5, prevX: 9, prevY: 64, prevZ: 5, width: 0.6, height: 1.95, fireTicks: 120 },
+    { id: 2, type: 'pig', x: 0, y: 64, z: 0, width: 0.9, height: 0.9, fireTicks: 0 },
+  ];
+  const player = { x: 1, y: 64, z: 1, renderX: 1, renderY: 64, renderZ: 1, width: 0.6, height: 1.8, fireTicks: 0, view: 0, dead: false };
+  let creative = false;
+  const game = { entities: { forEach: (fn) => mobs.forEach(fn) }, player, isCreative: () => creative };
+  let list = burningEntities(game, 0.5);
+  assert.equal(list.length, 1);
+  assert.equal(list[0].x, 9.5, 'interpolated position');
+  assert.equal(list[0].h, 1.95, 'hitbox height');
+  player.fireTicks = 50;
+  assert.equal(burningEntities(game, 1).length, 1, 'first person: the screen overlay shows the flames, not a quad');
+  player.view = 1;
+  list = burningEntities(game, 1);
+  assert.equal(list.length, 2);
+  assert.equal(list[1].id, -1, 'third person: the player model burns');
+  creative = true;
+  assert.equal(burningEntities(game, 1).length, 1, 'creative never burns');
+  const many = { entities: { forEach: (fn) => { for (let i = 0; i < 200; i++) fn({ id: i, x: 0, y: 0, z: 0, fireTicks: 5 }); } } };
+  assert.equal(burningEntities(many, 1).length, MAX_BURNING, 'bounded');
+  const f = fireFrames(textures);
+  assert.equal(f.layer, textures.layer('fire'));
+  assert.ok(f.frames >= 2 && f.fps > 0, 'animated fire frames');
+});
+
+test('sleeping camera lies on the pillow, looking along the bed toward its foot (FID-13)', () => {
+  // foot at (0, 4, 0) facing north (head at z = -1)
+  const cells = new Map([['0,4,0', ID.bed | (0 << 8)], ['0,4,-1', ID.bed | (4 << 8)]]);
+  const getRaw = (x, y, z) => cells.get(`${x},${y},${z}`) || 0;
+  for (const [x, z] of [[0, 0], [0, -1]]) {
+    const q = bedCameraPose(getRaw, x, 4, z);
+    assert.ok(q, 'pose from either half');
+    assert.equal(q.x, 0.5);
+    assert.ok(q.z < -0.5 && q.z > -1, `on the head part, toward its end (${q.z})`);
+    assert.ok(q.y > 4.6 && q.y < 5, `lying height (${q.y})`);
+    // look direction (-sin yaw, -cos yaw) points to the foot (+z)
+    assert.ok(Math.abs(-Math.sin(q.yaw)) < 1e-9 && -Math.cos(q.yaw) > 0.99, 'facing the foot');
+    assert.ok(q.pitch > 0, 'looking up a little');
+  }
+  // east-facing bed: head at x+1, look west
+  const east = new Map([['5,4,5', ID.bed | (1 << 8)], ['6,4,5', ID.bed | (5 << 8)]]);
+  const q = bedCameraPose((x, y, z) => east.get(`${x},${y},${z}`) || 0, 5, 4, 5);
+  assert.ok(q.x > 6.5 && -Math.sin(q.yaw) < -0.99, 'east bed: on the east cell, looking west');
+  assert.equal(bedCameraPose(() => 0, 0, 4, 0), null, 'no bed, no pose');
 });
