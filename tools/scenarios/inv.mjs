@@ -96,9 +96,16 @@ export default [
       });
       t.assert(marks.count === '37', 'stack count drawn');
       t.assert(marks.dura && marks.w === '20%', `durability bar 20% (${marks.w})`);
+      // creative: a full stack shows no number (counts never drop there; "64" means nothing to a non-reader)
+      await t.eval(() => window.__game.game.inventory.set(5, { item: 'stone', count: 64 }));
+      await t.call('waitFrames', 2);
+      const fullCount = () => t.eval(() => { const c = document.querySelectorAll('#hud .inv-hb-slot')[5].querySelector('.bc-count'); return c ? c.textContent : ''; });
+      t.assert(await fullCount() === '', 'creative full stack shows no count');
       await t.shot('inv-hud-creative');
       // survival rows
       await t.call('setMode', 'survival');
+      await t.call('waitFrames', 2);
+      t.assert(await fullCount() === '64', 'survival shows the full stack count');
       // freeze game ticks (frames still paint the HUD) so the real survival/physics do not regenerate health
       // and air or clear eyeInWater between setting the values and reading the rows (LEAD integration)
       await t.eval(() => window.__game.game.setState('paused'));
@@ -117,6 +124,19 @@ export default [
       await t.eval(() => { window.__game.game.player.eyeInWater = false; });
       await t.call('waitFrames', 3);
       t.assert(await t.eval(() => [...document.querySelectorAll('#hud [data-hud="air"] .inv-sprite')].every((e) => !e.checkVisibility({ visibilityProperty: true }))), 'air bubbles hidden once the eye leaves the water');
+      // damage flash: white outlines only; a full heart never turns into a dark empty one (sampled every frame)
+      const seen = await t.eval(async () => {
+        const g = window.__game.game; g.player.health = 13; g.events.emit('player:hurt', { amount: 2, cause: 'test', health: 13 });
+        const out = new Set();
+        const t0 = performance.now();
+        while (performance.now() - t0 < 500) {
+          await new Promise((r) => requestAnimationFrame(r));
+          out.add(document.querySelector('#hud [data-hud="hearts"] .inv-sprite').dataset.sprite);
+        }
+        return [...out];
+      });
+      t.note('flash', seen.join(','));
+      t.assert(!seen.includes('heart_flash') && !seen.includes('heart_empty'), `full heart stays red while flashing (${seen})`);
       await t.eval(() => { const g = window.__game.game; g.player.health = 3; g.events.emit('player:hurt', { amount: 4, cause: 'test', health: 3 }); });
       await t.call('waitFrames', 3);
       t.assert(await t.eval(() => document.querySelector('#hud [data-hud="hearts"]').classList.contains('inv-low')), 'hearts shake at <= 4 HP');
@@ -403,6 +423,12 @@ export default [
       await t.call('openScreen', 'chest', c);
       await clickSid(t, 'p' + await indexOf(t, 'diamond'), 'left', { shift: true });
       t.assert((await getSlot(t, 'k0')).count === 5, 'shift-click into the chest');
+      // every chest / player slot is tappable at its centre (the close button sits over the header strip)
+      const covered = await t.eval(() => [...document.querySelectorAll('.inv-screen [data-sid]')].filter((s) => {
+        const r = s.getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return !(e && (e === s || s.contains(e)));
+      }).map((s) => s.dataset.sid));
+      t.assert(covered.length === 0, `no chest slot under the close button (${covered})`);
       await t.shot('inv-chest');
       await t.call('closeUI');
       // unload the column (20 columns away) and come back: the chest contents come back with it

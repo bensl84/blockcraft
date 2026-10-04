@@ -47,7 +47,7 @@ export function createHudSystem(game) {
       game.events.on('toast', (e) => hud.toast(e && e.text, e && (e.icon || e.iconItem)));
       game.events.on('player:hurt', () => { hurtAt = performance.now(); });
       game.events.on('settings:changed', (e) => { if (['controls', 'guiScale', 'buttonSize'].includes(e.key)) last.layoutDirty = true; });
-      game.events.on('mode:changed', () => { ps.survival = null; });
+      game.events.on('mode:changed', () => { ps.survival = null; last.version = -1; }); // counts show or hide with the mode
       game.events.on('world:ready', () => { last.layoutDirty = true; last.item = undefined; });
       game.events.on('world:exit', () => { clearTimeout(toastTimer); if (toastEl) toastEl.classList.remove('inv-show'); });
       // a screen toast ("Needs a crafting table") belongs to that screen: it goes when the screen closes
@@ -223,7 +223,8 @@ export function createHudSystem(game) {
     const hp = Math.max(0, Math.round(p.health ?? SURVIVAL.MAX_HEALTH));
     const maxHp = Math.max(2, p.maxHealth || SURVIVAL.MAX_HEALTH);
     const flash = flashPhase === 0;
-    fill(rows.hearts, hp, maxHp, flash ? 'heart_flash' : 'heart_full', 'heart_half', flash ? 'heart_flash' : 'heart_empty');
+    // flash: white outlines only; full and half hearts stay red (Java), empty containers get the white outline
+    fill(rows.hearts, hp, maxHp, flash ? 'heart_full_flash' : 'heart_full', flash ? 'heart_half_flash' : 'heart_half', flash ? 'heart_flash' : 'heart_empty');
     rows.hearts.wrap.classList.toggle('inv-low', hp <= 4 && hp > 0);
     const food = Math.max(0, Math.round(p.food ?? SURVIVAL.MAX_FOOD));
     fill(rows.food, food, 20, 'food_full', 'food_half', 'food_empty');

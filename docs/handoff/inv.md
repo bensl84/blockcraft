@@ -4,6 +4,21 @@ Branch `lane/inv` · worktree `C:\Users\BSLeo\AppData\Roaming\Claude\scratch-wor
 
 <!-- newest first: date · what changed · commands run + results (copy the PASS/FAIL lines) · remaining · blockers · spec conflicts -->
 
+## 2026-10-04 · Judge round 1 fixes (KID-10, ROB-6, ROB-7, POL-2, POL-13)
+
+`git merge main` fast-forwarded to `7f105b0`. All changes in INV files.
+
+| Finding | Fix | Verified |
+|---|---|---|
+| KID-10 "64" on every creative slot | `showsCount` in `inv_slotview.js`: in creative a full stack shows no number (partial stacks and survival still do); HUD repaints the hotbar on `mode:changed` | creative hotbar `["","","","12","",...]`, survival `["64","64","64","12","16",...]`; smoke `inv-hud` asserts both |
+| ROB-6 / POL-13 chest close X over slot k8 | Chest panel gets a header strip (small chest picture) the X overhangs; `.inv-screen` padding keeps the X's 18 px overhang on screen | judge `covered.mjs` at 1280x720, 1366x657, 1024x500, 1920x969, 1366x768, 667x375, 900x600: no covered slot; smoke `inv-chest-unload` asserts it |
+| ROB-7 landscape phone 667x375 | `slotSizeFor()` picks the largest slot size (>= 30 px, never above the GUI size) for which panel + recipe book + close fit; picker hotbar and tabs shrink to the panel width and keep clear of the X | judge `inv-sizes.mjs` (9 sizes incl. 667x375): nothing off-screen; picker hit-test at 667x375 .. 1920x969: nothing covered. Side-by-side stacking was not needed: at 667x375 stacked gives 35-44 px slots vs 32 px side by side |
+| POL-2 damage flash empties the heart bar | New sprites `heart_full_flash` / `heart_half_flash` (red heart, white outline); `heart_flash` only for empty containers | per-frame sample during the flash: `heart_full_flash,heart_full`, never `heart_flash`/`heart_empty` for a full heart; smoke `inv-hud` asserts it |
+
+Commands: `node build.mjs --dev --out .tmp/build-inv` ok; `npm run test:unit` 233/233 (2 new: slot sizing, counts);
+`node tools/smoke.mjs --tag inv`: all `inv-*` PASS (first full run `{"PASS":160,"SKIP":5}`; a rerun hit `ENOSPC` in
+`cored-render` because drive C: was full, not a game failure).
+
 ## 2026-10-03 · Phase 2: merged the real core, verified in real gameplay
 
 `git merge main` (no conflicts; LEAD files untouched) -> merge commit `c26971e`. INV had no stub fallbacks to remove

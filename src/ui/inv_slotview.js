@@ -7,7 +7,7 @@
 //                                 click gather, keys 1-9 swap with the hotbar while hovering a slot.
 
 import { el } from '../core/dom.js';
-import { getItem } from '../data/items.js';
+import { getItem, maxStack } from '../data/items.js';
 import { clickSlot, dragDistribute, gatherToCursor } from '../inventory/slots.js';
 
 /**
@@ -31,9 +31,20 @@ export function durabilityLeft(stack) {
   return Math.max(0, Math.min(1, 1 - stack.damage / max));
 }
 
+/**
+ * Whether a stack shows its count number. Creative stacks never run out, so a full stack there shows no number
+ * ("64" on every slot means nothing to a child who cannot read yet); survival, and any partial stack, still do.
+ */
+export function showsCount(game, stack) {
+  if (!stack || stack.count <= 1) return false;
+  const creative = !!(game && typeof game.isCreative === 'function' && game.isCreative());
+  return !creative || stack.count < maxStack(stack.item);
+}
+
 /** Paint a stack into a slot element (icon + count + durability). Cheap when nothing changed. */
 export function paintSlot(game, slotEl, stack, px) {
-  const key = stack ? `${stack.item}|${stack.count}|${stack.damage || 0}|${px}` : `|${px}`;
+  const counted = showsCount(game, stack);
+  const key = stack ? `${stack.item}|${stack.count}|${stack.damage || 0}|${px}|${counted}` : `|${px}`;
   if (slotEl._invKey === key) return;
   slotEl._invKey = key;
   let holder = slotEl._invHolder;
@@ -48,7 +59,7 @@ export function paintSlot(game, slotEl, stack, px) {
   const def = getItem(stack.item);
   if (def) slotEl.title = def.name; // parent-facing tooltip only; never needed by the child
   if (game.icons && game.icons.element) holder.appendChild(game.icons.element(stack.item, px));
-  if (stack.count > 1) holder.appendChild(el('span', { class: 'bc-count', text: String(stack.count) }));
+  if (counted) holder.appendChild(el('span', { class: 'bc-count', text: String(stack.count) }));
   const f = durabilityLeft(stack);
   if (f >= 0) {
     const bar = el('span', { class: 'bc-durability' }, [el('i')]);

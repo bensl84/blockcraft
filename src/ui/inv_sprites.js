@@ -20,9 +20,18 @@ const DEFS = {
     rows: ['.KKK.KKK.', 'KEEEKEEEK', 'KEEEEEEEK', 'KEEEEEEEK', 'KEEEEEEEK', '.KEEEEEK.', '..KEEEK..', '...KEK...', '....K....'],
     pal: { K: '#2b0a0a', E: '#4a1c1c' },
   },
+  // damage flash: only the outline turns white; full / half hearts keep their red (the bar never looks emptied)
   heart_flash: {
     rows: ['.WWW.WWW.', 'WEEEWEEEW', 'WEEEEEEEW', 'WEEEEEEEW', 'WEEEEEEEW', '.WEEEEEW.', '..WEEEW..', '...WEW...', '....W....'],
     pal: { W: '#ffffff', E: '#4a1c1c' },
+  },
+  heart_full_flash: {
+    rows: ['.WWW.WWW.', 'WRRRWRRRW', 'WRHRRRRRW', 'WRRRRRRRW', 'WDRRRRRDW', '.WDRRRDW.', '..WDRDW..', '...WDW...', '....W....'],
+    pal: { W: '#ffffff', R: '#e8312c', H: '#ffb4a8', D: '#a81c1c' },
+  },
+  heart_half_flash: {
+    rows: ['.WWW.WWW.', 'WRRRWEEEW', 'WRHREEEEW', 'WRRREEEEW', 'WDRREEEEW', '.WDREEEW.', '..WDEEW..', '...WEW...', '....W....'],
+    pal: { W: '#ffffff', R: '#e8312c', H: '#ffb4a8', D: '#a81c1c', E: '#4a1c1c' },
   },
   food_full: {
     rows: ['.....KKK.', '....KMMMK', '...KMMHMK', '...KMMMMK', '..KMMMMK.', '.KBKKKK..', 'KBBK.....', 'KWBK.....', '.KK......'],

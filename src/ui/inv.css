@@ -1,9 +1,10 @@
 /* OWNER LANE: FEATURE-INV. Container screens (inventory, crafting, furnace, chest), recipe book, kid creative
    picker. Uses the shared kit from styles.css (.bc-panel, .bc-slot, .bc-count, .bc-durability). SPEC §8.2.4, §9. */
 
-.inv-screen { position: absolute; inset: 0; touch-action: none; display: flex; align-items: center; justify-content: center; }
+/* padding = inv_screens.js MARGIN: the top and sides leave room for the close button's overhang */
+.inv-screen { position: absolute; inset: 0; touch-action: none; display: flex; align-items: center; justify-content: center; padding: 24px 22px 16px; box-sizing: border-box; }
 .inv-screen * { box-sizing: border-box; }
-.inv-layout { display: flex; align-items: stretch; gap: 16px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); }
+.inv-layout { display: flex; align-items: stretch; gap: 16px; max-width: 100%; max-height: 100%; }
 .inv-panel { position: relative; display: flex; flex-direction: column; align-items: flex-start; }
 
 .inv-slot { cursor: pointer; touch-action: none; }
@@ -25,7 +26,7 @@
 .inv-spacer { flex: 1; }
 
 .inv-close {
-  position: absolute; top: -18px; right: -18px; z-index: 3; padding: 0;
+  position: absolute; top: -18px; right: -18px; /* = CLOSE_OVERHANG in inv_screens.js */ z-index: 3; padding: 0;
   display: flex; align-items: center; justify-content: center;
   background: #b03a2e; border: 3px solid #000; border-radius: 8px;
   box-shadow: inset 3px 3px 0 #e07a6a, inset -3px -3px 0 #6a1a12; cursor: pointer;
@@ -113,7 +114,9 @@
 .inv-trash { background: #8a3a2e; box-shadow: inset 3px 3px 0 #c87a6a, inset -3px -4px 0 #4a1a12; }
 .inv-trash:hover { background: #a84a3c; }
 
-/* chest: wooden frame around the chest's own slots */
+/* chest: picture header (the close button overhangs this strip, not a slot), wooden frame around its slots */
+.inv-chest-head { display: flex; align-items: center; padding-left: var(--gui); }
+.inv-chest-head .bc-icon { pointer-events: none; }
 .inv-chest-box { padding: calc(var(--gui) * 2); margin: calc(var(--gui) * -1); background: #9e662c; border: 2px solid #3a2410; border-radius: 4px; box-shadow: inset 2px 2px 0 #c8925a, inset -2px -2px 0 #6a4018; }
 
 /* faint "what goes here" pictures in empty armour / fuel slots */
