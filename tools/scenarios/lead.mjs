@@ -325,4 +325,24 @@ export default [
       t.assert(r.aim[0] === 0 && r.aim[1] === 0 && r.aim[2] === true, 'kid cursor back in the middle');
     },
   },
+  {
+    // Integration (found in the end-to-end play): a new world has farm animals close to the spawn, inside the kid
+    // border, on every preset with grass; a saved world does not get them twice.
+    name: 'lead-starter-animals', requires: ['mobs', 'worldgen'],
+    async run(t) {
+      const out = {};
+      for (const [preset, seed] of [['default', 12345], ['default', 8], ['default', 777], ['flat', 1], ['snowy', 5]]) {
+        await t.call('startWorld', { preset, seed, mode: 'creative', difficulty: 'peaceful' });
+        const r = await t.eval(() => {
+          const g = window.__game.game, sp = g.meta.spawn;
+          const near = g.entities.all().filter((e) => e.category === 'creature' && Math.hypot(e.x - sp.x, e.z - sp.z) <= 32);
+          return { n: near.length, types: [...new Set(near.map((e) => e.type))].sort() };
+        });
+        out[preset + seed] = r;
+        t.assert(r.n >= 6 && r.types.length >= 3, `${preset} ${seed}: animals within 32 blocks of the spawn (${JSON.stringify(r)})`);
+      }
+      t.note('near', out);
+      await t.shot('lead-starter-animals');
+    },
+  },
 ];

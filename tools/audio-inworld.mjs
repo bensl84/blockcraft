@@ -444,7 +444,9 @@ if (want('perf')) {
   else check('perf: audio lane costs < 1 ms per frame in the storm', stormMs < 1, { msPerFrame: Math.round((busy.audioMsPerSec + busy.emitMsPerSec) / Math.max(1, busy.fps) * 1000) / 1000 });
   check('perf: busy sound storm keeps >= 85% of the quiet fps', busy.fps >= quiet.fps * 0.85, { quiet: quiet.fps, busy: busy.fps });
   check('perf: voice cap holds during the storm (<= 32)', busy.voices <= 32, { voices: busy.voices });
-  check('perf: audio adds no draw calls', quiet.drawCalls === muted.drawCalls || Math.abs((quiet.drawCalls || 0) - (muted.drawCalls || 0)) <= 2, { quiet: quiet.drawCalls, muted: muted.drawCalls });
+  // the two samples are 8 s apart: with the real MOBS lane animals walk in and out of view in between (one draw
+  // each), so allow that drift (LEAD integration); audio itself never touches the renderer
+  check('perf: audio adds no draw calls', Math.abs((quiet.drawCalls || 0) - (muted.drawCalls || 0)) <= 2 + Math.ceil(0.03 * (quiet.drawCalls || 0)), { quiet: quiet.drawCalls, muted: muted.drawCalls });
 }
 
 /* ======================================================================= 11. tab hidden / back */

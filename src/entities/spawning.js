@@ -22,6 +22,8 @@ import { daylightAt, effectiveSky, randInt } from './mob_ai.js';
 import { hash32, mulberry32 } from '../core/math.js';
 
 const PASSIVE_TOPUP_TICKS = 400;
+/** LEAD integration: the farm animals a NEW world always starts with near the spawn (one small group each). */
+export const STARTER_TYPES = Object.freeze(['cow', 'sheep', 'pig', 'chicken']);
 const MONSTER_TYPES = ['zombie', 'skeleton', 'creeper', 'spider'];
 
 /** Numeric key of a column for the populated set. */
@@ -97,6 +99,51 @@ export function createSpawner(game) {
     return n;
   }
 
+  /**
+   * One group of `type` around block (gx, gz): up to `want` animals on sky-lit grass within 3 blocks. Ignores the
+   * creature cap (starter animals). Returns how many spawned.
+   */
+  function spawnGroupAt(gx, gz, type, want, rand, reason, extra = {}) {
+    const w = game.world;
+    let n = 0;
+    for (let i = 0; i < want * 6 && n < want; i++) {
+      const bx = gx + randInt(rand, -3, 3), bz = gz + randInt(rand, -3, 3);
+      if (!w.isColumnLoaded(bx >> 4, bz >> 4)) continue;
+      const s = surfaceBlock(bx, bz);
+      // grass, or a thin snow layer on grass (the snowy preset)
+      if (!s || !(s.id === ID.grass_block || (s.id === ID.snow && w.getBlock(bx, s.y - 1, bz) === ID.grass_block))) continue;
+      const fy = s.y + 1;
+      if (B_SOLID[w.getBlock(bx, fy, bz)] || B_SOLID[w.getBlock(bx, fy + 1, bz)] || B_LIQUID[w.getBlock(bx, fy, bz)]) continue;
+      const e = game.mobs.spawnMob(type, bx + 0.5, s.id === ID.snow ? s.y + 0.125 : fy, bz + 0.5, { reason, rand, ...extra });
+      if (e) n++;
+    }
+    return n;
+  }
+
+  /**
+   * LEAD integration (found in the end-to-end play: the nearest animal was 75 blocks away, outside the kid world's
+   * 48-block border). A NEW world gets one small group of each farm animal 10-28 blocks from the spawn, inside the
+   * border, deterministic per world seed. They are not 'wild', so the cap never culls them when their column
+   * reloads (like pets). Returns how many spawned.
+   */
+  function starterAnimals() {
+    const sp = game.meta && game.meta.spawn;
+    if (!sp || !rules().passiveMobs) return 0;
+    const rng = mulberry32(hash32((game.meta.seed >>> 0) ^ 0x53544152, 11, 22, 33));
+    const border = rules().worldBorder > 0 ? rules().worldBorder : 64;
+    const maxR = Math.max(12, Math.min(28, border - 8));
+    let n = 0;
+    for (const type of STARTER_TYPES) {
+      if (!ENTITY_TYPES.has(type)) continue;
+      for (let tries = 0; tries < 8; tries++) {
+        const a = rng() * Math.PI * 2, r = 10 + rng() * (maxR - 10);
+        const got = spawnGroupAt(Math.floor(sp.x + Math.cos(a) * r), Math.floor(sp.z + Math.sin(a) * r), type, rng() < 0.5 ? 2 : 3, rng, 'starter');
+        if (got) { n += got; break; }
+      }
+    }
+    return n;
+  }
+
   /** Drop untouched wild animals of a just-restored column while the loaded creature count is over the cap. */
   function cullRestored(cx, cz) {
     let over = counts().creature - SPAWN.CREATURE_CAP;
@@ -132,7 +179,11 @@ export function createSpawner(game) {
       if (!w.isColumnLoaded(c.cx, c.cz)) return;
       const dx = c.cx * 16 + 8 - p.x, dz = c.cz * 16 + 8 - p.z;
       const d = Math.hypot(dx, dz);
-      if (d >= SPAWN.MIN_PLAYER_DIST && d <= (w.renderDistance || 6) * 16) cols.push(c);
+      if (d < SPAWN.MIN_PLAYER_DIST || d > (w.renderDistance || 6) * 16) return;
+      // a world with a border (kid worlds): only inside it, where the child can reach them (LEAD integration)
+      const sp = game.meta && game.meta.spawn, br = rules().worldBorder;
+      if (sp && br > 0 && Math.hypot(c.cx * 16 + 8 - sp.x, c.cz * 16 + 8 - sp.z) > br - 6) return;
+      cols.push(c);
     });
     if (!cols.length) return 0;
     const c = cols[Math.floor(rand() * cols.length)];
@@ -182,7 +233,7 @@ export function createSpawner(game) {
 
   return {
     get populated() { return populated; },
-    counts, onColumnLoaded, spawnAnimalGroup, topUp, monsterAttempt, despawnMonsters, hostileAllowed, cullRestored,
+    counts, onColumnLoaded, spawnAnimalGroup, spawnGroupAt, starterAnimals, topUp, monsterAttempt, despawnMonsters, hostileAllowed, cullRestored,
     tick() {
       if (!game.meta) return;
       if (++topupTimer >= PASSIVE_TOPUP_TICKS) { topupTimer = 0; topUp(); }

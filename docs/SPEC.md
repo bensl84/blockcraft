@@ -1,6 +1,6 @@
 # Blockcraft — Engineering Specification
 
-Version 1.5 · 2026-10-03 · owner: LEAD (architect / integrator) · v1.1 applies the independent review (lane isolation, persistence, undo data, test API, kid controls, content gaps) · v1.2 records the CORE integration (lanes A–E merged): light curve with the brightness lift, accepted lane spec conflicts, streaming radii, new lane events and decisions D14–D15 · v1.3 applies the CORE review (CORE-R1…R9): meshing one ring beyond the fog with a crisp linear fog, quad flip, leaves and water textures, tap classification by event time, `unmeshedWithin` after a teleport, capsule kid outline, larger climate regions, moonlit night tint · v1.4 applies the CORE review recheck (CORE-R10, CORE-R2): columns wholly beyond the fog are not drawn, and smooth light and AO are blended bilinearly per pixel from each quad's four corners (mesh contract: `corner` array, flag bits 7–8; chunk geometry uploads no `aLight`) · v1.5 applies CORE-R11: the fog cull hides fully fogged geometry only where the sky behind it is the fog colour, so the picture never changes and distant fogged mountains stay; the sky keeps an exact fog-colour horizon and FX draws no sky objects below it
+Version 1.6 · 2026-10-04 · owner: LEAD (architect / integrator) · v1.1 applies the independent review (lane isolation, persistence, undo data, test API, kid controls, content gaps) · v1.2 records the CORE integration (lanes A–E merged): light curve with the brightness lift, accepted lane spec conflicts, streaming radii, new lane events and decisions D14–D15 · v1.3 applies the CORE review (CORE-R1…R9): meshing one ring beyond the fog with a crisp linear fog, quad flip, leaves and water textures, tap classification by event time, `unmeshedWithin` after a teleport, capsule kid outline, larger climate regions, moonlit night tint · v1.4 applies the CORE review recheck (CORE-R10, CORE-R2): columns wholly beyond the fog are not drawn, and smooth light and AO are blended bilinearly per pixel from each quad's four corners (mesh contract: `corner` array, flag bits 7–8; chunk geometry uploads no `aLight`) · v1.5 applies CORE-R11: the fog cull hides fully fogged geometry only where the sky behind it is the fog colour, so the picture never changes and distant fogged mountains stay; the sky keeps an exact fog-colour horizon and FX draws no sky objects below it · v1.6 records the FEATURE integration (lanes INV, MENUS, AUDIO, FX, MOBS, MECH, KID merged): placer return contract, kid entity holds, new-world resets, a frozen renderer behind menus, the in-block overlay, autosave natural causes, item pickup reach, touch column clear of the HUD, dirt under generated pumpkins and boulders, creeper blasts through MECH
 
 This file is the single source of truth for Blockcraft. Two kinds of files back it up:
 
@@ -461,6 +461,7 @@ Owner: FEATURE-MECH.
 - 1352 rays (the 16³ grid surface). Each ray has intensity `power × (0.7..1.3)`, steps 0.3 blocks, and loses `0.225 + (blast + 0.3) × 0.3` per block.
 - A block is destroyed while the intensity stays > 0.
 - Entity damage: `(1 − d/(2P)) × exposure`, giving `7P(i² + i) + 1`, with knockback scaled by the impact.
+- *(v1.6)* MECH owns every explosion, the creeper's included (`mechanics.explode(…, {source: 'creeper'})`). A creeper's blast scales its damage to the player with difficulty like Java (easy: half + 1); the player's own TNT does not.
 - Drops: TNT drops 100% of destroyed blocks when `dropItemsOnBreak` is on; creepers drop with chance 1/P.
 - Explosions in water break no blocks.
 - Caps: at most 2 explosions resolved per tick (the rest queue) and at most 600 blocks per explosion.
@@ -590,7 +591,7 @@ Owner: FEATURE-KID.
   - About 0.5 s of whoosh and fade, then teleport to `meta.home` (or `meta.spawn`), facing the build.
   - A home arrow appears when the player is more than 48 blocks away.
 - **Void rescue** (`rules.voidRescue`, on by default in every world): if the feet go below y 0 (`KID.VOID_RESCUE_Y`), or 10 blocks below the lowest terrain, teleport silently to the surface. No damage, no death screen (§2.3).
-- **Stuck rescue:** if the player presses move for 3 s or more without moving while enclosed at head height, pulse the Up button. Holding Jump for 1 s then pops the player to free space (`physics.findFreeY`).
+- **Stuck rescue:** if the player presses move for 3 s or more without moving while enclosed at head height, pulse the Up button. Holding Jump for 1 s then pops the player to free space (`physics.findFreeY`). *(v1.6)* Head inside an opaque block, **or the body inside any solid block** (sand or gravel that fell on the child lands in the feet cell), pops on its own after 2 s.
 - **Soft border:** at `rules.worldBorder` (512) from spawn, the player is pushed back gently (0.1 b/t) inside thickening fog (`renderer.setFogOverride(near, far)`, cleared with `null`).
 - **Undo:** the U key or the Undo button. Reverts the last 50 player actions (one tap, one hold-break, one door, one bed or one explosion = one entry, including the second door/bed half and torches that fell off). Undo restores blocks only, never items. Data model in §8.5.2.
 - **Bed nap:** with the day locked, a bed gives a short nap with stars (§2.5) instead of "you can only sleep at night".
@@ -1075,7 +1076,7 @@ export function fbm2(n2, x, y, octaves=4, lacunarity=2, gain=0.5)
     | Clay (under shallow water) | — | 6 | — |
 
   - Trees per biome density: oak height 4–6 with a leaf blob; birch 5–7; spruce 6–9 with a cone. Never on sand or in water.
-  - Decoration: flowers in patches of 3–8 from the biome list, short grass, ferns, dead bushes (desert), cactus (desert, 1–3 tall), sugar cane (next to water, 1–3), pumpkins (rare, 1 in about 40 columns), melons (rare).
+  - Decoration: flowers in patches of 3–8 from the biome list, short grass, ferns, dead bushes (desert), cactus (desert, 1–3 tall), sugar cane (next to water, 1–3), pumpkins (rare, 1 in about 40 columns), melons (rare). *(v1.6)* The ground under a pumpkin, melon or boulder stone is dirt, not grass (grass under an opaque block turns to dirt by itself, which remeshed every new area in its first minutes).
   - Snowy biome: snow layer (state 0) on top of every exposed solid block; ice where sea water meets air.
 - **`flat` preset:** exactly bedrock at y 0, dirt at y 1–2, grass at y 3. The player stands at y = 4. No decoration in P0; P1 adds a few flowers and trees at hashed positions, at most 1 tree per 4 columns.
 - **`snowy` (P1)** forces the snowy biome. **`islands` (P2)** is an archipelago over ocean.
@@ -1295,7 +1296,11 @@ addObject(obj3d) ; removeObject(obj3d)         // dynamic objects (entities, par
 createEntityMaterial({map?, atlas?, transparent?, alphaTest?, color?, parts?}) -> material with uniforms uLightSky, uLightBlock (0..15), uTint (vec4)
                                                // parts: N <= 8 -> + uniform mat4 uParts[N]; geometry attribute aPart (Uint8) picks the matrix
 createBlockModel(id, state) -> THREE.Mesh      // meshBlockModel geometry + atlas entity material; caller disposes geometry
-captureThumbnail(w = 160, h = 100) -> jpeg data URL (renders then copies)
+captureThumbnail(w = 160, h = 100) -> jpeg data URL (renders then copies; v1.6: without the block outline)
+redraw                                         // v1.6: true = draw the next frame even while frozen. Paused, or on the title with no
+                                               //   world, the renderer draws 2 frames and then skips the world until something
+                                               //   visible changes (streamed meshes, resize, settings, ui open/close, context
+                                               //   restore); getStats().frozenSkips counts the skipped frames
 getStats() -> {drawCalls, triangles, geometries, textures, programs, sectionMeshes, dpr}   // per frame, all passes summed
                                                // (v1.4: + fogCulled = columns past the fog not drawn at all last frame;
                                                //  v1.5: + fogTrimmed = columns past the fog that still draw what rises above the horizon)
@@ -1716,7 +1721,7 @@ setFlying(bool) ; canFly() (creative) ; swing() ; tick ; frame ; serialize() -> 
   - Gravity 0.04, drag 0.98, ground friction 0.6 × 0.98.
   - Bobbing and spinning mesh from `game.fx.makeItemMesh(item)`.
   - Pickup delay 10 ticks (40 when thrown).
-  - Magnet: within 1.5 blocks of the player, pull at 0.1 b/t; picked up within 1.0 when there is space, calling `inventory.add`. Emit `item:pickup`.
+  - Magnet: within 1.5 blocks of the player, pull at 0.1 b/t; picked up within 1.0 when there is space, calling `inventory.add`. Emit `item:pickup`. *(v1.6)* Distances are measured to the player's body from 0.5 below the feet to the head (Java inflates the pickup box by 0.5 down), so a drop at the far side of the 1-deep hole just dug is still pulled in.
   - Merges with an identical stack within 0.5. Despawns after 6000 ticks. Lava destroys it.
 - **Survival** (`src/survival/survival.js`, system `survival`): `damage(amount, cause, source) → bool`, `heal`, `addExhaustion`, `canEat`, `applyFood(itemKey)`, `addFood(h, s)`, `kill(cause)`, `respawn()`, `serialize`, `deserialize`, implementing §2.3.
   - Food item-use hooks for every `use: 'eat'` or `'drink'` item.
@@ -1909,7 +1914,7 @@ Classic scheme: on `input:pointerLock {locked: false}` while playing with no scr
   5. Emit `save:start` and `save:done`.
   Never block the loop; a save in progress makes a new request coalesce.
 - **Autosave triggers:**
-  - 2.5 s after the last `block:changed` (debounced).
+  - 2.5 s after the last `block:changed` (debounced). *(v1.6)* Natural changes (`cause` `growth`, `melt`, `decay`: MECH random ticks) count as soft changes, saved within 30 s, so they never push a child's edit out to the 30 s interval.
   - At least every 30 s while there are changes.
   - Immediately on `visibilitychange` → hidden, on `pagehide`, on the `pause` screen, on `kid:home`, and on fullscreen exit.
 - **Persistence:** call `navigator.storage.persist()` on http(s).
@@ -1947,7 +1952,7 @@ Classic scheme: on `input:pointerLock {locked: false}` while playing with no scr
   | Control | Position and behaviour |
   |---|---|
   | D-pad | Bottom left, centred at (24 + 140, H − 24 − 140): ▲ forward, ▼ back, ◀ ▶ **turn** (`setVirtual('turnLeft'/'turnRight')`), with an 8–12 px safe ring. Optional fixed joystick (160 px base, 64 px knob) via `setMoveVector`. |
-  | Jump / Up | 112 px, about 100 px from the right edge and 140 px from the bottom. |
+  | Jump / Up | 112 px, about 100 px from the right edge and 140 px from the bottom. *(v1.6)* When the jump / down / fly column would overlap the HUD block (hotbar, backpack, survival rows; narrow or touch laptops, or Down while flying at 1280 × 720), the column is lifted so its bottom sits 8 px above the HUD. |
   | Down ▼ | 96 px, shown only while flying: `setVirtual('descend')`. |
   | Fly toggle | 80 px, above the jump button. |
   | Pause, Home | Top right and top left (Home may be owned by `kid.js`; one implementation only). |
@@ -2038,6 +2043,7 @@ No frame above 50 ms during the TNT chain on the RTX machine.
 - **Kid ghost block:** a translucent (α 0.35) preview of the held placeable block at the target cell, kid scheme only, while the cursor hovers. Pulses gently.
 - **Bed nap:** fade plus a starry sky for `sleep:start {nap: true}`.
 - **Underwater:** a blue overlay div at Z.FX_OVERLAY with opacity 0.25, shown while `player.eyeInWater`.
+- **In a block** *(v1.6)*: while the camera sits inside an opaque full cube (head in sand, a wall behind the third-person camera), that block's side texture fills the screen in big pixels at about a third of its brightness, as in the original, instead of seeing through the world. `fx.stats().inBlock`.
 - **Hurt flash:** red vignette only (the hurt tilt is the player lane's, §2.1).
 - **Fades:** sleep and home.
 - **Flash safety:** never more than 3 flashes per second (WCAG 2.3.1).

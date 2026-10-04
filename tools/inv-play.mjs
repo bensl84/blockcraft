@@ -315,9 +315,13 @@ await run('survival', async () => {
   const cs = (await call('inventory')).findIndex((s) => s && s.item === 'chest');
   if (cs >= 9) await ev((i) => { const inv = window.__game.game.inventory; const a = inv.get(i); inv.set(i, inv.get(7)); inv.set(7, a); }, cs);
   await tapSel(`#hud .inv-hb-slot[data-slot="${cs >= 9 ? 7 : cs}"]`);
-  const cx = g.x - 1, cz = g.z, cy = await call('surfaceY', cx, cz);
+  let cx = g.x - 1, cz = g.z, cy = await call('surfaceY', cx, cz);
   await tapBlockTop(cx, cy - 1, cz);
-  check('chest placed', (await call('getBlock', cx, cy, cz)) === 'chest', await call('getBlock', cx, cy, cz));
+  // LEAD integration: with real animals around (they nudge the player) the terrain step next to the cell can be
+  // what the tap hits; the chest goes where the tap pointed, as for a child, so follow it there
+  const chestAt = await ev(([x, y, z]) => { for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) if (window.__game.getBlock(x + dx, y + dy, z + dz) === 'chest') return [dx, dy, dz]; return null; }, [cx, cy, cz]);
+  check('chest placed', !!chestAt, `chest at offset ${JSON.stringify(chestAt)} from ${cx},${cy},${cz}`);
+  if (chestAt) { cx += chestAt[0]; cy += chestAt[1]; cz += chestAt[2]; }
   await call('waitFrames', 10);
   await shot('23-chest-placed');
   await tapBlockFront(cx, cy, cz);
@@ -343,7 +347,7 @@ await run('survival', async () => {
   check('holding on the chest breaks it', brokeChest || args.touch, `broken events ${before} -> ${await call('eventCount', 'block:broken')}`);
   const dropped = await ev(() => window.__game.game.invui.lastDropped.map((s) => `${s.item}x${s.count}`));
   check('chest contents are dropped', !brokeChest || dropped.some((d) => d.startsWith('oak_planks')), dropped.join(','));
-  if (stubs.includes('items')) skip('dropped stacks become item entities (pop + magnet)', 'items lane is still a stub');
+  if (!brokeChest) skip('dropped stacks become item entities (pop + magnet)', 'the chest was not broken (touch run: Playwright touch has no long press)');
   else check('dropped stacks become item entities', (await call('entities')).some((e) => e.type === 'item'));
   await shot('25-chest-broken');
   // survival HUD values (hearts/hunger/air move only once SURVIVAL/MOBS land)

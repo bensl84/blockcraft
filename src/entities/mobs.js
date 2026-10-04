@@ -129,6 +129,8 @@ export function createMobsSystem(game) {
       });
       game.events.on('world:columnLoaded', (e) => { try { spawner.onColumnLoaded(e); } catch (err) { game.reportError(err, 'mobs columnLoaded'); } });
       game.events.on('world:exit', () => spawner.clear());
+      // a new world starts with a few farm animals near the spawn (LEAD integration)
+      game.events.on('world:ready', (e) => { if (e && e.isNew) { try { spawner.starterAnimals(); } catch (err) { game.reportError(err, 'mobs starter animals'); } } });
       const purge = () => { if (!spawner.hostileAllowed()) spawner.despawnMonsters(true); };
       game.events.on('difficulty:changed', purge);
       game.events.on('rules:changed', (e) => { if (e.key === 'hostileMobs') purge(); });
