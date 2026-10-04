@@ -560,3 +560,80 @@ test('world: batches relight once with correct light; setBlock rules', () => {
   assert.equal(w.getColumn(0, 0).modified, true);
   w.close();
 });
+
+/* ================================================================== robustness (review ROB-1) */
+
+test('world: damaged saved columns are set aside and regenerated; the world still streams (ROB-1)', () => {
+  // a good save of the spawn area with one gold block per column
+  const A = makeWorld({ R: 2 });
+  A.pump(() => A.w.isColumnLoaded(0, 0) && A.w.isColumnLoaded(1, 0) && A.w.isColumnLoaded(0, 1), 'lit');
+  for (const [cx, cz] of [[0, 0], [1, 0], [0, 1], [-1, 0]]) A.w.setBlock(cx * 16 + 3, 8, cz * 16 + 3, ID.gold_block, 0, { cause: 'test' });
+  const saved = new Map();
+  A.w.forEachColumn((c) => { if (c.modified) saved.set(colKey(c.cx, c.cz), { data: encodeColumn(c.blocks), blockEntities: [] }); });
+  A.w.close();
+  const good = saved.get(colKey(-1, 0));
+  const garbage = new Uint8Array(400); for (let i = 0; i < garbage.length; i++) garbage[i] = (i * 7919) & 255;
+  saved.set(colKey(0, 0), { data: garbage, blockEntities: [] });                                                   // bad magic
+  saved.set(colKey(1, 0), { data: saved.get(colKey(1, 0)).data.slice(0, 5), blockEntities: [] });                 // truncated
+  saved.set(colKey(0, 1), { data: new Uint8Array(0), blockEntities: 'oops' });                                      // empty
+  saved.set(colKey(-1, 0), { data: good.data, blockEntities: ['x', null, { i: -4, data: {} }, { i: colIndex(1, 9, 1), data: { kind: 'chest' } }] });
+
+  const renderer = fakeRenderer();
+  const { w, events, game } = makeWorld({ R: 2, saved, renderer });
+  const reported = [];
+  game.reportError = (err, where) => reported.push(where);
+  const corrupt = [];
+  events.on('world:columnCorrupt', (e) => corrupt.push(e));
+  const warn = console.warn; let warns = 0; console.warn = () => { warns++; };
+  try {
+    for (let i = 0; i < 600; i++) { renderer.frame++; w.frame(game, 0.016); }
+  } finally { console.warn = warn; }
+  assert.equal(w.unmeshedWithin(2), 0, 'every column around the player meshed');
+  assert.deepEqual([...w.corruptColumns.keys()].sort(), [colKey(0, 0), colKey(0, 1), colKey(1, 0)].sort());
+  assert.equal(corrupt.length, 3, 'one event per damaged column');
+  assert.equal(warns, 3, 'reported once each');
+  assert.equal(reported.length, 0, 'damaged data is not a game error');
+  assert.ok(w.corruptColumns.get(colKey(0, 0)).record.data === garbage, 'the record is kept as found');
+  for (const [cx, cz] of [[0, 0], [1, 0], [0, 1]]) {
+    assert.ok(w.isColumnLoaded(cx, cz), `${cx},${cz} regenerated`);
+    assert.equal(w.getBlock(cx * 16 + 3, 8, cz * 16 + 3), 0, 'regenerated from the seed (the lost block is gone)');
+    assert.equal(w.getColumn(cx, cz).modified, false, 'an unedited regenerated column is never saved over the record');
+    assert.ok(!w.savedColumns.has(colKey(cx, cz)) && !w.pendingSave.has(colKey(cx, cz)));
+  }
+  assert.equal(w.getBlock(-13, 8, 3), ID.gold_block, 'the good column restored');
+  const be = [...w.getColumn(-1, 0).blockEntities];
+  assert.deepEqual(be, [[colIndex(1, 9, 1), { kind: 'chest' }]], 'only well-formed block entities kept');
+  // a damaged unloaded pendingSave record: export returns null, markColumnSaved does not throw, record set aside
+  w.pendingSave.set(colKey(40, 40), { blocks: new Uint16Array(10), blockEntities: [] });
+  console.warn = () => {};
+  try {
+    assert.equal(w.exportColumn(40, 40), null);
+    w.markColumnSaved(40, 40);
+  } finally { console.warn = warn; }
+  assert.ok(w.corruptColumns.has(colKey(40, 40)) && !w.pendingSave.has(colKey(40, 40)));
+  w.close();
+});
+
+test('world: one column that throws is reported once and never stops streaming (ROB-1)', () => {
+  const renderer = fakeRenderer();
+  const realSet = renderer.setSectionMesh;
+  // the renderer throws for every section of column (1,1)
+  renderer.setSectionMesh = (cx, sy, cz, mesh) => { if (cx === 1 && cz === 1) throw new Error('boom'); return realSet(cx, sy, cz, mesh); };
+  const { w, game } = makeWorld({ R: 3, renderer });
+  const reported = [];
+  game.reportError = (err, where) => reported.push(where);
+  let threw = 0;
+  for (let i = 0; i < 800; i++) { renderer.frame++; try { w.frame(game, 0.016); } catch { threw++; } }
+  assert.equal(threw, 0, 'world.frame never throws');
+  assert.equal(reported.length, 1, `reported once: ${reported}`);
+  assert.match(reported[0], /world column 1,1/);
+  for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) {
+    if (dx * dx + dz * dz > 9 || (dx === 1 && dz === 1)) continue;
+    assert.equal(w.getColumn(dx, dz).state, COL_STATE.MESHED, `${dx},${dz} meshed despite the failing neighbour`);
+  }
+  // the failing column backs off and, after repeated failures, no longer holds the kid flight cap
+  const t0 = Date.now();
+  while (w.unmeshedWithin(3) > 0 && Date.now() - t0 < 15000) { renderer.frame++; w.frame(game, 0.016); }
+  assert.equal(w.unmeshedWithin(3), 0, 'a column that keeps failing stops counting as unmeshed');
+  w.close();
+});

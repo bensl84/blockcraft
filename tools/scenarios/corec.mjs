@@ -397,4 +397,60 @@ SCENARIOS.push({
   },
 });
 
+// Damaged saves (review ROB-1): a garbage spawn column, a truncated column far away and a good one. The world
+// opens, the damaged columns are set aside (world.corruptColumns) and regenerated from the seed, the good one is
+// restored, and streaming reaches the far damaged column without a single recorded error.
+SCENARIOS.push({
+  name: 'corec-damaged-save',
+  requires: ['world', 'lighting', 'mesher'],
+  async run(t) {
+    await t.call('startWorld', HILLS);
+    await t.waitFor(() => window.__game.game.world.unmeshedWithin(3) === 0, null, 20000);
+    const info = await t.eval(async () => {
+      const api = window.__game, g = api.game, w = g.world;
+      const sx = Math.floor(g.player.x), sz = Math.floor(g.player.z);
+      const scx = sx >> 4, scz = sz >> 4;
+      // a good saved column next to spawn with a gold block in the air
+      const gx = (scx + 1) * 16 + 5, gz = scz * 16 + 5, gy = Math.min(120, Math.floor(w.getSurfaceY(gx + 0.5, gz + 0.5)) + 4);
+      api.setBlock(gx, gy, gz, 'gold_block');
+      const good = w.exportColumn(scx + 1, scz);
+      const garbage = new Uint8Array(500); for (let i = 0; i < garbage.length; i++) garbage[i] = (i * 7919) & 255;
+      const fcx = scx + 12;
+      const columns = new Map([
+        [scx + ',' + scz, { data: garbage, blockEntities: 'oops' }],
+        [(scx + 1) + ',' + scz, { blocks: good.blocks, blockEntities: [] }],
+        [fcx + ',' + scz, { data: new Uint8Array([0x42, 0x43, 1, 5]), blockEntities: [] }],
+      ]);
+      const meta = JSON.parse(JSON.stringify(g.meta));
+      meta.spawn = { x: sx + 0.5, y: g.player.y, z: sz + 0.5 };
+      meta.systems = { ...(meta.systems || {}), player: { x: sx + 0.5, y: g.player.y, z: sz + 0.5, yaw: g.player.yaw, pitch: 0 } };
+      const warn = console.warn; const warns = []; console.warn = (...a) => { warns.push(String(a[0])); };
+      try { await api.startWorld({ meta, columns }); } finally { console.warn = warn; }
+      return { scx, scz, fcx, gx, gy, gz, goldId: good.blocks[(gx & 15) | ((gz & 15) << 4) | (gy << 8)] & 0xff, warns, state: g.state };
+    });
+    t.assert(info.state === 'playing', 'the world with a damaged spawn column opens (' + info.state + ')');
+    t.assert(await t.waitFor(() => window.__game.game.world.unmeshedWithin(3) === 0, null, 20000), 'spawn area meshed');
+    const near = await t.eval((i) => {
+      const w = window.__game.game.world;
+      return { corrupt: [...w.corruptColumns.keys()], gold: w.getBlock(i.gx, i.gy, i.gz), spawnLoaded: w.isColumnLoaded(i.scx, i.scz) };
+    }, info);
+    t.note('near', near);
+    t.assert(near.corrupt.includes(info.scx + ',' + info.scz), 'damaged spawn column set aside');
+    t.assert(near.spawnLoaded, 'damaged spawn column regenerated and lit');
+    t.assert(info.goldId > 0 && near.gold === info.goldId, 'the good saved column next to it is restored (gold block kept)');
+    await t.shot('corec-damaged-spawn');
+    // fly to the far damaged column: streaming must reach it and carry on
+    await t.eval((i) => { const api = window.__game; api.setFlying(true); api.teleport(i.fcx * 16 + 8.5, 100, i.scz * 16 + 8.5); }, info);
+    const ok = await t.waitFor(() => window.__game.game.world.unmeshedWithin(3) === 0, null, 20000);
+    const far = await t.eval((i) => { const w = window.__game.game.world; return { corrupt: [...w.corruptColumns.keys()], state: (w.getColumn(i.fcx, i.scz) || {}).state, errors: window.__game.errors.length }; }, info);
+    t.note('far', far);
+    t.assert(ok, 'streaming finished around the far damaged column');
+    t.assert(far.corrupt.includes(info.fcx + ',' + info.scz) && far.state === 3, 'far damaged column set aside and meshed from the seed');
+    t.assert(far.errors === 0, 'no recorded errors');
+    await t.eval(() => window.__game.setLook && window.__game.setLook(0, -35));
+    await t.call('waitFrames', 3);
+    await t.shot('corec-damaged-far');
+  },
+});
+
 export default SCENARIOS;
