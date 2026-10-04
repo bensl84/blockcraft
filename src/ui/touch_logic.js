@@ -15,7 +15,8 @@ export const PALM_PX = 40;       // contacts larger than this are palms (ignored
  * Rect = {x, y, w, h} (top-left). Mirrored horizontally when leftHanded (pause stays top right).
  * hud = {left, right, top}: the HUD's bottom block (hotbar, backpack, hearts/food rows) in CSS px. When the
  * jump / down / fly column would overlap it (narrow or touch laptops), the column is lifted above it (LEAD
- * integration, KID request 2: at 1024 x 600 the backpack sat under the Jump button).
+ * integration, KID request 2: at 1024 x 600 the backpack sat under the Jump button), and the D-pad / joystick
+ * rises when one of its buttons would cover the HUD block (POL-12).
  */
 export function touchLayout(W, H, buttonSize = 'M', leftHanded = false, hud = null) {
   const B = BUTTON_SIZES[buttonSize] || BUTTON_SIZES.M;
@@ -51,6 +52,23 @@ export function touchLayout(W, H, buttonSize = 'M', leftHanded = false, hud = nu
       const y = Math.max(pause.y + pause.h + GAP, jump.y - lift);   // never under the pause button
       const dy = jump.y - y;
       jump.y -= dy; down.y -= dy; fly.y -= dy;
+    }
+  }
+  // POL-12: the D-pad / joystick likewise rises when one of its buttons sits over the HUD block (at 1024 x 600
+  // survival the hearts row ran under the ▶ button). Never above the top row (Home / Undo / Pause).
+  if (hud && Number.isFinite(hud.top)) {
+    const topRow = pause.y + pause.h + GAP;
+    const limit = hud.top - GAP;
+    let need = 0;
+    const rects = dpadRects(dpad);
+    for (const k in rects) {
+      const r = rects[k];
+      if (r.x < hud.right && r.x + r.w > hud.left) need = Math.max(need, r.y + r.h - limit);
+    }
+    if (need > 0) dpad.cy = Math.max(topRow + dpad.extent, dpad.cy - need);
+    const jr = joystick.base / 2;
+    if (joystick.cx - jr < hud.right && joystick.cx + jr > hud.left && joystick.cy + jr > limit) {
+      joystick.cy = Math.max(topRow + jr, limit - jr);
     }
   }
   // Short screens (landscape phones): no room above jump, so fly goes beside the Down button.

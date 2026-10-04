@@ -115,6 +115,62 @@ test('undo: first before kept per cell, only restores cells still equal to after
   assert.equal(w.getRaw(5, 4, 0), ID.gold_block, 'changed cell untouched');
 });
 
+test('redo (KID-8): the last undone action comes back first; a new action clears redo; dead cells skipped', () => {
+  const log = new UndoLog(50);
+  const events = new EventBus();
+  const w = fakeWorld(events);
+  events.on('block:changed', (e) => log.record(e));
+  const DOOR = ID.oak_door ?? 30;
+  // five player placements, then a door (two halves, one action)
+  for (let i = 0; i < 5; i++) w.setBlock(i, 4, 0, ID.stone, 0, { cause: 'player', action: i + 1 });
+  w.setBlock(9, 4, 0, DOOR, 0, { cause: 'player', action: 9 });
+  w.setBlock(9, 5, 0, DOOR, 8, { cause: 'cascade', action: 9 });
+  assert.equal(log.size, 6);
+  // undo the door: redo puts both halves back (bottom first) in one batch, not recorded as a new action
+  assert.equal(log.undo(w).count, 2);
+  assert.equal(w.getRaw(9, 5, 0), 0);
+  assert.equal(log.redoSize, 1);
+  const b0 = w.batches;
+  assert.equal(log.redo(w).count, 2);
+  assert.equal(w.batches, b0 + 1, 'one batch per redo');
+  assert.equal(w.getRaw(9, 4, 0) & 0xff, DOOR);
+  assert.equal(w.getRaw(9, 5, 0) >> 8, 8, 'top half state back');
+  assert.equal(log.size, 6, 'the redone action is undoable again (and not recorded twice)');
+  assert.equal(log.redoSize, 0);
+  // mash undo: everything gone, all of it redoable
+  for (let i = 0; i < 6; i++) assert.ok(log.undo(w).count > 0);
+  assert.equal(log.size, 0);
+  assert.equal(log.redoSize, 6);
+  assert.equal(log.undo(w).count, 0, 'nothing left to undo');
+  // redo walks forward again: the last undone (placement 1) first
+  assert.equal(log.redo(w).count, 1);
+  assert.equal(w.getRaw(0, 4, 0), ID.stone, 'placement 1 back');
+  assert.equal(w.getRaw(1, 4, 0), 0, 'placement 2 still undone');
+  assert.equal(log.size, 1);
+  assert.equal(log.redoSize, 5);
+  // undo again then redo again round-trips
+  assert.equal(log.undo(w).count, 1);
+  assert.equal(w.getRaw(0, 4, 0), 0);
+  assert.equal(log.redo(w).count, 1);
+  assert.equal(w.getRaw(0, 4, 0), ID.stone);
+  // a cell changed by someone else since the undo is left alone; an entry with nothing left is dropped
+  w.setBlock(1, 4, 0, ID.glass, 0);   // unrecorded edit where placement 2 was
+  assert.equal(log.redo(w).count, 1, 'skips placement 2 (its cell is no longer air) and redoes placement 3');
+  assert.equal(w.getRaw(1, 4, 0), ID.glass, 'edited cell untouched');
+  assert.equal(w.getRaw(2, 4, 0), ID.stone);
+  assert.equal(log.redoSize, 3);
+  // a new player action clears the redo stack
+  w.setBlock(20, 4, 0, ID.stone, 0, { cause: 'player', action: 20 });
+  assert.equal(log.redoSize, 0, 'new action clears redo');
+  assert.equal(log.redo(w).count, 0);
+  assert.equal(w.getRaw(3, 4, 0), 0, 'placement 4 stays undone');
+  // clear() empties redo too
+  log.undo(w);
+  assert.equal(log.redoSize, 1);
+  log.clear();
+  assert.equal(log.redoSize, 0);
+});
+
 test('undo: candidates are bounded and entries capped', () => {
   const log = new UndoLog();
   for (let a = 1; a <= 200; a++) log.record(ch(a, 1, 1, 0, 1, 'cascade', a));
@@ -304,6 +360,26 @@ test('touch layout: the jump / down / fly column is lifted clear of the HUD bloc
       assert.ok(!rectsTooClose(L.jump, L.down, GAP) && !rectsTooClose(L.jump, L.fly, GAP) && !rectsTooClose(L.fly, L.down, GAP), 'column buttons apart');
     }
   }
+  // POL-12: the D-pad and the joystick rise clear of the HUD block (1024 x 600 survival: hearts under ▶)
+  const inX = (r, h) => r.x < h.right && r.x + r.w > h.left;
+  for (const [W, H, hud] of [[1024, 600, { left: 213, right: 885, top: 442 }], [1024, 640, { left: 213, right: 885, top: 482 }], [1280, 720, { left: 311, right: 1057, top: 575 }]]) {
+    for (const lh of [false, true]) {
+      const h = lh ? { left: W - hud.right, right: W - hud.left, top: hud.top } : hud;
+      const L = touchLayout(W, H, 'M', lh, h);
+      const rs = dpadRects(L.dpad);
+      for (const k in rs) {
+        const r = rs[k];
+        assert.ok(!inX(r, h) || r.y + r.h <= h.top - GAP, `D-pad ${k} clear of the HUD (${W}x${H} lh=${lh}): ${JSON.stringify(r)}`);
+        assert.ok(r.y >= L.pause.y + L.pause.h + GAP, `D-pad ${k} below the top row (${W}x${H})`);
+        assert.ok(r.y + r.h <= H - EDGE, `D-pad ${k} on screen`);
+      }
+      const j = L.joystick, jr = { x: j.cx - j.base / 2, y: j.cy - j.base / 2, w: j.base, h: j.base };
+      assert.ok(!inX(jr, h) || jr.y + jr.h <= h.top - GAP, `joystick clear of the HUD (${W}x${H} lh=${lh})`);
+    }
+  }
+  // no HUD overlap: the D-pad keeps its spec spot (24 px margins)
+  const free = touchLayout(1366, 768, 'M', false, { left: 354, right: 1100, top: 600 });
+  assert.equal(free.dpad.cy, 768 - EDGE - free.dpad.extent);
   // a wide screen with the HUD far away keeps the spec position
   const wide = touchLayout(1920, 1080, 'M', false, { left: 650, right: 1330, top: 900 });
   assert.equal(1080 - (wide.jump.y + wide.jump.h / 2), 140);

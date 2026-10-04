@@ -4,6 +4,40 @@ Branch `lane/kid` · worktree `C:\Users\BSLeo\AppData\Roaming\Claude\scratch-wor
 
 <!-- newest first: date · what changed · commands run + results (copy the PASS/FAIL lines) · remaining · blockers · spec conflicts -->
 
+## 2026-10-04 · Fixer round 1: KID-8, POL-11, POL-12
+
+Merged `main` (fast-forward to `7f105b0`) first.
+
+### What changed
+
+- **KID-8 (Undo had no Redo):**
+  - `undo.js`: `UndoLog` keeps a redo stack. A successful undo pushes its entry there. `redo(world)` puts each cell's `after` back (oldest cell first, one batch, cause `'undo'`, so it is not recorded twice), and only where the cell still holds `before`. The entry then returns to the undo list. Any new qualifying action clears the stack, and so does `clear()`. `applyEntry(world, entry, forward)` serves both directions.
+  - `kid.js` / `kid.css` / `pixelicons.js`: a 56 px Redo plate (a mirrored undo arrow) at left 200, top 36, beside Undo. It shows for `REDO_SHOW_MS` (10 s) after the last undo or redo, while something can still be redone.
+  - Additive API: `kid.redo() → bool`, `kid.redoVisible`. Additive event: `kid:redo {count}`. Redo plays a lower-pitched whoosh. An empty redo plays `ui.error` and shakes the button.
+- **POL-11 (Home / Undo peeked out from under the picker):** `kid.frame()` sets `.kid-under-screen` on the kid layer while `game.ui.current` is set. Home, Undo, Redo, the home arrow and the hint plate then get `visibility: hidden; pointer-events: none`. This covers every container and menu screen, pause included, because the pause screen has its own Home and the kid buttons do nothing while paused.
+- **POL-12 (hearts under the D-pad ▶ at 1024 x 600):** `touch_logic.touchLayout` now lifts the D-pad when any of its buttons overlaps the HUD block horizontally. The button's bottom ends up `GAP` above the HUD top, and the D-pad never rises above the top row (pause / Home bottom + `GAP`). The joystick rises the same way. Unchanged at 1280 x 720 and 1366 x 768 (no overlap there).
+
+### Verification
+
+- `npm run test:unit`: fail 0. Added two tests:
+  - `redo (KID-8)…`: door halves, round-trips, dead cells skipped, and a new action clears the stack.
+  - D-pad and joystick clear of the HUD at 1024x600, 1024x640 and 1280x720, both hands.
+- New smoke checks:
+  - `kid-undo-real`: the Redo button shows beside Undo, two real clicks put the two undone blocks back (newest undo first), it hides when nothing is left, and the redone blocks undo again.
+  - `kid-buttons`: Home and Undo are hidden under `creative` and `pause` and come back after closing.
+  - New `kid-touch-hud` (touch only, 1024 x 600 survival): every D-pad button and the joystick stay clear of the hearts row and hotbar, and below the Home row.
+- Real-browser repro and after (`.tmp/kidfix/repro.mjs`; screenshots in `.tmp/kidfix/before|after/`):
+  - **Undo:** 5 taps then 5 Undo taps left everything as air, with no redo control. After the fix, 3 Redo taps restore 3 blocks, a new placement hides Redo, and Redo hides by itself after 10.6 s.
+  - **Picker at 1366x768 and 1024x640:** Home and Undo were visible under the picker. After the fix they are hidden under the picker and under pause, and visible again after closing.
+  - **Touch at 1024x600, survival:**
+    - Before: turnRight `[216,392,88,88]` overlapped the hearts at `[223,462]`, and the joystick overlapped too.
+    - After: turnRight is at `[216,346,88,88]` and the joystick at `[84,274,160,160]`, with no overlaps. 1024x640 is also clear now. 1280x720 and 1366x768 are unchanged.
+
+### Remaining
+
+- 800 x 480 (phone landscape, not a target) is still crowded. Even lifted as far as the top row allows, the D-pad's ▼ button reaches the hearts row because the centred hotbar starts at x 111. A smaller button size or a phone layout would be needed there.
+- Redo has no key. Input bindings belong to CORE-E; Redo is button-only for now.
+
 ## 2026-10-03 · Phase 2: merged main (real core) and verified in-world
 
 ### What changed

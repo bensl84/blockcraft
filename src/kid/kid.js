@@ -10,7 +10,9 @@
 //    opaque block) -> 'kid:stuck' (the touch Up button pulses; keyboard players get a pictogram); holding Jump
 //    for 1 s pops to free space. Head-in-block pops on its own after 2 s.
 //  - Soft border: rules.worldBorder from spawn, pushed back 0.1 b/t inside thickening fog (renderer.setFogOverride).
-//  - Undo (U / button): see undo.js. Last KID.UNDO_ENTRIES actions.
+//  - Undo (U / button): see undo.js. Last KID.UNDO_ENTRIES actions. After an undo a Redo button appears beside
+//    Undo for REDO_SHOW_MS (KID-8: mashing Undo could erase a whole build for good); the next new action clears it.
+//  - Home / Undo / Redo / home arrow / hints hide while a menu or container screen is open (POL-11).
 //  - Onboarding hints (P1): animated pictograms after 7 s without progress, optional local speech.
 //  - Speak block names on hotbar selection (settings.speakNames, local voices only).
 //  - Exit guards: see guards.js.
@@ -34,6 +36,8 @@ import { HINT_LINES, hintHtml } from './hints.js';
 /** Ticks from the Home press to the teleport (fade out first; the kid-home scenario allows 5). */
 export const HOME_TELEPORT_TICK = 3;
 const HOME_SEQ_TICKS = 12;
+/** How long the Redo button stays after the last undo (ms of real time). */
+export const REDO_SHOW_MS = 10000;
 
 /** @returns {object} Kid system (game.kid) */
 export function createKidSystem(game) {
@@ -45,10 +49,13 @@ export function createKidSystem(game) {
   const bs = {};
   const fogTmp = {};
   const cellsTmp = [];
-  let layer = null, homeBtn = null, undoBtn = null, arrowEl = null, arrowRot = null, hintEl = null, sparkLayer = null;
+  let layer = null, homeBtn = null, undoBtn = null, redoBtn = null, arrowEl = null, arrowRot = null, hintEl = null, sparkLayer = null;
   let homeSeq = -1;             // ticks since the Home press, -1 = idle
   let lastFogT = 0;
   let buttonsShown = null;
+  let underScreen = null;       // a menu / container screen is open (the kid layer hides under it)
+  let redoUntil = 0;            // performance.now() until which the Redo button may show
+  let redoShown = null;
   let arrowShown = null, arrowDeg = 1e9;
   let hintShown = null;         // name of the pictogram on screen
   let stuckHintShown = false;
@@ -147,15 +154,32 @@ export function createKidSystem(game) {
         game.events.emit('kid:undo', { count: r.count });
         game.events.emit('sound', { name: 'ui.whoosh', volume: 0.5, pitch: 1.4 });
         spin(undoBtn);
-        // a restored block may now hold the player: lift them out silently
-        const p = game.player;
-        if (playerCollides(p.x, p.y, p.z)) { const ty = freeY(p.x, p.y, p.z); p.y = p.prevY = ty; p.vy = 0; }
+        redoUntil = now() + REDO_SHOW_MS;
+        liftOut();
         return true;
       }
       game.events.emit('sound', { name: 'ui.error' });
       shake(undoBtn);
       return false;
     },
+    /** Put back the newest undone action (Redo button). Returns true if something was redone. */
+    redo() {
+      if (!game.world || !game.world.isOpen) return false;
+      const r = undoLog.redo(game.world);
+      if (r.count > 0) {
+        game.events.emit('kid:redo', { count: r.count });
+        game.events.emit('sound', { name: 'ui.whoosh', volume: 0.5, pitch: 1.0 });
+        spin(redoBtn);
+        redoUntil = now() + REDO_SHOW_MS;
+        liftOut();
+        return true;
+      }
+      game.events.emit('sound', { name: 'ui.error' });
+      shake(redoBtn);
+      return false;
+    },
+    /** True while the Redo button is offered (tests). */
+    get redoVisible() { return !!redoShown; },
 
     /* ---------------------------------------------------------------- guards */
     /** Request fullscreen + keyboard lock. MUST be called inside a user-gesture handler (Play button). */
@@ -208,10 +232,15 @@ export function createKidSystem(game) {
         layer.classList.toggle('kid-off', !show);
         if (!show) hideHint();
       }
+      // menus and container screens cover the world: the kid buttons hide under them instead of peeking out
+      const under = show && !!game.ui.current;
+      if (under !== underScreen) { underScreen = under; layer.classList.toggle('kid-under-screen', under); }
       if (show) {
         const empty = undoLog.size === 0;
         if (undoBtn.classList.contains('kid-empty') !== empty) undoBtn.classList.toggle('kid-empty', empty);
       }
+      const redo = show && undoLog.redoSize > 0 && now() < redoUntil;
+      if (redo !== redoShown) { redoShown = redo; redoBtn.classList.toggle('kid-hidden', !redo); }
       updateArrow(show);
     },
 
@@ -233,19 +262,31 @@ export function createKidSystem(game) {
       html: ICONS.undo(),
       onpointerdown: (e) => { e.preventDefault(); e.stopPropagation(); game.events.emit('ui:click', {}); if (playing()) kid.undo(); },
     });
+    redoBtn = el('div', {
+      class: 'bc-plate-btn kid-btn kid-redo kid-hidden', role: 'button', 'aria-label': 'Redo', 'data-interactive': '', 'data-kid': 'redo',
+      html: ICONS.redo(),
+      onpointerdown: (e) => { e.preventDefault(); e.stopPropagation(); game.events.emit('ui:click', {}); if (playing()) kid.redo(); },
+    });
     arrowRot = el('div', { class: 'kid-arrow-rot' }, [el('div', { class: 'kid-arrow-tip', html: ICONS.compass() })]);
     arrowEl = el('div', { class: 'kid-arrow kid-hidden', 'data-kid': 'home-arrow', 'aria-hidden': 'true' }, [
       el('div', { class: 'kid-arrow-house', html: ICONS.home() }), arrowRot,
     ]);
     hintEl = el('div', { class: 'kid-hint kid-hidden', 'data-kid': 'hint', 'aria-hidden': 'true' });
     sparkLayer = el('div', { class: 'kid-sparks' });
-    for (const b of [homeBtn, undoBtn]) {
+    for (const b of [homeBtn, undoBtn, redoBtn]) {
       b.addEventListener('contextmenu', (e) => e.preventDefault());
       b.addEventListener('pointerup', () => b.classList.remove('bc-pressed'));
       b.addEventListener('pointercancel', () => b.classList.remove('bc-pressed'));
       b.addEventListener('pointerdown', () => b.classList.add('bc-pressed'));
     }
-    layer.append(homeBtn, undoBtn, arrowEl, hintEl, sparkLayer);
+    layer.append(homeBtn, undoBtn, redoBtn, arrowEl, hintEl, sparkLayer);
+  }
+
+  function now() { return typeof performance !== 'undefined' ? performance.now() : Date.now(); }
+  /** A restored block may now hold the player: lift them out silently. */
+  function liftOut() {
+    const p = game.player;
+    if (playerCollides(p.x, p.y, p.z)) { const ty = freeY(p.x, p.y, p.z); p.y = p.prevY = ty; p.vy = 0; }
   }
 
   function press(b) { if (!b) return; b.classList.add('bc-pressed'); setTimeout(() => b.classList.remove('bc-pressed'), 160); }
@@ -510,6 +551,7 @@ export function createKidSystem(game) {
 
   function resetWorldState() {
     undoLog.clear();
+    redoUntil = 0;
     stuck.reset();
     homeSeq = -1;
     kid.homeSeqActive = false;
