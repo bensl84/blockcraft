@@ -167,7 +167,7 @@ export function createRendererSystem(game) {
       chunkMats = PASS_KEYS.map((k) => makeChunkMaterial(k));
       skyMesh = makeSky();
       r.scene.add(skyMesh);
-      outline = new Outline();
+      outline = new Outline(() => game.guiScale);
       r.scene.add(outline.group);
       applyBrightness(game.settings.brightness ?? 0.7);
       r.uniforms.uWave.value = game.settings.waving === false ? 0 : 1;
