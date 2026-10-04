@@ -11,6 +11,17 @@
 
 const FLAT = { preset: 'flat', seed: 1, mode: 'creative', difficulty: 'peaceful' };
 const NO_SPAWN = { ...FLAT, rules: { passiveMobs: false } };
+/** Wait until the renderer is quiet: no section uploads or column merges and no hot (edited) sections left. */
+async function settleRenderer(t, quietMs = 400, maxMs = 15000) {
+  const end = Date.now() + maxMs;
+  let last = -1, since = Date.now();
+  while (Date.now() < end) {
+    const q = await t.eval(() => { const s = window.__game.game.renderer.getStats(); return { n: s.sectionSets * 100000 + s.merges, hot: s.hotSections || 0 }; });
+    if (q.n !== last || q.hot > 0) { last = q.n; since = Date.now(); } else if (Date.now() - since >= quietMs) return true;
+    await new Promise((r) => setTimeout(r, 60));
+  }
+  return false;
+}
 const SURVIVAL = { preset: 'flat', seed: 1, mode: 'survival', difficulty: 'easy', rules: { passiveMobs: false, hostileMobs: false } };
 
 /** Spawn a mob near the player and return its id. */
@@ -166,11 +177,25 @@ export default [
     async run(t) {
       // the stub world streams columns (load/unload) end to end, so this runs today
       await t.call('startWorld', { preset: 'default', seed: 12345, mode: 'creative', difficulty: 'peaceful' });
+      const rd0 = await t.eval(() => window.__game.game.settings.renderDistance);
+      await t.call('setSetting', 'renderDistance', 6);
       const home = await t.call('pos');
       const sample = () => t.eval(() => window.__game.game.mobs.counts().creature);
       let max = await sample();
       const spawnsChunkgen = [];
-      const settle = async () => { for (let i = 0; i < 12; i++) { await t.call('waitFrames', 5); max = Math.max(max, await sample()); } };
+      // LEAD (integration): wait until the new area has really streamed in (meshed ring done and no new column
+      // populated for a while) - a fixed 60 frames was too short in a loaded full suite, so a column first loaded
+      // in round 2 looked like a repopulated one. The render distance is pinned so auto quality cannot add a ring.
+      const settle = async () => {
+        let last = -1, quiet = 0;
+        const end = Date.now() + 20000;
+        while (Date.now() < end && quiet < 8) {
+          await t.call('waitFrames', 5);
+          max = Math.max(max, await sample());
+          const s = await t.eval(() => { const g = window.__game.game; return { pop: g.mobs.populatedCount(), un: g.world.unmeshedWithin(g.world.renderDistance + 1) }; });
+          if (s.pop === last && s.un === 0) quiet++; else { quiet = 0; last = s.pop; }
+        }
+      };
       await t.eval(() => { const g = window.__game.game; g.__cg = 0; g.events.on('entity:spawn', (e) => { if (e.reason === 'chunkgen') g.__cg++; }); });
       await settle();
       for (let round = 0; round < 3; round++) {
@@ -180,6 +205,7 @@ export default [
         await settle();
         spawnsChunkgen.push(await t.eval(() => window.__game.game.__cg));
       }
+      await t.call('setSetting', 'renderDistance', rd0);
       t.note('maxCreatures', max);
       t.note('chunkgenSpawnsAfterEachRound', spawnsChunkgen);
       t.note('populated', await t.eval(() => window.__game.game.mobs.populatedCount()));
@@ -597,6 +623,9 @@ export default [
       t.assert(alive.length === 10, `all ten alive with a mesh after 100 ticks (${alive.length})`);
       t.assert(alive.filter((a) => a.water).every((a) => a.inWater), 'fish and squid are still in the pond');
       const setVis = (v) => t.eval((v) => { for (const e of window.__game.game.entities.all()) if (e.object3d) e.object3d.visible = v; }, v);
+      // LEAD (integration): the pond edit leaves hot sections that fold back into their column a few seconds later,
+      // and streaming may still add sections; either changes the terrain's draw count between the two captures.
+      await settleRenderer(t);
       let entityDraws = Infinity;
       for (let i = 0; i < 4; i++) {
         await setVis(false); await t.call('waitFrames', 3);
