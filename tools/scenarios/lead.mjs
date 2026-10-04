@@ -180,10 +180,11 @@ export default [
       const t0 = (await t.call('stats')).ticks;
       const t1 = await t.call('runTicks', 40);
       t.assert(t1 >= t0 + 40, `runTicks advances 40 ticks (${t0} -> ${t1})`);
-      await t.call('setRandomSeed', 7);
-      const a = await t.eval(() => [0, 1, 2].map(() => window.__game.game.rand()));
-      await t.call('setRandomSeed', 7);
-      const b = await t.eval(() => [0, 1, 2].map(() => window.__game.game.rand()));
+      // seed + draws in ONE evaluation: a tick or frame between two calls may draw game.rand() (mobs, mechanics)
+      const draw = () => t.eval(() => { window.__game.setRandomSeed(7); return [0, 1, 2].map(() => window.__game.game.rand()); });
+      const a = await draw();
+      await t.call('runTicks', 5);
+      const b = await draw();
       t.assert(JSON.stringify(a) === JSON.stringify(b), 'setRandomSeed makes game.rand reproducible');
       const p = await t.call('pos');
       for (const k of ['vx', 'vy', 'vz', 'sneaking', 'sprinting', 'eyeInWater', 'inLava', 'onLadder', 'air', 'fallDistance', 'view']) t.assert(k in p, `pos() has ${k}`);
@@ -206,6 +207,62 @@ export default [
       t.assert(typeof as.voices === 'number' && as.byName, 'audioStats shape');
       const tap = await t.call('tapAt', 0, 0);
       t.assert(tap === null || typeof tap === 'object', 'tapAt runs');
+    },
+  },
+  {
+    // Integration (cross-lane defect, MOBS -> CORE-E): in the kid scheme a hold that started on an animal must
+    // never turn into digging after the animal hops away (kid creative breaks blocks instantly).
+    name: 'lead-kid-hold-entity', requires: ['mobs', 'interaction', 'input', 'player'],
+    async run(t) {
+      await t.call('startWorld', { ...FLAT, rules: { passiveMobs: false } });
+      await t.call('setFlying', false);
+      await t.call('waitTicks', 5);
+      const p = await t.call('pos');
+      const id = await t.eval(({ x, y, z }) => window.__game.game.mobs.spawnMob('pig', x, y, z - 2.5).id, p);
+      await t.call('waitTicks', 3);
+      const pig = (await t.call('entities')).find((e) => e.id === id);
+      await t.call('lookAt', pig.x, pig.y + 0.4, pig.z);
+      t.assert(await t.eval((id) => { const te = window.__game.game.interaction.targetEntity; return !!(te && te.entity && te.entity.id === id); }, id), 'the pig is targeted');
+      const broken0 = await t.call('eventCount', 'block:broken');
+      // hold (as a long kid press does), then the pig is gone from under the cursor while the hold continues
+      await t.eval(() => window.__game.game.input.setVirtual('attack', true));
+      await t.call('waitTicks', 3);
+      await t.eval((id) => { const e = window.__game.game.entities.get(id); window.__game.game.entities.remove(e, 'test'); }, id);
+      await t.call('waitTicks', 30);
+      const tg = await t.call('target');
+      t.assert(tg && tg.name === 'grass_block', `the grass behind is targeted now (${JSON.stringify(tg)})`);
+      t.assert(await t.call('eventCount', 'block:broken') === broken0, 'the hold that hit the pig dug nothing');
+      await t.eval(() => window.__game.game.input.setVirtual('attack', false));
+      await t.call('waitTicks', 2);
+      // a NEW hold on the block still breaks it
+      await t.eval(() => window.__game.game.input.setVirtual('attack', true));
+      await t.call('waitTicks', 3);
+      await t.eval(() => window.__game.game.input.setVirtual('attack', false));
+      t.assert(await t.call('eventCount', 'block:broken') > broken0, 'a new hold on the block breaks it');
+    },
+  },
+  {
+    // Integration (cross-lane defect, KID -> FX/CORE-D): with the eye inside an opaque block the screen shows that
+    // block's texture instead of seeing through the world.
+    name: 'lead-head-in-block', requires: ['fx', 'renderer', 'player'],
+    async run(t) {
+      await t.call('startWorld', FLAT);
+      await t.call('setFlying', true);
+      const p = await t.call('pos');
+      const x = Math.floor(p.x) + 3, z = Math.floor(p.z) + 3;
+      for (let y = 4; y <= 7; y++) await t.call('setBlock', x, y, z, 'sand');
+      await t.call('teleport', x + 0.5, 5, z + 0.5);   // eye at 6.62, inside the sand
+      await t.call('setLook', 0, 0);
+      await t.call('waitFrames', 4);
+      const s = await t.eval(() => window.__game.game.fx.stats());
+      t.assert(s.inBlock, 'the in-block overlay is on');
+      const shown = await t.eval(() => { const e = document.querySelector('#fx-layer .fx-inblock'); return { on: e.classList.contains('on'), bg: getComputedStyle(e).backgroundImage.slice(0, 30), op: getComputedStyle(e).opacity }; });
+      t.note('overlay', shown);
+      t.assert(shown.on && shown.bg.startsWith('url(') && shown.op === '1', 'the sand texture fills the screen');
+      await t.shot('lead-head-in-block');
+      await t.call('teleport', x + 0.5, 9, z + 0.5);
+      await t.call('waitFrames', 4);
+      t.assert(!(await t.eval(() => window.__game.game.fx.stats().inBlock)), 'the overlay goes away when the head is out');
     },
   },
 ];

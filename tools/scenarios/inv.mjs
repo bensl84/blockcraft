@@ -99,6 +99,9 @@ export default [
       await t.shot('inv-hud-creative');
       // survival rows
       await t.call('setMode', 'survival');
+      // freeze game ticks (frames still paint the HUD) so the real survival/physics do not regenerate health
+      // and air or clear eyeInWater between setting the values and reading the rows (LEAD integration)
+      await t.eval(() => window.__game.game.setState('paused'));
       await t.eval(() => { const p = window.__game.game.player; p.health = 7; p.food = 13; p.eyeInWater = true; p.air = 150; p.xpLevel = 3; p.xpProgress = 0.4; });
       await t.call('waitFrames', 3);
       const rows = await t.eval(() => {
@@ -119,6 +122,7 @@ export default [
       t.assert(await t.eval(() => document.querySelector('#hud [data-hud="hearts"]').classList.contains('inv-low')), 'hearts shake at <= 4 HP');
       await t.call('sleep', 500);
       await t.shot('inv-hud-survival');
+      await t.eval(() => window.__game.game.setState('playing'));
       // toast + hidden while a container is open
       await t.eval(() => window.__game.game.events.emit('toast', { text: 'Respawn point set', icon: 'red_bed' }));
       await t.call('waitFrames', 2);

@@ -12,7 +12,7 @@
 // New events: 'fx:weather' {rain, snow} when the target rain strength changes.
 
 
-import { B_LIQUID, ID, blockDef, getSelectionBoxes } from '../core/registry.js';
+import { B_LIQUID, ID, blockDef, faceTexKey, getSelectionBoxes } from '../core/registry.js';
 import { MOBS } from '../data/mobs.js';
 import { mulberry32 } from '../core/math.js';
 import { getTexturePixels } from '../textures/textures.js';
@@ -137,7 +137,7 @@ export function createFxSystem(game) {
         itemMeshesLive: items.live, itemGeometries: items.cache.size,
         crack: crack.mesh.visible ? crack.stage : -1, ghost: ghost.mesh.visible ? { ...ghost.placement } : null,
         viewModel: viewModel.root.visible, heldItem: viewModel.itemKey, playerModel: avatar.mesh.visible,
-        underwater: overlays.underwater, flashes: overlays.flashes, fade: overlays.fadeLevel,
+        underwater: overlays.underwater, inBlock: !!overlays.inBlockURL, flashes: overlays.flashes, fade: overlays.fadeLevel,
         sky: { ...celestial.state }, clouds: celestial.clouds.visible, cloudQuads: celestial.flat ? celestial.flatCloudQuads : celestial.cloudQuads, flatClouds: celestial.flat, stars: celestial.starCount,
         weather: { ...weather.state }, ring: !!overlays.ringState,
       };
@@ -397,9 +397,36 @@ export function createFxSystem(game) {
       }
     }
     overlays.setUnderwater(inWorld && eyeWater && !p.view);
+    overlays.setInBlock(inWorld ? inBlockURL() : '');
     overlays.setInLava(inWorld && eyeLava);
     overlays.setVignette(inWorld);
     overlays.updateRing();
+  }
+
+  /** Texture URL when the camera sits inside an opaque full block (head in sand, a wall in third person), else ''. */
+  const inBlockCache = new Map();
+  function inBlockURL() {
+    const cam = game.renderer && game.renderer.camera, w = game.world;
+    if (!cam || !w || !w.isOpen || !w.getRaw || !game.textures) return '';
+    const y = Math.floor(cam.position.y);
+    if (y < 0 || y >= 256) return '';
+    const raw = w.getRaw(Math.floor(cam.position.x), y, Math.floor(cam.position.z)), id = raw & 0xff;
+    const def = blockDef(id);
+    if (!def || !def.opaque || def.shape !== 'cube' || def.liquid) return '';
+    const key = faceTexKey(id, raw >>> 8, 2);
+    let url = inBlockCache.get(key);
+    if (url === undefined) {
+      url = '';
+      try {
+        const px = getTexturePixels(game.textures, key);
+        const c = document.createElement('canvas'); c.width = 16; c.height = 16;
+        const cx = c.getContext('2d'), img = cx.createImageData(16, 16);
+        img.data.set(px); cx.putImageData(img, 0, 0);
+        url = c.toDataURL('image/png');
+      } catch { url = ''; }
+      inBlockCache.set(key, url);
+    }
+    return url;
   }
 
   function installPointerRing() {
@@ -426,8 +453,8 @@ export function createFxSystem(game) {
 /** Overlay stand-in without a DOM (Node tests). */
 function nullOverlays() {
   return {
-    underwater: false, inLava: false, flashes: 0, fadeLevel: 0, ringState: null,
-    setUnderwater(v) { this.underwater = v; }, setInLava(v) { this.inLava = v; }, setVignette() {},
+    underwater: false, inLava: false, inBlockURL: '', flashes: 0, fadeLevel: 0, ringState: null,
+    setUnderwater(v) { this.underwater = v; }, setInLava(v) { this.inLava = v; }, setInBlock(u) { this.inBlockURL = u || ''; }, setVignette() {},
     hurtFlash() { this.flashes++; return true; }, fade(to) { this.fadeLevel = to; return Promise.resolve(); }, pulse() { return Promise.resolve(); },
     ringDown() {}, ringMove() {}, ringUp() {}, ringCancel() {}, updateRing() {}, clearAll() {},
   };

@@ -47,7 +47,9 @@ export class ItemEntity extends Entity {
     let magnet = false;
     const p = game.player;
     if (d.delay <= 0 && p && !p.dead) {
-      const py = Math.max(p.y, Math.min(p.y + (p.height || 1.8), this.y + 0.125));
+      // the body reaches 0.5 below the feet (Java inflates the pickup box by 0.5 down): a drop that rolled to
+      // the far side of the 1-deep hole the child just dug in front of them is still pulled in and picked up
+      const py = Math.max(p.y - 0.5, Math.min(p.y + (p.height || 1.8), this.y + 0.125));
       const dx = p.x - this.x, dy = py - (this.y + 0.125), dz = p.z - this.z;
       const dist = Math.hypot(dx, dy, dz);
       if (dist < ITEM_PICKUP_RANGE && this.tryPickup(game)) return;

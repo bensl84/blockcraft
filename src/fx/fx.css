@@ -20,6 +20,14 @@
 #fx-layer .fx-lava { background: rgb(230, 90, 20); opacity: 0; transition: opacity 0.15s; }
 #fx-layer .fx-lava.on { opacity: 0.6; }
 
+/* eye inside an opaque block: the block's own texture, big pixels, darkened (the original shows the same) */
+#fx-layer .fx-inblock {
+  background-color: #000; background-repeat: repeat; background-position: center;
+  background-size: 34vmax 34vmax; image-rendering: pixelated;
+  filter: brightness(0.32); opacity: 0;
+}
+#fx-layer .fx-inblock.on { opacity: 1; }
+
 /* hurt: red vignette only (the camera tilt belongs to the player lane) */
 #fx-layer .fx-hurt {
   background: radial-gradient(ellipse at center, rgba(200, 0, 0, 0) 45%, rgba(200, 0, 0, 0.55) 85%, rgba(160, 0, 0, 0.75) 100%);

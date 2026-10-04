@@ -250,11 +250,24 @@ export const SCENARIOS = [
     async run(t) {
       await t.call('startWorld', { ...FLAT, mode: 'survival', difficulty: 'easy' });
       await t.call('setRule', 'fallDamage', true);
-      const p = await t.call('pos');
-      await t.call('teleport', p.x, p.y + 10, p.z);
-      await t.call('waitTicks', 60);
-      const q = await t.call('pos');
-      t.assert(q.health <= 13 && q.health >= 12, `10-block fall costs 7 HP (health ${q.health})`);
+      await t.call('setFlying', false);
+      // Judge the fall by its own 'player:hurt' event: by the time the player has landed and settled, natural
+      // regeneration (+1 HP per 10 ticks at full hunger, SPEC) has already healed some of it.
+      await t.eval(() => { const g = window.__game.game; g.__fallHurts = []; g.__fallOff = g.events.on('player:hurt', (e) => g.__fallHurts.push({ amount: e.amount, cause: e.cause, health: e.health })); });
+      try {
+        const p = await t.call('pos');
+        await t.call('teleport', p.x, p.y + 10, p.z);
+        t.assert(await t.call('waitFor', 'game.__fallHurts.length > 0', 5000), 'the fall hurts');
+        const hurts = await t.eval(() => window.__game.game.__fallHurts);
+        t.note('hurt', hurts);
+        const fall = hurts.find((h) => h.cause === 'fall');
+        t.assert(fall && fall.amount === 7 && fall.health === 13, `10-block fall costs 7 HP (${JSON.stringify(hurts)})`);
+        await t.call('waitTicks', 20);
+        const q = await t.call('pos');
+        t.assert(q.health >= 13 && q.health < 20, `health after landing (${q.health})`);
+      } finally {
+        await t.eval(() => { const g = window.__game.game; if (g.__fallOff) g.__fallOff(); g.__fallOff = null; });
+      }
     },
   },
   {

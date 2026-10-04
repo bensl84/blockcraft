@@ -16,21 +16,33 @@ export class Overlays {
     this.vignette = el('div', { class: 'fx-vignette' });
     this.water = el('div', { class: 'fx-water' });
     this.lava = el('div', { class: 'fx-lava' });
+    // eye inside an opaque block: that block's texture fills the screen, darkened (LEAD integration, kid lane
+    // cross-lane defect 4: the camera used to see through the world with a huge outline)
+    this.inBlock = el('div', { class: 'fx-inblock' });
     this.hurt = el('div', { class: 'fx-hurt' });
     this.fadeEl = el('div', { class: 'fx-fade' });
     this.ring = el('div', { class: 'fx-ring' });
-    this.root.append(this.vignette, this.water, this.lava, this.hurt, this.fadeEl, this.ring);
+    this.root.append(this.vignette, this.water, this.lava, this.inBlock, this.hurt, this.fadeEl, this.ring);
     this.limiter = new FlashLimiter(3);
     this.fadeLevel = 0;
     this.fadeTimer = 0;
     this.flashes = 0;
     this.underwater = false;
     this.inLava = false;
+    this.inBlockURL = '';
     this.ringState = null;   // {id, x, y, t0, done}
   }
 
   setUnderwater(on) { if (on !== this.underwater) { this.underwater = on; this.water.classList.toggle('on', on); } }
   setInLava(on) { if (on !== this.inLava) { this.inLava = on; this.lava.classList.toggle('on', on); } }
+  /** Eye inside an opaque block: show its texture (a data URL of the 16 px face) full screen; '' hides it. */
+  setInBlock(url) {
+    url = url || '';
+    if (url === this.inBlockURL) return;
+    this.inBlockURL = url;
+    if (url) this.inBlock.style.backgroundImage = `url(${url})`;
+    this.inBlock.classList.toggle('on', !!url);
+  }
   setVignette(on) { this.vignette.classList.toggle('on', !!on); }
 
   /** Red vignette pulse. Returns false when suppressed by the flash limiter. */
@@ -92,7 +104,7 @@ export class Overlays {
   }
 
   clearAll() {
-    this.setUnderwater(false); this.setInLava(false); this.ringCancel();
+    this.setUnderwater(false); this.setInLava(false); this.setInBlock(''); this.ringCancel();
     try { if (this.hurtAnim) this.hurtAnim.cancel(); } catch { /* ignore */ }
   }
 }

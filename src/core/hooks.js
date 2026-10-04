@@ -7,6 +7,9 @@
 //   3. held item -> itemUse[itemKey]                       (eat, bucket, bone meal, hoe, spawn egg, flint & steel...)
 //   4. held item places a block -> placers[blockName] if registered, else CORE-E default placement
 // A handler returns true when it CONSUMED the action (stop), false to fall through.
+// PLACERS are different (SPEC §7.4 step 5): true = placed. interaction then swings and, outside creative, consumes ONE
+// item from the selected slot itself, so a placer never consumes the item. false = refused: nothing is placed or
+// consumed, and the default placement does NOT run.
 //
 // Context objects (all fields always present; hit may be null). `action` is the id of this player action
 // (interaction.newAction()): pass it as opts.action to every breakBlock/placeBlock/setBlock the handler does, so
@@ -22,7 +25,7 @@ export const hooks = {
   blockUse: new Map(),
   /** @type {Map<string, (ctx: object) => boolean>} keyed by item key */
   itemUse: new Map(),
-  /** @type {Map<string, (ctx: object) => boolean>} keyed by block name; custom placement (door, bed) */
+  /** @type {Map<string, (ctx: object) => boolean>} keyed by block name; custom placement (door, bed). true = placed (item consumed by interaction), false = refused */
   placers: new Map(),
   /** @type {Map<string, (ctx: object) => boolean>} keyed by entity type */
   entityInteract: new Map(),

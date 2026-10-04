@@ -1595,6 +1595,7 @@ tick ; frame
 **Attack** (`attack` held)
 
 - **Entity target:** run `hooks.entityAttack[type]`; otherwise `entity.hurt(damage, {type: 'player', player: true, crit})`. Repeat every 10 ticks while held (spam clicks always register). Swing. Exhaustion 0.1. Tool durability as in §2.2.
+- **Kid scheme (v1.6):** a hold that hit an entity stays an entity hold until it is released. When the animal hops away the hold does nothing, instead of digging the block behind it (kid creative breaks blocks instantly). The classic scheme keeps the Java behaviour.
 - **Block target, creative:** `breakBlock` instantly, then every 5 ticks while held.
 - **Block target, survival:**
   - Accumulate `1/breakTicks` per tick.
@@ -1623,6 +1624,7 @@ Every player `use()`/`attack()` press allocates one `newAction()` and passes it 
    - Food handlers **must return false** when the target is a farmland top face and the item places a crop (carrot, potato), so planting wins.
    - Bucket and flint handlers do their own raycast with `fluids` when needed.
 5. Held item places a block (`itemPlaces`) → `hooks.placers[blockName]` if registered, else the **default placement** below.
+   - **Placer return contract (v1.6):** a placer returns **true** when it placed the block (door, bed: both halves, with `ctx.action`). `interaction` then swings the arm and, outside creative, consumes **one** item from the selected slot itself, so a placer **never consumes the item**. **false** means refused: nothing is placed, nothing is consumed, and the default placement does **not** run.
 6. Kid scheme, creative, nothing consumed, and the hand is **empty or holds a tool** (an item with `tool`) → break the targeted block instantly. Tapping with food, dye, bone or any other non-placeable item never breaks blocks.
 
 **Default placement rules**

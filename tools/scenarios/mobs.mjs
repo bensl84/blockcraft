@@ -58,11 +58,16 @@ export default [
       t.assert(meshes >= 19, `every entity has a mesh (${meshes})`);
       // the real renderer also draws terrain: count the entity draws as (all) - (entities hidden)
       const setVis = (v) => t.eval((v) => { for (const e of window.__game.game.entities.all()) if (e.object3d) e.object3d.visible = v; }, v);
-      await setVis(false); await t.call('waitFrames', 3);
-      const without = (await t.call('stats')).drawCalls;
-      await setVis(true); await t.call('waitFrames', 3);
-      const withEnt = (await t.call('stats')).drawCalls;
-      const entityDraws = withEnt - without;
+      // terrain still streaming in (or FX clouds/particles) can change the total between two samples: take the
+      // smallest difference over a few hidden/shown pairs (LEAD integration: flaked after other scenarios)
+      let entityDraws = Infinity, withEnt = 0;
+      for (let i = 0; i < 4; i++) {
+        await setVis(false); await t.call('waitFrames', 3);
+        const without = (await t.call('stats')).drawCalls;
+        await setVis(true); await t.call('waitFrames', 3);
+        const w = (await t.call('stats')).drawCalls;
+        if (w - without < entityDraws) { entityDraws = w - without; withEnt = w; }
+      }
       t.note('drawCalls', { total: withEnt, entities: entityDraws });
       t.assert(entityDraws <= 19 + 2, `one draw call per mob (${entityDraws} entity draws for 19 entities)`);
       t.note('renderCache', await t.eval(() => window.__game.game.mobs.renderStats()));
@@ -102,6 +107,21 @@ export default [
       const after = await t.eval(() => window.__game.game.inventory.count('dirt'));
       t.assert(after === before + 1, `+1 dirt (${before} -> ${after})`);
       t.assert(await ec('item:pickup') >= 1, 'item:pickup');
+      // LEAD regression: the random pop sometimes rolled the drop to the far side of the hole, out of reach
+      // (mobs-pickup flaked in the full suite). Every pop direction must still be picked up.
+      const misses = await t.eval(async ({ x, y, z }) => {
+        const g = window.__game.game, out = [];
+        for (const [vx, vz] of [[0, -0.1], [0.1, -0.1], [-0.1, -0.1], [0.1, 0], [-0.1, 0], [0, 0.1]]) {
+          const n0 = g.inventory.count('dirt');
+          // what interaction.breakBlock's dropItem() spawns, with a chosen pop direction
+          const e = g.entities.spawn('item', x + 0.5, y + 0.375, z + 0.5, { stack: { item: 'dirt', count: 1 }, vx, vy: 0.2, vz, delay: 10, reason: 'drop' });
+          if (!e) { out.push('no item entity'); break; }
+          g.stepTicks(40);
+          if (g.inventory.count('dirt') !== n0 + 1) out.push(`${vx},${vz}`);
+        }
+        return out;
+      }, br);
+      t.assert(misses.length === 0, `drops in the dug hole are picked up from every side (missed ${misses.join(' ')})`);
     },
   },
   {

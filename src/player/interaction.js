@@ -77,6 +77,9 @@ export function createInteractionSystem(game) {
   let attackAction = 0, useAction = 0;
   let breakCooldown = 0;           // ticks until the next block may start (creative repeat / survival delay)
   let entityCooldown = 0;
+  // Kid scheme: a hold that hit an entity stays an entity hold until it is released, so an animal that hops
+  // away never turns the hold into digging the block behind it (12 holds on a pig dug 11 holes in kid creative).
+  let attackOnEntity = false;
   let useRepeat = 0;
   let useRepeatPlaces = false;
   // targeting scratch (allocation-free per frame)
@@ -214,6 +217,7 @@ export function createInteractionSystem(game) {
     /** One attack step at the current target (left click / kid hold). Returns true if something happened. */
     attack(action = 0) {
       if (!game.world || !game.world.isOpen) return false;
+      attackOnEntity = false;
       return attackStep(action || ix.newAction(), true);
     },
     /** Middle click: put the targeted block's item in the hotbar (creative). */
@@ -255,9 +259,9 @@ export function createInteractionSystem(game) {
 
       // ---- attack (hold / left click)
       const pressed = input.wasPressed('attack'), held = input.isDown('attack') || pressed;
-      if (pressed) { attackAction = ix.newAction(); entityCooldown = 0; if (game.isCreative()) breakCooldown = 0; }
+      if (pressed) { attackAction = ix.newAction(); entityCooldown = 0; attackOnEntity = false; if (game.isCreative()) breakCooldown = 0; }
       if (held) attackStep(attackAction || ix.newAction(), pressed);
-      else stopMining();
+      else { stopMining(); attackOnEntity = false; }
     },
 
     frame() {
@@ -371,9 +375,11 @@ export function createInteractionSystem(game) {
       stopMining();
       if (entityCooldown > 0 && !pressed) return false;
       entityCooldown = ENTITY_ATTACK_REPEAT;
+      attackOnEntity = true;
       hitEntity(te.entity);
       return true;
     }
+    if (attackOnEntity && game.input && game.input.scheme === 'kid') { stopMining(); return false; }
     const t = ix.target;
     if (!t) { stopMining(); return false; }
     if (game.isCreative()) {
