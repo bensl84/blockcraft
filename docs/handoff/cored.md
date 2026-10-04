@@ -139,3 +139,8 @@ None for this lane.
 - Please record spec conflicts 1–5 in the SPEC.
 - Optional: extend `lead-testapi`/`terrain-render` to use `renderer.capturePixels` (exact PNG-free pixels) instead of the JPEG thumbnail when precision matters.
 - Optional (CORE-C/LEAD decision): mesh columns whose nearest edge is within `fogFar` (not just centre distance ≤ R) to remove the diagonal gap entirely; the eased fog already hides it.
+
+### Fix round 1 (judge-polish POL-1, POL-3)
+
+- **POL-1 kid outline thickness:** the ribbon shader takes `uMaxPx` (framebuffer px) and clamps each capsule radius to it. The cap is `OUTLINE_MAX_RADIUS_GUI` (core 1.0, border 1.85 GUI units) x `game.guiScale` x the renderer's current pixel ratio, set per draw in `onBeforeRender`. At GUI 3 that is a 6 px white core on an 11 px black border, which is what a face at about 2.7 blocks gets anyway, so normal reach looks unchanged; a face 0.6 blocks away (or a tunnel wall right beside the camera) now keeps the same thin outline instead of a 45 px frame or full-height bars. `new Outline(guiScaleGetter)`; without a getter it assumes GUI 3.
+- **POL-3 water moire:** the TRANSLUCENT chunk pass fades the texel toward the tile's last mip (its average colour) as the mip level rises (smoothstep 0.75..2.25 of the texel-per-pixel LOD), so the nearest-sampled small mips of the ripple pattern no longer beat into rings around the camera. Close water keeps crisp pixels. The remaining depth bands near shores are the sea floor showing through (they follow the coast, not the camera).

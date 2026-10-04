@@ -147,6 +147,13 @@ void main() {
   if (tex.a < thr) discard;
   tex.a = 1.0;
 #elif defined(TRANSLUCENT)
+  // Water seen far away or at a grazing angle: the small nearest-sampled mips of its tiled ripple pattern beat
+  // against the pixel grid and draw moire rings around the camera. Fade to the tile's average colour (its last
+  // mip) as the mip level rises; close water keeps its crisp pixels.
+  vec2 tc = vUv * vec2(textureSize(uTex, 0).xy);
+  vec2 dx = dFdx(tc), dy = dFdy(tc);
+  float lod = 0.5 * log2(max(max(dot(dx, dx), dot(dy, dy)), 1e-8));
+  tex = mix(tex, textureLod(uTex, vec3(vUv, vLayer), 8.0), smoothstep(0.75, 2.25, lod));
   if (tex.a < 0.02) discard;
 #else
   tex.a = 1.0;
@@ -331,6 +338,7 @@ in float aSide;
 in float aAlong;
 uniform float uWidth;
 uniform float uMinPx;   // minimum width in "blocks per block of depth" (keeps lines visible far away)
+uniform float uMaxPx;   // maximum capsule radius in framebuffer px (keeps lines thin when the face is right in front)
 uniform vec4 uViewport;
 flat out vec2 vA;       // segment ends, framebuffer pixels
 flat out vec2 vB;
@@ -355,8 +363,8 @@ void main() {
   vec2 hv = 0.5 * uViewport.zw;
   vec2 pa = (ca.xy / ca.w) * hv + hv + uViewport.xy;
   vec2 pb = (cb.xy / cb.w) * hv + hv + uViewport.xy;
-  float wa = max(uWidth, -va.z * uMinPx) * 0.5 * projectionMatrix[1][1] * hv.y / -va.z;
-  float wb = max(uWidth, -vb.z * uMinPx) * 0.5 * projectionMatrix[1][1] * hv.y / -vb.z;
+  float wa = min(max(uWidth, -va.z * uMinPx) * 0.5 * projectionMatrix[1][1] * hv.y / -va.z, uMaxPx);
+  float wb = min(max(uWidth, -vb.z * uMinPx) * 0.5 * projectionMatrix[1][1] * hv.y / -vb.z, uMaxPx);
   vec2 d = pb - pa;
   float len = length(d);
   vec2 dir = len > 1e-3 ? d / len : vec2(1.0, 0.0);
