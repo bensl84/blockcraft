@@ -93,8 +93,10 @@ export function createFxSystem(game) {
       weather.update(dt);
       entityFire.update(dt, game.state === 'playing' ? alpha : 1);
       sleepView.apply(dt);
-      fx.weather.rain = weather.state.rain; fx.weather.target = weather.state.target; fx.weather.snow = weather.state.snow;
-      celestial.update(dt, weather.state.rain);
+      // v1.7 (FID-8): it never rains in the Nether (the renderer, rain sounds and the cycle all read fx.weather)
+      const dry = !!(game.renderer && game.renderer.nether);
+      fx.weather.rain = dry ? 0 : weather.state.rain; fx.weather.target = dry ? 0 : weather.state.target; fx.weather.snow = weather.state.snow;
+      celestial.update(dt, fx.weather.rain);
       updateOverlays();
     },
 

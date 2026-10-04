@@ -409,9 +409,10 @@ def(183, 'netherrack', { tex: 'netherrack', hardness: 0.4, blast: 0.4, tool: 'pi
 def(184, 'soul_sand', { tex: 'soul_sand', hardness: 0.5, tool: 'shovel', sound: 'sand', tab: 'nature', color: '#54402f' });
 def(185, 'nether_quartz_ore', { ...ORE, tex: 'nether_quartz_ore', level: 1, drops: [{ item: 'quartz', min: 1, max: 2 }], xp: [2, 5], color: '#7a4a44' });
 def(186, 'nether_bricks', { ...STONY, tex: 'nether_bricks', color: '#2c1418' });
-// Portal sheet inside a lit obsidian frame (MECH nether.js). Not minable; breaking the frame removes it.
+// Portal sheet inside a lit obsidian frame (mechanics/nether.js). Breaks at a touch and drops nothing; breaking the
+// frame removes the whole sheet (MECH support rule, cascade).
 def(187, 'nether_portal', {
-  shape: 'portal', pass: 'translucent', solid: false, opaque: false, emit: 11, hardness: -1, blast: 3600000,
+  shape: 'portal', pass: 'translucent', solid: false, opaque: false, emit: 11, hardness: 0,
   tex: 'nether_portal', item: null, drops: null, sound: 'glass', color: '#7a2ad8',
 });
 

@@ -152,7 +152,7 @@ export class Weather {
       }
     }
     const rain = this.state.rain;
-    if (rain > 0.05 && !this.state.snow && g.player && g.world && g.world.getHeight) {
+    if (rain > 0.05 && !this.state.snow && g.player && g.world && g.world.getHeight && !(g.renderer && g.renderer.nether)) {
       const p = g.player;
       const n = Math.floor(rain * 4 + this.rng());
       for (let i = 0; i < n; i++) {
@@ -170,7 +170,7 @@ export class Weather {
     s.rain += (s.target - s.rain) * k;
     if (Math.abs(s.target - s.rain) < 0.002) s.rain = s.target;
     const cam = g.renderer && g.renderer.camera;
-    const show = !!(g.meta && cam && s.rain > 0.01);
+    const show = !!(g.meta && cam && s.rain > 0.01 && !(g.renderer && g.renderer.nether)); // v1.7: no rain in the Nether
     this.mesh.visible = show;
     if (!show) { this.geometry.setDrawRange(0, 0); return; }
     this.uniforms.uTime.value += dt;

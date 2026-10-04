@@ -15,6 +15,7 @@
 // columns stream in during frames (spec deviation recorded in docs/handoff/mobs.md).
 
 import { BIOMES } from '../world/worldgen.js';
+import { isNetherColumn, isNetherX } from '../core/nether.js';
 import { B_LIQUID, B_SOLID, ID } from '../core/registry.js';
 import { MOBS, SPAWN, mobsForBiome } from '../data/mobs.js';
 import { ENTITY_TYPES } from './entity.js';
@@ -223,6 +224,7 @@ export function createSpawner(game) {
     const key = columnKey(ev.cx, ev.cz);
     if (populated.has(key)) return;             // never populate a column twice (SPEC §2.6)
     populated.add(key);
+    if (isNetherColumn(ev.cx)) return;          // LEAD v1.7 (FID-8): the kid-safe Nether has no mobs
     if (!rules().passiveMobs) return;
     // water mobs roll their own per-column generator, so the land animals of a seed stay exactly as before
     const wrng = mulberry32(hash32((game.meta.seed >>> 0) ^ 0x57415452, ev.cx, ev.cz, 9));
@@ -307,8 +309,9 @@ export function createSpawner(game) {
     counts, onColumnLoaded, spawnAnimalGroup, spawnWaterGroup, spawnGroupAt, starterAnimals, topUp, monsterAttempt, despawnMonsters, hostileAllowed, cullRestored,
     tick() {
       if (!game.meta) return;
-      if (++topupTimer >= PASSIVE_TOPUP_TICKS) { topupTimer = 0; topUp(); topUp(true); }
-      if (hostileAllowed()) {
+      const nether = !!(game.player && isNetherX(game.player.x));   // LEAD v1.7 (FID-8): nothing spawns in the Nether
+      if (++topupTimer >= PASSIVE_TOPUP_TICKS) { topupTimer = 0; if (!nether) { topUp(); topUp(true); } }
+      if (hostileAllowed() && !nether) {
         if (++monsterTimer >= SPAWN.MONSTER_ATTEMPT_TICKS) { monsterTimer = 0; monsterAttempt(); }
         despawnMonsters(false);
       } else if (game.tickCount % 20 === 0 && counts().monster > 0) despawnMonsters(true);

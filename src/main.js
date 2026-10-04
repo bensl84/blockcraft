@@ -26,6 +26,7 @@ import { createEntitySystem } from './entities/entity.js';
 import { createMobsSystem } from './entities/mobs.js';
 import { createSurvivalSystem } from './survival/survival.js';
 import { createMechanicsSystem } from './mechanics/mechanics.js';
+import { createNetherSystem } from './mechanics/nether.js';
 import { Inventory, KID_CREATIVE_HOTBAR } from './inventory/inventory.js';
 import { createInventoryUISystem } from './ui/inventory_ui.js';
 import { createHudSystem } from './ui/hud.js';
@@ -153,6 +154,7 @@ function createSystems() {
   register(createPlayerSystem(game));       // game.player
   register(createInteractionSystem(game));  // game.interaction
   register(createMechanicsSystem(game));    // game.mechanics
+  register(createNetherSystem(game));       // game.nether (v1.7: portal + the Nether, judge FID-8)
   register(createEntitySystem(game));       // game.entities
   register(createMobsSystem(game));         // game.mobs
   register(createSurvivalSystem(game));     // game.survival

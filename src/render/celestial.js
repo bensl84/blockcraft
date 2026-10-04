@@ -257,7 +257,8 @@ export class Celestial {
     this.stars.visible = stars > 0.01;
     // clouds
     const show = g.settings ? g.settings.clouds !== false : true;
-    this.clouds.visible = show && !!g.meta;
+    const nether = !!(r && r.nether);            // v1.7 (FID-8): no sky in the Nether
+    this.clouds.visible = show && !!g.meta && !nether;
     if (this.clouds.visible) {
       if (g.state === 'playing' || g.state === 'title') this.cloudDrift += dt * CLOUD_SPEED;
       const period = CLOUD_MAP_SIZE * CLOUD_CELL;
@@ -297,7 +298,7 @@ export class Celestial {
     }
     this.state.angle = angle; this.state.phase = phase; this.state.stars = stars;
     this.state.sunVisible = sd[1] > -0.2 && clear > 0; this.state.cloudsVisible = this.clouds.visible;
-    this.group.visible = !!g.meta;
+    this.group.visible = !!g.meta && !nether;
   }
 
   dispose() {

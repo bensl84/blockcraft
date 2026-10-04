@@ -26,7 +26,7 @@ for (const b of BLOCKS) {
   if (!b) continue;
   B_BLAST[b.id] = b.blast;
   const shape = B_SHAPE[b.id];
-  if (b.support || b.placeOn || shape === SHAPE.DOOR || shape === SHAPE.BED) B_NEEDS_SUPPORT[b.id] = 1;
+  if (b.support || b.placeOn || shape === SHAPE.DOOR || shape === SHAPE.BED || shape === SHAPE.PORTAL) B_NEEDS_SUPPORT[b.id] = 1;
   if (b.placeOn) PLACE_ON[b.id] = new Set(b.placeOn.map((n) => ID[n]));
   const washShape = shape === SHAPE.CROSS || shape === SHAPE.CROP || shape === SHAPE.TORCH || shape === SHAPE.FIRE || shape === SHAPE.LAYER;
   if (b.id !== 0 && !b.liquid && (washShape || b.replaceable)) B_WASHABLE[b.id] = 1;
@@ -113,6 +113,13 @@ export function supportStatus(getRaw, x, y, z) {
   if (shape === SHAPE.LADDER) {
     const d = FACING_DIRS[((st & 3) + 2) & 3];
     return hasSolidSide(getRaw(x + d[0], y, z + d[2])) ? 'ok' : 'support';
+  }
+  // v1.7 (FID-8): a portal sheet holds while its in-plane neighbours are portal or obsidian (break the frame: it goes)
+  if (shape === SHAPE.PORTAL) {
+    const keep = (r) => { const i = r & 0xff; return i === id || i === ID.obsidian; };
+    const zAxis = (st & 1) !== 0;
+    const a = zAxis ? getRaw(x, y, z - 1) : getRaw(x - 1, y, z), c = zAxis ? getRaw(x, y, z + 1) : getRaw(x + 1, y, z);
+    return keep(below) && keep(getRaw(x, y + 1, z)) && keep(a) && keep(c) ? 'ok' : 'cascade';
   }
   // v1.7: a hanging lantern needs something solid above; a wall sign the wall behind its board
   if (shape === SHAPE.LANTERN && (st & 1)) return B_SOLID[getRaw(x, y + 1, z) & 0xff] ? 'ok' : 'support';

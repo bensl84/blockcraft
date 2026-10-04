@@ -18,6 +18,8 @@ import { ID, B_OPAQUE } from '../core/registry.js';
 import { hash32, hash01, mulberry32 } from '../core/math.js';
 import { getTerrain, B } from './gen_terrain.js';
 import { buildTree, TREE_MAX_RADIUS } from './gen_trees.js';
+import { isNetherColumn } from '../core/nether.js';
+import { generateNetherColumn } from './gen_nether.js';
 
 /**
  * Biome table. id is stored per column cell in Column.biomes (Uint8). Order is save-stable.
@@ -262,6 +264,8 @@ export function generateColumn(seed, cx, cz, preset, out) {
   if (blocks.length !== COLUMN_VOLUME) throw new Error('generateColumn: blocks must be Uint16Array(32768)');
   seed >>>= 0;
   blocks.fill(0); // callers pass zeroed arrays (SPEC); cheap insurance for pooled worker buffers
+  // every world keeps its Nether in a far-east strip (LEAD v1.7, judge FID-8; core/nether.js, gen_nether.js)
+  if (isNetherColumn(cx)) { generateNetherColumn(seed, cx, cz, blocks, biomes); return out; }
   if (preset === 'flat') { generateFlat(seed, cx, cz, blocks, biomes); return out; }
   const T = getTerrain(seed, preset);
   const x0 = cx * 16, z0 = cz * 16;

@@ -474,6 +474,90 @@ export default [
     },
   },
   {
+    // Judge FID-8: an obsidian frame lit with flint and steel (a real tap) opens a portal; walking in (the real up
+    // arrow) takes the child to the Nether - dark red caverns, glowstone, a lava sea, no sky, no rain - onto a
+    // safe railed platform; walking back in brings her to the same portal at home. One Undo removes a lit sheet,
+    // and breaking the frame removes it too.
+    name: 'lead-nether-portal', requires: ['mechanics', 'interaction', 'renderer', 'worldgen', 'kid'],
+    async run(t) {
+      await t.call('startWorld', { preset: 'default', seed: 12345, mode: 'creative', difficulty: 'peaceful' });
+      await t.call('setFlying', false);
+      await t.call('waitTicks', 5);
+      const p = await t.call('pos');
+      const x0 = Math.floor(p.x) - 1, y0 = Math.floor(p.y), z0 = Math.floor(p.z) - 4;
+      await t.eval(({ x0, y0, z0 }) => {
+        const api = window.__game, w = api.game.world, id = (n) => api.blockId(n);
+        for (let dx = -2; dx <= 5; dx++) for (let dz = -1; dz <= 4; dz++) {
+          w.setBlock(x0 + dx, y0 - 1, z0 + dz, id('stone'), 0, { cause: 'test' });
+          for (let dy = 0; dy < 6; dy++) w.setBlock(x0 + dx, y0 + dy, z0 + dz, 0, 0, { cause: 'test' });
+        }
+        for (let dx = 0; dx < 4; dx++) for (let dy = 0; dy < 5; dy++) {
+          if (dx === 0 || dx === 3 || dy === 0 || dy === 4) w.setBlock(x0 + dx, y0 + dy, z0, id('obsidian'), 0, { cause: 'test' });
+        }
+      }, { x0, y0, z0 });
+      await t.call('setSlot', 0, 'flint_and_steel', 1); await t.call('selectSlot', 0);
+      await t.call('setLook', 0, -20);
+      await t.call('waitFrames', 5);
+      const sheet = () => t.eval(({ x0, y0, z0 }) => { let n = 0; const g = window.__game; for (let dx = 1; dx <= 2; dx++) for (let dy = 1; dy <= 3; dy++) if (g.getBlock(x0 + dx, y0 + dy, z0) === 'nether_portal') n++; return n; }, { x0, y0, z0 });
+      await tapWorld(t, x0 + 1.5, y0 + 1, z0 + 0.5);
+      t.assert(await sheet() === 6, `a flint tap inside the frame lights a 2x3 sheet (${await sheet()})`);
+      await t.shot('lead-nether-lit');
+      await t.eval(() => window.__game.game.kid.undo());
+      await t.call('waitTicks', 2);
+      t.assert(await sheet() === 0, 'one Undo puts the frame back to empty');
+      await tapWorld(t, x0 + 1.5, y0 + 1, z0 + 0.5);
+      t.assert(await sheet() === 6, 'lit again');
+      // walk in
+      await t.call('setLook', 0, 0);
+      const travels = () => t.call('eventCount', 'nether:travel');
+      const base = await travels();
+      await t.page.keyboard.down('ArrowUp');
+      let went = false;
+      for (let i = 0; i < 60 && !went; i++) { await new Promise((r) => setTimeout(r, 100)); went = (await travels()) > base; }
+      await t.page.keyboard.up('ArrowUp');
+      t.assert(went, 'walking into the sheet travels');
+      await t.call('waitFrames', 30);
+      const there = await t.eval(() => {
+        const g = window.__game.game, pl = g.player, r = g.renderer, w = g.world;
+        let lava = 0;
+        for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let dy = -1; dy <= 2; dy++) if ((w.getRaw(Math.floor(pl.x) + dx, Math.floor(pl.y) + dy, Math.floor(pl.z) + dz) & 0xff) === 14) lava++;
+        return { x: pl.x, y: pl.y, z: pl.z, nether: r.nether, fogFar: r.uniforms.uFogFar.value, minLight: r.uniforms.uMinLight.value, rain: g.fx.weather.rain,
+          floor: window.__game.getBlock(Math.floor(pl.x), Math.floor(pl.y) - 1, Math.floor(pl.z)), lava, clouds: g.fx.stats ? g.fx.stats().celestial : null };
+      });
+      t.note('arrived', there);
+      t.assert(there.x > 30000 && there.nether, `in the Nether (${Math.round(there.x)})`);
+      t.assert(there.fogFar <= 56 && there.minLight >= 0.3 && there.rain === 0, 'Nether haze, a light floor and no rain');
+      t.assert(['obsidian', 'nether_bricks', 'netherrack'].includes(there.floor) && there.lava === 0, `a safe floor and no lava next to the child (${there.floor}, lava ${there.lava})`);
+      for (let i = 0; i < 40; i++) { if (!(await t.eval(() => window.__game.game.world.unmeshedWithin(3)))) break; await new Promise((r) => setTimeout(r, 100)); }
+      await t.call('waitFrames', 10);
+      await t.shot('lead-nether-arrived');
+      await t.call('setLook', 0, 10);
+      await t.call('waitFrames', 10);
+      await t.shot('lead-nether-portal-back');
+      // back through the portal behind the arrival spot (it faces away from the sheet)
+      const sheetDir = await t.eval(() => {
+        const g = window.__game.game, pl = g.player;
+        for (let r = 1; r <= 3; r++) for (const [dx, dz] of [[0, -r], [0, r], [r, 0], [-r, 0]]) {
+          if ((g.world.getRaw(Math.floor(pl.x + dx), Math.floor(pl.y) + 1, Math.floor(pl.z + dz)) & 0xff) === window.__game.blockId('nether_portal')) return { dx, dz };
+        }
+        return null;
+      });
+      t.assert(!!sheetDir, 'the arrival portal is right there');
+      await t.call('setLook', sheetDir.dz < 0 ? 0 : sheetDir.dz > 0 ? 180 : sheetDir.dx > 0 ? 270 : 90, 0);
+      await t.page.keyboard.down('ArrowUp');
+      let back = false;
+      for (let i = 0; i < 60 && !back; i++) { await new Promise((r) => setTimeout(r, 100)); back = (await travels()) > base + 1; }
+      await t.page.keyboard.up('ArrowUp');
+      const home = await t.call('pos');
+      t.assert(back && Math.abs(home.x - (x0 + 2)) < 4 && Math.abs(home.z - z0) < 4, `back home at the first portal (${Math.round(home.x)}, ${Math.round(home.z)} vs ${x0 + 2}, ${z0})`);
+      t.assert(!(await t.eval(() => window.__game.game.renderer.nether)), 'the overworld sky is back');
+      // breaking the frame removes the sheet
+      await t.call('setBlock', x0, y0 + 2, z0, 'air');
+      await t.call('runTicks', 10);
+      t.assert(await sheet() === 0, `no sheet without its frame (${await sheet()})`);
+    },
+  },
+  {
     // Judge KID-12: an event payload that carries a live mob (player:hurt's source) used to make events() walk the
     // whole game: the Playwright process ran out of memory. Now the copy is bounded and the mob is a small stub.
     name: 'lead-events-live-payload', requires: ['mobs', 'survival'],

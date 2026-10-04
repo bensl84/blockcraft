@@ -27,6 +27,7 @@ import { makeEntityMaterial } from './entitymat.js';
 import { ANIM, RENDER, WORLD_HEIGHT, Z } from '../core/constants.js';
 import { B_LIQUID, B_PASS, PASS, bindTextures } from '../core/registry.js';
 import { buildTextures } from '../textures/textures.js';
+import { NETHER_FOG, NETHER_FOG_FAR, NETHER_FOG_NEAR, NETHER_MIN_LIGHT, isNetherX } from '../core/nether.js';
 import { meshBlockModel } from '../world/mesher.js';
 
 const PASS_KEYS = ['opaque', 'cutout', 'translucent'];
@@ -109,6 +110,10 @@ export function createRendererSystem(game) {
     },
     /** {near, far} while the kid soft border (or another lane) overrides the fog, else null */
     fogOverride: null,
+    /** v1.7: the camera is in the Nether (sky, fog and light floor follow it; FX reads it too). */
+    nether: false,
+    /** uMinLight from settings.brightness (the Nether raises the floor while the camera is there). */
+    baseMinLight: 0.155,
     /** last computeSky() result (FX draws sun/moon/stars/clouds from it) */
     sky: computeSky(6000),
     gpu: { renderer: 'unknown', vendor: 'unknown', maxLayers: 0 },
@@ -734,8 +739,14 @@ export function createRendererSystem(game) {
     const time = game.time;
     const rain = game.fx && game.fx.weather && Number.isFinite(game.fx.weather.rain) ? game.fx.weather.rain : 0;
     const sky = computeSky(time ? time.dayTime : 6000, rain, time ? time.day : 0);
+    // v1.7 (judge FID-8): the Nether has no sky - a warm, thick haze everywhere and a brighter light floor so a
+    // child can see the caverns (FX hides the sun, moon, stars and clouds there; core/nether.js)
+    const nether = !!game.meta && isNetherX(r.camera.position.x);
+    r.nether = nether;
+    if (nether) { sky.skyColor = NETHER_FOG; sky.fogColor = NETHER_FOG; sky.sunsetColor = null; sky.starBrightness = 0; }
     r.sky = sky;
     const u = r.uniforms;
+    u.uMinLight.value = nether ? Math.max(r.baseMinLight, NETHER_MIN_LIGHT) : r.baseMinLight;
     u.uDaylight.value = sky.daylight;
     u.uSkyColor.value.setRGB(sky.skyColor[0], sky.skyColor[1], sky.skyColor[2]);
     const cam = r.camera;
@@ -769,10 +780,12 @@ export function createRendererSystem(game) {
       if (sm) sm.uSkyFlat.value = 1;
     } else {
       const fo = r.fogOverride;
-      u.uFogNear.value = fo ? fo.near : r.renderFar * RENDER.FOG_START;
-      u.uFogFar.value = fo ? fo.far : r.renderFar;
+      let near = fo ? fo.near : r.renderFar * RENDER.FOG_START, far = fo ? fo.far : r.renderFar;
+      if (nether) { far = Math.min(far, NETHER_FOG_FAR); near = Math.min(near, NETHER_FOG_NEAR, far * 0.5); }
+      u.uFogNear.value = near;
+      u.uFogFar.value = far;
       u.uFogSphere.value = 0;
-      if (sm) sm.uSkyFlat.value = 0;
+      if (sm) sm.uSkyFlat.value = nether ? 1 : 0;
     }
     u.uFogColor.value.copy(fog);
     r.scene.background.copy(fog);
@@ -900,7 +913,8 @@ export function createRendererSystem(game) {
   function applyBrightness(v) {
     const b = clamp01(Number.isFinite(v) ? v : 0.7);
     r.uniforms.uGamma.value = b;
-    r.uniforms.uMinLight.value = 0.05 + 0.15 * b;
+    r.baseMinLight = 0.05 + 0.15 * b;
+    r.uniforms.uMinLight.value = r.baseMinLight;
   }
 
   function onSetting(e) {

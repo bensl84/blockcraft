@@ -17,6 +17,7 @@
 //  - Speak block names on hotbar selection (settings.speakNames, local voices only).
 //  - Exit guards: see guards.js.
 
+import { isNetherX, toNether } from '../core/nether.js';
 import './kid.css';
 import { el, uiLayer } from '../core/dom.js';
 import { DEG } from '../core/math.js';
@@ -492,8 +493,11 @@ export function createKidSystem(game) {
   }
 
   function tickBorder(radius) {
-    const p = game.player, s = game.meta.spawn;
+    const p = game.player;
+    let s = game.meta.spawn;
     if (!(radius > 0) || !s) { clearFog(); kid.border.over = 0; kid.border.fogT = 0; return; }
+    // LEAD v1.7 (FID-8): in the Nether the border is around the spawn's Nether point, 1:8 (at least 64 blocks)
+    if (isNetherX(p.x)) { s = toNether(s.x, s.z); radius = Math.max(64, radius / 8); }
     borderState(p.x, p.z, s.x, s.z, radius, bs);
     kid.border.dist = bs.dist; kid.border.over = bs.over; kid.border.fogT = bs.fogT;
     if (bs.over > 0) {
