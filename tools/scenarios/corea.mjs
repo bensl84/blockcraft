@@ -48,7 +48,12 @@ export default [
           sheet.appendChild(slot);
         }
         document.body.appendChild(sheet);
-        return { count: ic.index.size, thin, missing, crisp, sized, p16: p16.length, texMs: g.textures.buildMs, iconMs: ic.buildMs, cols: ic.cols, rows: ic.rows, urlLen: ic.url.length };
+        // ROB-4: an icon element must not inline the whole atlas data URL (that froze the backpack open)
+        const t0 = performance.now();
+        const many = []; for (let i = 0; i < 300; i++) many.push(ic.element(keys[i % keys.length], 48));
+        const make300Ms = performance.now() - t0;
+        const bgLen = many[0].style.backgroundImage.length;
+        return { count: ic.index.size, thin, missing, crisp, sized, p16: p16.length, texMs: g.textures.buildMs, iconMs: ic.buildMs, cols: ic.cols, rows: ic.rows, urlLen: ic.url.length, make300Ms, bgLen };
       }, keys);
       t.note('textureBuildMs', Math.round(r.texMs * 10) / 10);
       t.note('iconBuildMs', Math.round(r.iconMs * 10) / 10);
@@ -62,6 +67,9 @@ export default [
       t.assert(r.crisp === 'pixelated', `icons render pixelated (got ${r.crisp})`);
       t.assert(r.sized === 64, `element(key, 64) is 64 px (got ${r.sized})`);
       t.assert(r.p16 === 16 * 16 * 4, 'pixels16 gives a 16x16 RGBA sprite');
+      t.note('icon300Ms', Math.round(r.make300Ms * 10) / 10);
+      t.assert(r.bgLen < 200, `icon elements reference the atlas by a short URL (style is ${r.bgLen} chars)`);
+      t.assert(r.make300Ms < 40, `300 icon elements build fast (${r.make300Ms.toFixed(1)} ms)`);
       t.assert(r.iconMs < 400, `buildItemIcons fast enough (${r.iconMs.toFixed(1)} ms; budget 150 ms on a mid laptop)`);
       t.assert(r.texMs < 300, `buildTextures fast enough (${r.texMs.toFixed(1)} ms; budget 60 ms on a mid laptop)`);
     },

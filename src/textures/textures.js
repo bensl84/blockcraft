@@ -113,6 +113,7 @@ export function getTexturePixels(textureSet, key, frame = 0) {
  * @property {HTMLCanvasElement} canvas        the atlas
  * @property {number} cols @property {number} rows
  * @property {string} url                      atlas as a data: URL (for CSS backgrounds)
+ * @property {string} cssUrl                   short `url(blob:...)` CSS value for the same atlas (what style()/element() use)
  * @property {Map<string, number>} index       item key -> cell index
  * @property {(key: string) => {x:number,y:number,w:number,h:number}} rect   pixel rect in the atlas
  * @property {(key: string, px: number) => HTMLElement} element  a <span class="bc-icon"> showing the icon at px size
@@ -132,6 +133,10 @@ export function buildItemIcons(textureSet) {
   const ctx = canvas.getContext('2d');
   ctx.putImageData(new ImageData(atlas.data, canvas.width, canvas.height), 0, 0);
   const url = canvas.toDataURL('image/png');
+  // ROB-4: never inline the ~220 KB data URL into each icon's style; every inline copy is re-parsed
+  // (200 icons cost ~190 ms, a 0.5 s freeze on a slow laptop when the backpack opens). One short blob
+  // URL for the whole atlas, decoded once up front, keeps an icon element to a few microseconds.
+  const cssUrl = `url(${shortUrl(url)})`;
   const rect = (key) => {
     const i = index.has(key) ? index.get(key) : 0;
     return { x: (i % cols) * size, y: Math.floor(i / cols) * size, w: size, h: size };
@@ -139,7 +144,7 @@ export function buildItemIcons(textureSet) {
   const style = (key, px) => {
     const r = rect(key), k = px / size;
     return {
-      backgroundImage: `url(${url})`,
+      backgroundImage: cssUrl,
       backgroundPosition: `${-r.x * k}px ${-r.y * k}px`,
       backgroundSize: `${canvas.width * k}px ${canvas.height * k}px`,
       imageRendering: 'pixelated',
@@ -147,7 +152,7 @@ export function buildItemIcons(textureSet) {
     };
   };
   return {
-    size, canvas, cols, rows, url, index, rect, style,
+    size, canvas, cols, rows, url, cssUrl, index, rect, style,
     buildMs: now() - t0,
     element(key, px) {
       const e = document.createElement('span');
@@ -164,5 +169,24 @@ export function buildItemIcons(textureSet) {
   };
 }
 const ITEM_FALLBACK = 'stone';
+
+/** A short blob: URL holding the same PNG as `dataUrl` (falls back to the data URL itself). */
+const keepDecoded = [];
+function shortUrl(dataUrl) {
+  try {
+    if (typeof URL === 'undefined' || !URL.createObjectURL || typeof Blob === 'undefined') return dataUrl;
+    const bin = atob(dataUrl.slice(dataUrl.indexOf(',') + 1));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    // Never revoked: icons already in the page keep pointing at it (built once per page load).
+    const atlasBlobUrl = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
+    if (typeof Image !== 'undefined') {                     // decode once now, so the first backpack has its icons
+      const img = new Image(); img.src = atlasBlobUrl;
+      keepDecoded.push(img);
+      if (img.decode) img.decode().catch(() => {});
+    }
+    return atlasBlobUrl;
+  } catch { return dataUrl; }
+}
 
 export { ICON_COLS };

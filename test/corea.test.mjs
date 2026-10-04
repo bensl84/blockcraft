@@ -164,6 +164,26 @@ test('icons: every item gets a non-empty 32px cell; sprites cover requiredSprite
   for (const name of Object.keys(SPRITES)) assert.equal(typeof SPRITES[name], 'function');
 });
 
+test('spawn eggs show their mob face (POL-10): every egg differs and has dark eye pixels', () => {
+  const eggs = ITEM_LIST.filter((it) => it.use === 'spawn_egg');
+  assert.ok(eggs.length >= 7, 'spawn eggs exist');
+  const seen = new Map();
+  for (const it of eggs) {
+    const pc = SPRITES.spawn_egg(it);
+    const h = fnv(pc.data);
+    assert.ok(!seen.has(h), `${it.key} looks the same as ${seen.get(h)}`);
+    seen.set(h, it.key);
+    let dark = 0, opaque = 0;
+    for (let i = 0; i < 256; i++) {
+      if (!pc.data[i * 4 + 3]) continue;
+      opaque++;
+      if (pc.data[i * 4] + pc.data[i * 4 + 1] + pc.data[i * 4 + 2] < 150) dark++;
+    }
+    assert.ok(opaque >= 140, `${it.key} is a big face (${opaque} px)`);
+    assert.ok(dark >= 2, `${it.key} has eyes (${dark} dark px)`);
+  }
+});
+
 test('performance: warm builds stay well inside the boot budget', () => {
   for (let i = 0; i < 3; i++) buildTextures();
   let t0 = performance.now();
