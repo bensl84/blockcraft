@@ -269,6 +269,7 @@ export const ICONS = Object.freeze({
   pause: () => pixelSvg(PAUSE),
   home: () => pixelSvg(HOUSE),
   undo: () => pixelSvg(UNDO),
+  redo: () => pixelSvg(flipH(UNDO)),
   star: () => pixelSvg(STAR),
   hand: () => pixelSvg(HAND),
   kid: () => pixelSvg(KID),

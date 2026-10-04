@@ -13,7 +13,16 @@
 .kid-undo { left: 116px; top: 28px; width: 72px; height: 72px; }
 .kid-undo.kid-empty { opacity: 0.45; }
 .kid-undo.kid-spin .kid-px { animation: kid-spin 420ms ease-out; }
-.kid-undo.kid-shake { animation: kid-shake 300ms ease-in-out; }
+.kid-undo.kid-shake, .kid-redo.kid-shake { animation: kid-shake 300ms ease-in-out; }
+/* Redo: smaller, beside Undo, only for a while after an undo (KID-8) */
+.kid-redo { left: 200px; top: 36px; width: 56px; height: 56px; animation: kid-pop-in 220ms ease-out; }
+.kid-redo.kid-spin .kid-px { animation: kid-spin-cw 420ms ease-out; }
+@keyframes kid-spin-cw { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes kid-pop-in { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+/* menus and container screens cover the world: the kid controls hide under them (POL-11) */
+.kid-layer.kid-under-screen .kid-btn, .kid-layer.kid-under-screen .kid-arrow, .kid-layer.kid-under-screen .kid-hint {
+  visibility: hidden; pointer-events: none;
+}
 .kid-btn:hover { background: rgba(40, 60, 110, 0.6); }
 @keyframes kid-spin { from { transform: rotate(0deg); } to { transform: rotate(-360deg); } }
 @keyframes kid-shake { 0%, 100% { translate: 0 0; } 25% { translate: -6px 0; } 75% { translate: 6px 0; } }

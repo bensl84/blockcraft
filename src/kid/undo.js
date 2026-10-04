@@ -8,6 +8,10 @@
 // (MECH passes the causing change's action along). Causes 'undo', 'worldgen' and 'test' are never recorded.
 // Undo restores each cell's `before`, newest cell first, in one world batch with cause 'undo', and only where
 // the current value still equals the recorded `after`.
+// Redo (KID-8): an undone entry goes on a redo stack (newest last). Redo puts each cell's `after` back (oldest
+// cell first, cause 'undo' so it is not recorded again) where the current value still equals `before`, and the
+// entry returns to the undo list. The next new qualifying action (the child builds or breaks again, or a blast)
+// clears the redo stack.
 
 import { KID } from '../core/constants.js';
 
@@ -28,11 +32,15 @@ export class UndoLog {
     this.byAction = new Map();
     /** candidate (not yet qualifying) action ids, oldest first */
     this.candidates = [];
+    /** undone entries that can be redone, oldest first (newest undo last) */
+    this.redoStack = [];
   }
 
   get size() { return this.entries.length; }
+  /** Entries that can be redone. */
+  get redoSize() { return this.redoStack.length; }
 
-  clear() { this.entries.length = 0; this.byAction.clear(); this.candidates.length = 0; }
+  clear() { this.entries.length = 0; this.byAction.clear(); this.candidates.length = 0; this.redoStack.length = 0; }
 
   /**
    * Record one 'block:changed' payload. Returns true if it was stored.
@@ -71,6 +79,7 @@ export class UndoLog {
       const ci = this.candidates.indexOf(action);
       if (ci >= 0) this.candidates.splice(ci, 1);
       this.entries.push(entry);
+      this.redoStack.length = 0;    // a new action starts a new history branch
       while (this.entries.length > this.max) {
         const gone = this.entries.shift();
         this.byAction.delete(gone.action);
@@ -98,7 +107,30 @@ export class UndoLog {
     while (this.entries.length) {
       const entry = this.pop();
       const count = applyEntry(world, entry);
-      if (count > 0) return { count, entry };
+      if (count > 0) {
+        this.redoStack.push(entry);
+        while (this.redoStack.length > this.max) this.redoStack.shift();
+        return { count, entry };
+      }
+    }
+    return { count: 0, entry: null };
+  }
+
+  /**
+   * Redo the newest undone entry that can still be put back (entries whose cells were all changed since are
+   * dropped). The entry returns to the undo list. Returns {count, entry} (count 0 when nothing was redone).
+   * @param {{getRaw:Function, setBlock:Function, beginBatch?:Function, endBatch?:Function}} world
+   */
+  redo(world) {
+    while (this.redoStack.length) {
+      const entry = this.redoStack.pop();
+      const count = applyEntry(world, entry, true);
+      if (count > 0) {
+        this.entries.push(entry);
+        this.byAction.set(entry.action, entry);
+        while (this.entries.length > this.max) { const gone = this.entries.shift(); this.byAction.delete(gone.action); }
+        return { count, entry };
+      }
     }
     return { count: 0, entry: null };
   }
@@ -111,17 +143,22 @@ export class UndoLog {
   }
 }
 
-/** Restore an entry's cells newest first, inside one batch. Returns the number of cells restored. */
-export function applyEntry(world, entry) {
+/**
+ * Restore an entry's cells (undo: `before`, newest cell first; redo: `after`, oldest cell first) inside one
+ * batch, only where the current value is still the other side. Returns the number of cells changed.
+ */
+export function applyEntry(world, entry, forward = false) {
   if (!entry) return 0;
   let n = 0;
+  const len = entry.cells.length;
   if (world.beginBatch) world.beginBatch();
   try {
-    for (let i = entry.cells.length - 1; i >= 0; i--) {
-      const c = entry.cells[i];
+    for (let k = 0; k < len; k++) {
+      const c = entry.cells[forward ? k : len - 1 - k];
       if (c.before === c.after) continue;
-      if ((world.getRaw(c.x, c.y, c.z) >>> 0) !== c.after) continue;
-      if (world.setBlock(c.x, c.y, c.z, c.before & 0xff, c.before >> 8, { cause: 'undo' })) n++;
+      const from = forward ? c.before : c.after, to = forward ? c.after : c.before;
+      if ((world.getRaw(c.x, c.y, c.z) >>> 0) !== from) continue;
+      if (world.setBlock(c.x, c.y, c.z, to & 0xff, to >> 8, { cause: 'undo' })) n++;
     }
   } finally {
     if (world.endBatch) world.endBatch();

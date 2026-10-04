@@ -63,9 +63,20 @@ export default [
       t.assert(await t.call('eventCount', 'kid:home') === n0 + 1, 'kid:home emitted once');
       const sparks = await t.eval(() => document.querySelectorAll('.kid-spark').length);
       t.assert(sparks > 0, 'sparkles burst on arrival');
-      const tp = (await t.call('events', 'player:teleport', 1))[0];
-      t.assert(tp && tp.payload.reason === 'home', 'player:teleport reason home');
+      // (another teleport, e.g. a streaming fix-up, may land right after it: look at the last few)
+      const tps = await t.call('events', 'player:teleport', 4);
+      t.assert(tps.some((e) => e.payload.reason === 'home'), `player:teleport reason home (${JSON.stringify(tps.map((e) => e.payload.reason))})`);
       await t.shot('kid-buttons');
+      // POL-11: the kid buttons hide under menus and container screens instead of peeking out from under them
+      for (const scr of ['creative', 'pause']) {
+        await t.eval((s) => window.__game.game.ui.open(s), scr);
+        await t.call('waitFrames', 3);
+        t.assert(!(await rectOf(t, '[data-kid="home"]')).visible && !(await rectOf(t, '[data-kid="undo"]')).visible, `Home / Undo hidden under the ${scr} screen`);
+        if (scr === 'creative') await t.shot('kid-buttons-under-picker');
+        await t.call('closeUI');
+        await t.call('waitFrames', 3);
+        t.assert((await rectOf(t, '[data-kid="home"]')).visible, `Home back after closing ${scr}`);
+      }
       // buttons hide on the title
       await t.call('exitToTitle');
       await t.call('waitFrames', 2);
@@ -206,6 +217,22 @@ export default [
       await t.page.keyboard.press('KeyU');
       await t.call('waitTicks', 2);
       t.assert(await t.call('getBlock', bx + 1, 4, bz) === 'air' && await t.call('getBlock', bx, 4, bz) !== 'air', 'U removes the next one');
+      // KID-8: a Redo button appears beside Undo and walks the undos back, newest undo first
+      await t.call('sleep', 300);   // let its 220 ms pop-in finish before measuring
+      const redo = await rectOf(t, '[data-kid="redo"]');
+      t.assert(redo && redo.visible && redo.w >= 56 && redo.x >= undo.x + undo.w + 8, `Redo button shows beside Undo after an undo (${JSON.stringify(redo)})`);
+      await t.page.mouse.click(...centre(redo));
+      await t.call('waitTicks', 2);
+      t.assert(await t.call('getBlock', bx + 1, 4, bz) === tower[1] && await t.call('getBlock', bx + 2, 4, bz) === 'air', 'Redo puts the last undone block back');
+      await t.page.mouse.click(...centre(redo));
+      await t.call('waitTicks', 2);
+      t.assert(await t.call('getBlock', bx + 2, 4, bz) === tower[2], 'Redo again puts the next one back');
+      await t.call('waitFrames', 2);
+      t.assert(!(await rectOf(t, '[data-kid="redo"]')).visible, 'Redo hides when there is nothing left to redo');
+      await t.shot('kid-undo-real-redo');
+      await t.page.keyboard.press('KeyU'); await t.call('waitTicks', 2);
+      await t.page.keyboard.press('KeyU'); await t.call('waitTicks', 2);
+      t.assert(await t.call('getBlock', bx + 1, 4, bz) === 'air' && await t.call('getBlock', bx, 4, bz) !== 'air', 'redone blocks undo again');
       // hold to break the last tower block, undo brings it back
       const n = px(await t.call('worldToNdc', bx + 0.5, 4.6, bz + 0.98));
       await t.page.mouse.move(n.x, n.y);
@@ -685,6 +712,40 @@ export default [
       t.assert(await t.call('eventCount', 'block:placed') > placed0, 'tap on the world through the overlay places a block');
       await t.shot('kid-touch-world');
       await pad.end();
+    },
+  },
+  {
+    // POL-12: on a short touch laptop (1024 x 600) the survival hearts row ran under the D-pad's ▶ button.
+    name: 'kid-touch-hud',
+    requires: [],
+    touchOnly: true,
+    async run(t) {
+      await t.page.setViewportSize({ width: 1024, height: 600 });
+      try {
+        await t.call('setSetting', 'touchControls', 'on');
+        await t.call('startWorld', { ...FLAT, mode: 'survival' });
+        await t.call('waitFrames', 6);
+        const inside = (r, b) => r.x < b.x + b.w && b.x < r.x + r.w && r.y < b.y + b.h && b.y < r.y + r.h;
+        for (const style of ['dpad', 'joystick']) {
+          await t.eval((s) => window.__game.game.touch.setStyle(s), style);
+          await t.call('waitFrames', 3);
+          const hud = await rectOf(t, '#hud .inv-hud-bottom'), hearts = await rectOf(t, '[data-hud="hearts"]');
+          const undo = await rectOf(t, '[data-kid="undo"]');
+          t.assert(hearts && hearts.visible, `survival hearts visible (${JSON.stringify(hearts)})`);
+          const names = style === 'dpad' ? ['forward', 'back', 'turnLeft', 'turnRight'] : ['joystick'];
+          for (const n of names) {
+            const r = await rectOf(t, `[data-touch="${n}"]`);
+            t.assert(r && r.visible && !inside(r, hearts) && !inside(r, hud), `${style} ${n} clear of the hearts row and hotbar (${JSON.stringify(r)} vs ${JSON.stringify(hud)})`);
+            t.assert(r.y >= undo.y + undo.h + 8, `${style} ${n} below the Home / Undo row`);
+          }
+          await t.shot(`kid-touch-hud-${style}`);
+        }
+        await t.eval(() => window.__game.game.touch.setStyle('dpad'));
+      } finally {
+        await t.call('setSetting', 'touchControls', 'auto');
+        await t.page.setViewportSize({ width: 1280, height: 720 });
+        await t.call('waitFrames', 3);
+      }
     },
   },
 ];
