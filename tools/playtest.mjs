@@ -241,7 +241,9 @@ async function main() {
         }
         return null;
       });
-      if (open && open.moved) { await api('teleport', open.x, open.y, open.z); await waitTicks(5); }
+      // always centre on that column: a player standing near its edge overlaps the next column, whose leaves can
+      // hold the take-off (the walk ends at a slightly different spot each run)
+      if (open) { await api('teleport', open.x, open.y, open.z); await waitTicks(5); }
       report.flyStart = open;
       await key('KeyF');
       await waitTicks(2);

@@ -265,6 +265,14 @@ void main() {
 }
 `;
 
+/**
+ * Lowest sine of elevation the sunrise / sunset glow reaches (it is exactly 0 at and below this). Below the horizon
+ * (sine <= 0) the sky is exactly uFogColor, and below this floor that holds toward the sun too. The renderer's fog
+ * cull relies on both facts to hide fully fogged geometry only where the sky behind it is the fog colour (review
+ * CORE-R11), so it reads this constant instead of repeating it.
+ */
+export const SKY_GLOW_FLOOR = -0.08;
+
 /** Full-screen sky gradient (drawn first, no depth). Direction from the inverse view-projection. */
 export const SKY_VERT = /* glsl */ `
 uniform mat4 uInvViewProj;
@@ -289,6 +297,7 @@ void main() {
   vec3 d = normalize(vDir);
   float h = d.y;
   // Zenith = sky colour, horizon = fog colour; the band hugs the horizon like the classic sky plane.
+  // At and below the horizon (h <= 0) t is 0: exactly the fog colour (the fog cull depends on it).
   float t = clamp(h * 2.6, 0.0, 1.0);
   t = 1.0 - (1.0 - t) * (1.0 - t);
   vec3 col = mix(uFogColor, uSkyColor, t);
@@ -299,7 +308,7 @@ void main() {
     vec2 dh = d.xz;
     float dl = length(dh);
     float facing = (sl > 1e-4 && dl > 1e-4) ? max(0.0, dot(dh / dl, sd / sl)) : 0.0;
-    float band = exp(-abs(h - 0.04) * 5.0) * smoothstep(-0.08, 0.02, h);
+    float band = exp(-abs(h - 0.04) * 5.0) * smoothstep(${SKY_GLOW_FLOOR.toFixed(2)}, 0.02, h); // 0 at and below SKY_GLOW_FLOOR
     float g = uSunset.a * pow(facing, 2.5) * band;
     col = mix(col, uSunset.rgb, clamp(g, 0.0, 1.0));
   }

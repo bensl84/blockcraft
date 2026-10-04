@@ -1,6 +1,6 @@
 # Blockcraft — Engineering Specification
 
-Version 1.4 · 2026-10-03 · owner: LEAD (architect / integrator) · v1.1 applies the independent review (lane isolation, persistence, undo data, test API, kid controls, content gaps) · v1.2 records the CORE integration (lanes A–E merged): light curve with the brightness lift, accepted lane spec conflicts, streaming radii, new lane events and decisions D14–D15 · v1.3 applies the CORE review (CORE-R1…R9): meshing one ring beyond the fog with a crisp linear fog, quad flip, leaves and water textures, tap classification by event time, `unmeshedWithin` after a teleport, capsule kid outline, larger climate regions, moonlit night tint · v1.4 applies the CORE review recheck (CORE-R10, CORE-R2): columns wholly beyond the fog are not drawn, and smooth light and AO are blended bilinearly per pixel from each quad's four corners (mesh contract: `corner` array, flag bits 7–8; chunk geometry uploads no `aLight`)
+Version 1.5 · 2026-10-03 · owner: LEAD (architect / integrator) · v1.1 applies the independent review (lane isolation, persistence, undo data, test API, kid controls, content gaps) · v1.2 records the CORE integration (lanes A–E merged): light curve with the brightness lift, accepted lane spec conflicts, streaming radii, new lane events and decisions D14–D15 · v1.3 applies the CORE review (CORE-R1…R9): meshing one ring beyond the fog with a crisp linear fog, quad flip, leaves and water textures, tap classification by event time, `unmeshedWithin` after a teleport, capsule kid outline, larger climate regions, moonlit night tint · v1.4 applies the CORE review recheck (CORE-R10, CORE-R2): columns wholly beyond the fog are not drawn, and smooth light and AO are blended bilinearly per pixel from each quad's four corners (mesh contract: `corner` array, flag bits 7–8; chunk geometry uploads no `aLight`) · v1.5 applies CORE-R11: the fog cull hides fully fogged geometry only where the sky behind it is the fog colour, so the picture never changes and distant fogged mountains stay; the sky keeps an exact fog-colour horizon and FX draws no sky objects below it
 
 This file is the single source of truth for Blockcraft. Two kinds of files back it up:
 
@@ -1164,7 +1164,7 @@ It returns false for an unloaded column, out-of-range y, or no change.
 - **States:** EMPTY → GENERATED (terrain plus decoration from `generateColumn`, or restored from save) → LIT (needs the 3×3 neighbourhood GENERATED) → MESHED (needs the 3×3 neighbourhood LIT).
 - **Radii:** data out to R + 3 (`DATA_MARGIN` + 1, so the diagonal neighbours of every lit column exist; light reaches about R + 1.5), meshes within R (circular), meshes dropped beyond R + 1 (the column goes back to LIT, bounding draw calls and geometries), unload beyond R + 4 (`UNLOAD_MARGIN`). *(v1.2: as built by CORE-C.)*
 - *(v1.3, review CORE-R1)* The mesh radius is **M = R + `MESH_MARGIN` (1)**: one ring beyond the fog radius, so every gap of the circular mesh radius (and the newest, still-streaming ring) lies past `fogFar` = (R − 0.5)·16 and the fog can be a crisp linear ramp from 0.8 · `fogFar`. Data to M + 3 = R + 4, light to M + 1.5, meshes dropped beyond M + 1, unload beyond R + 5 (`UNLOAD_MARGIN`). Draw calls at R 6 stay about 150–200 (budget 300).
-- *(v1.4, review CORE-R10)* The extra ring and the M + 1 drop hysteresis cost no drawing: the renderer skips every column whose nearest horizontal point to the eye lies beyond `uFogFar` + 0.5 (it is 100 % fogged; §5.5.6 "Fog cull"). They stay meshed and cached, so a column is ready the moment it comes within the fog. Draw calls at R 6: about 157 (`cored-perf`), the same as before the ring was added.
+- *(v1.4, review CORE-R10; v1.5, review CORE-R11)* The extra ring and the M + 1 drop hysteresis cost little drawing: the renderer skips fully fogged geometry beyond `uFogFar` + 0.5 wherever the sky behind it is the fog colour (§5.5.6 "Fog cull"). Parts that rise above the horizon (a distant mountain, a tall tree) are drawn and show as pale fogged silhouettes, exactly as without the cull. The columns stay meshed and cached, so a column is ready the moment it comes within the fog. Draw calls at R 6: about 183 (`cored-perf`; 157 with v1.4, which also hid those silhouettes).
 - **Order:**
   - Precomputed offsets sorted by distance², with a look-direction bias of `dist² − 2·dot(lookDir, offset)`.
   - Rebuild the queue when the player crosses a column border.
@@ -1297,8 +1297,10 @@ createEntityMaterial({map?, atlas?, transparent?, alphaTest?, color?, parts?}) -
 createBlockModel(id, state) -> THREE.Mesh      // meshBlockModel geometry + atlas entity material; caller disposes geometry
 captureThumbnail(w = 160, h = 100) -> jpeg data URL (renders then copies)
 getStats() -> {drawCalls, triangles, geometries, textures, programs, sectionMeshes, dpr}   // per frame, all passes summed
-                                               // (v1.4: + fogCulled = columns skipped by the fog cull last frame)
-fogCull                                        // v1.4: true (default) skips columns wholly beyond the fog; tests set false to compare pictures
+                                               // (v1.4: + fogCulled = columns past the fog not drawn at all last frame;
+                                               //  v1.5: + fogTrimmed = columns past the fog that still draw what rises above the horizon)
+fogCull                                        // v1.4: true (default) skips fully fogged geometry; v1.5: only where the sky behind it is
+                                               // the fog colour, so the picture never changes; tests set false to compare pictures
 frame(game, dt, alpha)                          // updates uniforms from game.time / sky, renders world then view model
 dispose()
 ```
@@ -1362,9 +1364,10 @@ export function computeSky(dayTime, rain = 0, day = 0) -> {celestialAngle, dayli
 - `daylight = clamp(cos(angle·2π)·2 + 0.5, 0, 1) × (1 − 0.25·rain)`.
 - Renderer:
   - A sky dome or gradient: zenith = skyColor, horizon = fogColor blended with the sunset glow toward the sun.
+  - *(v1.5, review CORE-R11)* At and below the horizon (sine of elevation ≤ 0) the dome is exactly `uFogColor`, and the sunrise / sunset glow is exactly 0 at and below `SKY_GLOW_FLOOR` (−0.08, `shaders.js`; the sky shader reads the same constant). The fog cull (§5.5.6) depends on both, and a unit test pins them.
   - `scene.background` matches the fog colour at the horizon.
   - `uDaylight = sky.daylight`.
-- Sun, moon, stars and clouds are drawn by FX (`render/celestial*.js`) using `renderer.sky`.
+- Sun, moon, stars and clouds are drawn by FX (`render/celestial*.js`) using `renderer.sky`. *(v1.5)* So that the fog cull never changes the picture, FX draws no sun, moon or stars at or below the horizon, and clouds and particles use the shared fog uniforms (fully fog-coloured past `uFogFar`).
 
 #### 5.5.5 Entity materials
 
@@ -1401,7 +1404,12 @@ Call `game.world.setRenderDistance` in `init`.
 
 **Draw calls:** log `renderer.info` with `autoReset = false`, resetting once per frame. Budget ≤ 300 typical at R = 6. Sections alone are 250–500 draws at R = 6, so CORE-D measures the SwiftShader proxy early: **if it is over budget, column-merged geometry (one geometry per column per pass) is P0**, not P1. Mobs are one draw each and items share geometry (§5.5.5).
 
-**Fog cull** *(v1.4, review CORE-R10)*: right before each render, every chunk mesh of a column whose nearest horizontal point to the eye lies beyond `uFogFar` + 0.5 is hidden (the pad covers plant jitter and sway). Land fog is horizontal and underwater or lava fog is spherical, which is never shorter, so that geometry is 100 % fogged and the picture does not change: `cored-fog` renders the same frame with the cull off and on and asserts that no pixel changes from high up, and that at ground level only pure fog-colour pixels (a fully fogged silhouette against the sky) can change. It brings the extra mesh ring of §5.3.3 back to the old draw count: R 4 on SwiftShader, same views, 94 → 74 draws on the ground and 114 → 79 in the air.
+**Fog cull** *(v1.4, review CORE-R10; v1.5, review CORE-R11)*: right before each render, the renderer cuts the chunk geometry of every column whose nearest horizontal point to the eye lies beyond `uFogFar` + 0.5 (the pad covers plant jitter, sway and the water wave). That geometry is 100 % fogged: it draws exactly `uFogColor` (land fog is horizontal; underwater and lava fog are spherical, never shorter), and so does everything behind it except the sky. Hiding a piece of it therefore changes no pixel exactly when the sky behind it is the fog colour too: every view direction at or below the horizon; at or below `SKY_GLOW_FLOOR` for a column with any part toward the sun while the sunset glow is on; and every direction while the eye is in water or lava (flat sky).
+
+- Per pass (opaque, cutout, translucent), a section of such a column is hidden when its highest vertex + 0.5, seen from the eye at the column's farthest corner, stays at or below that line (`chunkmerge.fogCutFrom`, unit-tested). Section tops only grow upward within a pass, so the merged column mesh draws from its first kept section (`drawRange`), and hot and translucent section meshes are hidden one by one. Section tops come from the mesh positions when `setSectionMesh` is called.
+- Whatever rises above the line, such as a distant mountain or a tall tree, is drawn and shows as a pale fogged silhouette against the bluer sky, exactly as without the cull. v1.4 hid whole columns, which removed those silhouettes at ground level (review CORE-R11: a large pale mountain vanished; up to 7 % of the frame changed at R 4).
+- `cored-fog` renders the same frame with the cull off and on (no streaming in between) and asserts that **no pixel changes** at ground level, from high up (where it must also save draws), and at a view with silhouettes (seed 4242 spawn, sunset, toward the sun).
+- Cost of keeping the silhouettes, SwiftShader R 4, same views (ground facing peaks / air / second ground): draws 94 / 114 / 75 without any cull, 74 / 79 / 43 with the v1.4 cull, **92 / 79 / 49** with this one; frame rate about 4–6 % below v1.4 on the two ground views and the same in the air (within noise).
 
 **Manual render distance:** when `settings.renderDistance` is not 0 (auto), dynamic scaling may lower the DPR but never R.
 
@@ -2023,6 +2031,7 @@ No frame above 50 ms during the TNT chain on the RTX machine.
   - Square sun and 8 moon phases on the celestial angle (`renderer.sky.sunDir`).
   - Stars (`starBrightness`).
   - Flat clouds at `CLOUD_HEIGHT` (108), drifting +X at 0.03 b/t, procedural cloud map, toggled by `settings.clouds`.
+  - *(v1.5, review CORE-R11)* No sun, moon or stars at or below the horizon, and clouds use the shared fog uniforms, so the renderer's fog cull stays picture-neutral (§5.5.4).
 - **Crack overlay:** a box at 1.002 scale using the `crack_<stage>` layers with multiply-style blending, `depthWrite: false` and polygonOffset −1. Driven by `interaction.mining` and `block:mining`.
 - **Kid ghost block:** a translucent (α 0.35) preview of the held placeable block at the target cell, kid scheme only, while the cursor hovers. Pulses gently.
 - **Bed nap:** fade plus a starry sky for `sleep:start {nap: true}`.

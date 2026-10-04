@@ -9,8 +9,9 @@
 //     already-merged column draws the edited section as its own small "hot" mesh (its old quads collapse to
 //     degenerate triangles with a partial upload) and the column is re-merged 3 s after the last edit,
 //   - translucent geometry per section (water, ice, stained glass), sorted back-to-front by three,
-//   - sky gradient dome + sunrise/sunset glow, fog that matches the horizon (hides column pop-in); columns wholly
-//     beyond the fog are not drawn (fog cull, review CORE-R10),
+//   - sky gradient dome + sunrise/sunset glow, fog that matches the horizon (hides column pop-in); fully fogged
+//     geometry beyond the fog is not drawn where the sky behind it is the fog colour (fog cull, reviews CORE-R10
+//     and CORE-R11: the picture does not change, distant hazy mountains above the horizon stay),
 //     underwater / lava fog, all from uniforms (setTime never remeshes),
 //   - selection outline (classic thin lines, kid thick white-on-black ribbons),
 //   - entity materials (one draw call per mob via uParts), block models, view-model pass,
@@ -18,8 +19,8 @@
 
 import * as THREE from 'three';
 import { SKY_PALETTE, computeSky } from './sky.js';
-import { CHUNK_FRAG, CHUNK_VERT, SKY_FRAG, SKY_VERT } from './shaders.js';
-import { degenerateSection, mergeColumnPass, quadCenters, quadIndices, sortQuadsBackToFront, withCorner } from './chunkmerge.js';
+import { CHUNK_FRAG, CHUNK_VERT, SKY_FRAG, SKY_GLOW_FLOOR, SKY_VERT } from './shaders.js';
+import { degenerateSection, fogCutFrom, mergeColumnPass, quadCenters, quadIndices, sortQuadsBackToFront, withCorner } from './chunkmerge.js';
 import { DynamicScaler, detectPreset } from './quality.js';
 import { Outline } from './outline.js';
 import { makeEntityMaterial } from './entitymat.js';
@@ -35,10 +36,12 @@ const FULL_MERGE_SECTIONS = 4;           // >= this many sections changed at onc
 const SORT_RADIUS = 48;                  // translucent sections closer than this get back-to-front quad sorting
 const SORT_MOVE2 = 0.5 * 0.5;            // re-sort after the eye moved this far (squared)
 const SORTS_PER_FRAME = 12;
-// Fog cull (review CORE-R10): a column whose nearest horizontal point is farther than fogFar + this pad is 100 %
-// fogged, so it is not drawn (it stays meshed and cached). The pad covers geometry that pokes out of its column:
-// cross-plant jitter (0.1) plus plant sway (0.06).
+// Fog cull (reviews CORE-R10, CORE-R11): a column whose nearest horizontal point is farther than fogFar + this pad
+// is 100 % fogged. Its sections that stay below the line where the sky stops being the fog colour are not drawn
+// (they stay meshed and cached). The pad covers geometry that pokes out of its column or section: cross-plant
+// jitter (0.1), plant sway (0.06) and the water wave (0.03).
 const FOG_CULL_PAD = 0.5;
+const GLOW_FLOOR2 = SKY_GLOW_FLOOR * SKY_GLOW_FLOOR;
 
 /**
  * @param {object} game
@@ -73,6 +76,10 @@ export function createRendererSystem(game) {
   const counters = { sectionSets: 0, merges: 0, hotUploads: 0, compactions: 0, textureUploads: 0, contextLosses: 0, contextRestores: 0, qualityChanges: 0, quadSorts: 0 };
   /** columns hidden by the fog cull in the last rendered frame (getStats().fogCulled) */
   let fogCulled = 0;
+  /** columns past the fog that still draw their upper part (a silhouette rising above the horizon; fogTrimmed) */
+  let fogTrimmed = 0;
+  /** fog cull scratch: first drawn section per pass (opaque, cutout, translucent) */
+  const cutFrom = [0, 0, 0];
 
   const r = {
     name: 'renderer',
@@ -106,7 +113,7 @@ export function createRendererSystem(game) {
     renderFar: 88,
     contextLost: false,
     debugVisible: false,
-    /** CORE-D addition: skip drawing columns wholly beyond the fog (review CORE-R10). Tests switch it off to prove the picture is unchanged. */
+    /** CORE-D addition: skip drawing fully fogged geometry that cannot show against the sky (reviews CORE-R10, CORE-R11). Tests switch it off to prove the picture is unchanged. */
     fogCull: true,
     counters,
 
@@ -216,6 +223,7 @@ export function createRendererSystem(game) {
         mesh = { opaque: withCorner(mesh.opaque || null), cutout: withCorner(mesh.cutout || null), translucent: withCorner(mesh.translucent || null) };
       }
       rec.pending[sy] = has ? mesh : null;
+      for (let pi = 0; pi < 3; pi++) rec.top[pi * 8 + sy] = has ? sy * 16 + bufferTop(mesh[PASS_KEYS[pi]]) : -Infinity;
       dirtyCols.add(rec);
     },
     /** Remove (and dispose) all section meshes of a column. */
@@ -367,7 +375,7 @@ export function createRendererSystem(game) {
         programs: info && info.programs ? info.programs.length : 0,
         sectionMeshes: sectionCount, dpr: r.quality.dpr,
         // CORE-D extras
-        columnMeshes: merged, hotSections: hot, translucentMeshes: trans, preset: r.quality.preset, fogCulled,
+        columnMeshes: merged, hotSections: hot, translucentMeshes: trans, preset: r.quality.preset, fogCulled, fogTrimmed,
         renderFar: r.renderFar, eyeMedium: r.eyeMedium, contextLost: r.contextLost, ...counters,
       };
     },
@@ -534,9 +542,20 @@ export function createRendererSystem(game) {
       // opaque, cutout: merged column mesh + hot (edited) section meshes
       passes: [0, 1].map(() => ({ merged: null, mesh: null, hot: new Array(8).fill(null) })),
       trans: new Array(8).fill(null),
+      /** highest vertex y (world) of each section's latest mesh per pass, [pass * 8 + sy], -Infinity when empty (fog cull) */
+      top: new Array(24).fill(-Infinity),
       hotCount: 0,
       compactAt: 0,
     };
+  }
+
+  /** Highest vertex y (section-local) of one pass of a SectionMesh, -Infinity when it has no quads. */
+  function bufferTop(b) {
+    if (!b || !b.quads) return -Infinity;
+    let top = -Infinity;
+    const p = b.position;
+    for (let i = 1, e = b.quads * 12; i < e; i += 3) if (p[i] > top) top = p[i];
+    return top;
   }
 
   function sectionMesh(rec, sy, buf, pass) {
@@ -607,6 +626,7 @@ export function createRendererSystem(game) {
     for (let sy = 0; sy < 8; sy++) { dropMesh(rec.trans[sy]); rec.trans[sy] = null; }
     sectionCount -= popcount(rec.present);
     rec.present = 0;
+    rec.top.fill(-Infinity);
     rec.pending.fill(undefined);
     rec.hotCount = 0;
     hotCols.delete(rec);
@@ -750,32 +770,67 @@ export function createRendererSystem(game) {
   }
 
   /**
-   * Fog cull (review CORE-R10): hide every chunk mesh of a column whose nearest horizontal point to the eye lies
-   * beyond uFogFar + FOG_CULL_PAD. That geometry is 100 % fogged (land fog is horizontal; underwater and lava fog
-   * are spherical, which is never shorter), so the picture does not change, but the extra mesh ring beyond R
-   * (CORE-R1) and the +1 drop hysteresis cost no draw calls or vertex work. Runs right before every render, after
-   * flushPending, so meshes created this frame are covered too.
+   * Fog cull (reviews CORE-R10, CORE-R11). Geometry of a column whose nearest horizontal point to the eye lies beyond
+   * uFogFar + FOG_CULL_PAD is 100 % fogged: it draws exactly uFogColor (land fog is horizontal; underwater and lava
+   * fog are spherical, which is never shorter), and so does everything behind it, except the sky. Hiding such a
+   * piece therefore changes no pixel as long as the sky behind it is the fog colour too, which holds for every view
+   * direction below the horizon (sine of elevation <= 0), below SKY_GLOW_FLOOR where the sunset glow can reach, and
+   * everywhere while the eye is in water or lava (flat sky). So a section of a far column is hidden when its highest
+   * point (+ pad), seen from the eye, stays below that line; anything rising above it is drawn and shows as a pale
+   * fogged silhouette (distant mountains) exactly as without the cull. Each pass (opaque, cutout, translucent) is
+   * cut on its own; within a pass the section tops only grow upward, so the hidden sections are a bottom run: the
+   * merged column mesh draws from its first kept section (drawRange), hot and translucent section meshes are hidden
+   * one by one. Runs right before every render, after flushPending, so meshes created this frame are covered too;
+   * the extra mesh ring beyond R (CORE-R1) and the +1 drop hysteresis then cost little where they cannot be seen.
    */
   function cullFogged() {
     const e = r.camera.matrixWorld.elements;
-    const ex = e[12], ez = e[14];
+    const ex = e[12], ey = e[13], ez = e[14];
     const lim = r.uniforms.uFogFar.value + FOG_CULL_PAD;
     const lim2 = lim * lim;
     const on = r.fogCull !== false;
-    let hidden = 0;
+    const P = FOG_CULL_PAD;
+    const su = skyMesh ? skyMesh.material.uniforms : null;
+    // no sky dome (scene.background is the fog colour) or a flat sky underwater / in lava: the whole sky is fog
+    const flatSky = !su || su.uSkyFlat.value >= 1;
+    const sd = su ? su.uSunDir.value : null;
+    const sl = sd ? Math.hypot(sd.x, sd.z) : 0;
+    const glow = !flatSky && su.uSunset.value.w > 0 && sl > 1e-4;
+    const sx = glow ? sd.x / sl : 0, sz = glow ? sd.z / sl : 0;
+    let hidden = 0, trimmed = 0;
     for (const rec of columns.values()) {
       const x0 = rec.cx * 16, z0 = rec.cz * 16;
       const dx = Math.max(x0 - ex, 0, ex - x0 - 16), dz = Math.max(z0 - ez, 0, ez - z0 - 16);
-      const vis = !on || dx * dx + dz * dz <= lim2;
-      if (!vis) hidden++;
-      for (let pi = 0; pi < 2; pi++) {
-        const p = rec.passes[pi];
-        if (p.mesh) p.mesh.visible = vis;
-        for (let sy = 0; sy < 8; sy++) if (p.hot[sy]) p.hot[sy].mesh.visible = vis;
+      // first section drawn per pass (0 = all, 8 = none)
+      cutFrom[0] = 0; cutFrom[1] = 0; cutFrom[2] = 0;
+      if (on && dx * dx + dz * dz > lim2) {
+        if (flatSky) { cutFrom[0] = 8; cutFrom[1] = 8; cutFrom[2] = 8; }
+        else {
+          // padded column box relative to the eye
+          const ax = x0 - P - ex, bx = x0 + 16 + P - ex, az = z0 - P - ez, bz = z0 + 16 + P - ez;
+          // squared sine floor: the horizon (0), or below the sunset glow if any part of the box lies toward the sun
+          const floor2 = glow && Math.max(sx * ax, sx * bx) + Math.max(sz * az, sz * bz) > 0 ? GLOW_FLOOR2 : 0;
+          const fx = Math.max(Math.abs(ax), Math.abs(bx)), fz = Math.max(Math.abs(az), Math.abs(bz));
+          const far2 = fx * fx + fz * fz; // the elevation of a point below the eye is highest at the far corner
+          for (let pi = 0; pi < 3; pi++) cutFrom[pi] = fogCutFrom(rec.top, pi * 8, ey, far2, floor2, P);
+        }
+        if (cutFrom[0] >= 8 && cutFrom[1] >= 8 && cutFrom[2] >= 8) hidden++; else trimmed++;
       }
-      for (let sy = 0; sy < 8; sy++) if (rec.trans[sy]) rec.trans[sy].visible = vis;
+      for (let pi = 0; pi < 2; pi++) {
+        const p = rec.passes[pi], from = cutFrom[pi];
+        if (p.mesh) {
+          // the merged buffer holds the sections in order (ranges[sy * 2] = first quad): draw from section 'from'
+          const q0 = from > 0 && from < 8 && p.merged ? p.merged.ranges[from * 2] : 0;
+          p.mesh.visible = from < 8 && (!p.merged || q0 < p.merged.quads);
+          const dr = p.mesh.geometry.drawRange;
+          if (dr.start !== q0 * 6) { dr.start = q0 * 6; dr.count = Infinity; }
+        }
+        for (let sy = 0; sy < 8; sy++) if (p.hot[sy]) p.hot[sy].mesh.visible = sy >= from;
+      }
+      for (let sy = 0; sy < 8; sy++) if (rec.trans[sy]) rec.trans[sy].visible = sy >= cutFrom[2];
     }
     fogCulled = hidden;
+    fogTrimmed = trimmed;
   }
 
   function render() {

@@ -9,6 +9,8 @@
 const REQ = ['renderer', 'sky'];
 const FLAT = { preset: 'flat', seed: 1, mode: 'creative', difficulty: 'peaceful' };
 const HILLS = { preset: 'default', seed: 12345, mode: 'creative', difficulty: 'peaceful' };
+// spawn faces a lake with a tall mountain beyond the fog at yaw 0 (review CORE-R11: fogged silhouettes)
+const PEAKS = { preset: 'default', seed: 4242, mode: 'creative', difficulty: 'peaceful' };
 
 /** Wait until streaming has settled: no new section meshes for `quietMs`. */
 async function settle(t, quietMs = 400, maxMs = 20000) {
@@ -148,26 +150,35 @@ export default [
       });
       t.note('ringBeyondR', ring);
       t.assert(ring.n > 0 && ring.meshed >= ring.n * 0.9, `the ring just beyond R is meshed (${ring.meshed}/${ring.n})`);
-      // fog cull (review CORE-R10): chunk meshes lying wholly beyond fogFar are not drawn; nothing nearer is hidden
+      // fog cull (reviews CORE-R10, CORE-R11): fully fogged geometry past fogFar is hidden only where the sky behind
+      // it is the fog colour, so the picture never changes; fogged silhouettes rising above the horizon stay
       const fogCull = () => t.eval(() => {
         const g = window.__game.game, r = g.renderer;
-        // same frame, same uTime: the picture with the cull must equal the picture without it
+        // same frame, same uTime: the picture with the cull must equal the picture without it. Streaming between the
+        // two captures would also change pixels, so the section / merge counters must not move in between.
+        const cnt = () => { const st = r.getStats(); return st.sectionSets * 100000 + st.merges; };
+        const c0 = cnt();
         r.fogCull = false;
-        const off = r.capturePixels(640, 360);
+        const W = 640, H = 360;
+        const off = r.capturePixels(W, H);
         const drawsOff = r.getStats().drawCalls;
         r.fogCull = true;
-        const on = r.capturePixels(640, 360);
-        const drawsOn = r.getStats().drawCalls;
-        // a pixel may only change where the uncut picture showed pure fog colour (a fully fogged silhouette)
+        const on = r.capturePixels(W, H);
+        const st = r.getStats();
+        const streamed = cnt() !== c0;
         const fc = r.uniforms.uFogColor.value, fog = [fc.r * 255, fc.g * 255, fc.b * 255];
-        let diff = 0, diffNotFog = 0;
+        const isFog = (d, i) => Math.abs(d[i] - fog[0]) <= 1.01 && Math.abs(d[i + 1] - fog[1]) <= 1.01 && Math.abs(d[i + 2] - fog[2]) <= 1.01;
+        // the horizon row on screen; pure fog-colour pixels well above it can only be fully fogged silhouettes
+        const cam = r.camera, e = cam.matrixWorld.elements, far = r.uniforms.uFogFar.value;
+        const fx = -e[8], fz = -e[10], fl = Math.hypot(fx, fz) || 1;
+        const v = cam.position.clone().set(e[12] + fx / fl * 1000, e[13], e[14] + fz / fl * 1000).project(cam);
+        const horizonRow = Math.round((1 - v.y) / 2 * H);
+        let diff = 0, silhouette = 0;
         for (let i = 0; i < on.data.length; i += 4) {
-          if (on.data[i] === off.data[i] && on.data[i + 1] === off.data[i + 1] && on.data[i + 2] === off.data[i + 2]) continue;
-          diff++;
-          if (Math.abs(off.data[i] - fog[0]) > 1.01 || Math.abs(off.data[i + 1] - fog[1]) > 1.01 || Math.abs(off.data[i + 2] - fog[2]) > 1.01) diffNotFog++;
+          if (Math.floor(i / 4 / W) < horizonRow - 12 && isFog(off.data, i)) silhouette++;
+          if (on.data[i] !== off.data[i] || on.data[i + 1] !== off.data[i + 1] || on.data[i + 2] !== off.data[i + 2]) diff++;
         }
-        const e = r.camera.matrixWorld.elements, far = r.uniforms.uFogFar.value;
-        let drawnBeyond = 0, hiddenNear = 0, meshes = 0, hidden = 0;
+        let keptBeyond = 0, hiddenNear = 0, meshes = 0, hidden = 0;
         r.worldGroup.traverse((o) => {
           if (!o.isMesh) return;
           meshes++;
@@ -175,16 +186,21 @@ export default [
           const dx = Math.max(x0 - e[12], 0, e[12] - x0 - 16), dz = Math.max(z0 - e[14], 0, e[14] - z0 - 16);
           const d = Math.hypot(dx, dz);
           if (!o.visible) hidden++;
-          if (o.visible && d > far + 0.501) drawnBeyond++;
-          if (!o.visible && d < far) hiddenNear++;
+          if (o.visible && d > far + 0.501) keptBeyond++;
+          if ((!o.visible || o.geometry.drawRange.start > 0) && d < far) hiddenNear++;
         });
-        return { far, meshes, hidden, drawnBeyond, hiddenNear, fogCulled: r.getStats().fogCulled, drawsOff, drawsOn, diffPixels: diff, diffNotFog };
+        return { far, streamed, meshes, hidden, keptBeyond, hiddenNear, fogCulled: st.fogCulled, fogTrimmed: st.fogTrimmed, drawsOff, drawsOn: st.drawCalls, diffPixels: diff, horizonRow, silhouettePx: silhouette };
       });
-      const cull = await fogCull();
+      const fogCullSettled = async () => {
+        let c = await fogCull();
+        for (let k = 0; k < 5 && c.streamed; k++) { await settle(t); c = await fogCull(); }
+        return c;
+      };
+      const cull = await fogCullSettled();
       t.note('fogCull', cull);
-      t.assert(cull.hidden > 0 && cull.fogCulled > 0 && cull.drawsOn < cull.drawsOff, `columns past the fog are not drawn (${cull.hidden} of ${cull.meshes} meshes hidden, draws ${cull.drawsOff} -> ${cull.drawsOn})`);
-      t.assert(cull.drawnBeyond === 0 && cull.hiddenNear === 0, `fog cull is exact: ${cull.drawnBeyond} drawn wholly past fogFar, ${cull.hiddenNear} hidden inside it`);
-      t.assert(cull.diffNotFog === 0, `the fog cull removes only fully fogged pixels (${cull.diffPixels} changed, ${cull.diffNotFog} of them not pure fog colour)`);
+      t.assert(!cull.streamed, 'nothing streamed between the two captures');
+      t.assert(cull.fogCulled + cull.fogTrimmed > 0 && cull.hiddenNear === 0, `columns past the fog are cut (${cull.fogCulled} hidden, ${cull.fogTrimmed} trimmed), nothing inside fogFar is (${cull.hiddenNear})`);
+      t.assert(cull.diffPixels === 0, `the fog cull does not change the picture at ground level (${cull.diffPixels} pixels changed)`);
       // no seam at the horizon: from high up, the band around the horizon is the fog colour (terrain and sky)
       const p = await t.call('pos');
       await t.call('teleport', p.x, 120, p.z);
@@ -199,11 +215,13 @@ export default [
       }
       t.note('horizonDev', Math.round((dev / n) * 10) / 10);
       t.assert(dev / n < 6, `horizon band matches the fog colour (mean dev ${(dev / n).toFixed(1)})`);
-      // looking down from high up every culled column lies below the horizon: the picture must not change at all
+      // looking down from high up the far columns lie below the horizon: they are not drawn, and no pixel changes
       await t.call('setLook', 45, -20);
-      const cullHigh = await fogCull();
+      await t.call('waitFrames', 4);
+      const cullHigh = await fogCullSettled();
       t.note('fogCullHigh', cullHigh);
-      t.assert(cullHigh.diffPixels === 0 && cullHigh.drawnBeyond === 0 && cullHigh.hiddenNear === 0, `fog cull from high up: exact, and no pixel changed (${cullHigh.diffPixels})`);
+      t.assert(cullHigh.hidden > 0 && cullHigh.drawsOn < cullHigh.drawsOff && cullHigh.hiddenNear === 0, `from high up columns past the fog are not drawn (${cullHigh.hidden} of ${cullHigh.meshes} meshes hidden, draws ${cullHigh.drawsOff} -> ${cullHigh.drawsOn})`);
+      t.assert(cullHigh.diffPixels === 0, `fog cull from high up: no pixel changed (${cullHigh.diffPixels})`);
       await t.call('setLook', 45, 0);
       await t.call('waitFrames', 2);
       await t.shot('cored-horizon');
@@ -212,6 +230,22 @@ export default [
       await t.call('setLook', 135, 2);
       await t.call('waitFrames', 4);
       await t.shot('cored-fog-ground');
+      // review CORE-R11: a view WITH fogged silhouettes (a tall mountain past fogFar against the sunset sky, looking
+      // toward the sun). They must stay, and the cull must still change no pixel.
+      await t.call('startWorld', PEAKS);
+      await t.call('setFlying', true);
+      const sp = await t.call('pos');
+      await t.call('teleport', sp.x, sp.y + 0.2, sp.z);
+      await t.call('setTime', 12300);
+      await t.call('setLook', 0, 2);
+      await t.waitFor(() => window.__game.game.world.unmeshedWithin(window.__game.game.world.renderDistance + 1) === 0, null, 40000);
+      await settle(t);
+      const cullPeak = await fogCullSettled();
+      t.note('fogCullSilhouette', cullPeak);
+      t.assert(cullPeak.silhouettePx > 500 && cullPeak.keptBeyond > 0, `the view has fully fogged silhouettes above the horizon (${cullPeak.silhouettePx} px, ${cullPeak.keptBeyond} meshes past fogFar kept)`);
+      t.assert(!cullPeak.streamed && cullPeak.hiddenNear === 0 && cullPeak.diffPixels === 0, `the fog cull keeps them: ${cullPeak.diffPixels} pixels changed`);
+      await t.shot('cored-fog-silhouette');
+      await t.call('setTime', 6000);
     },
   },
   {

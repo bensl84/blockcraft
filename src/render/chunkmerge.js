@@ -168,3 +168,26 @@ export function sortQuadsBackToFront(centers, quads, ex, ey, ez, index) {
   }
   return index;
 }
+
+/**
+ * Fog cull (reviews CORE-R10, CORE-R11): for one pass of a column lying wholly past the fog, the first section that
+ * must still be drawn. Everything there is 100 % fogged (exactly the fog colour), so hiding a piece changes no pixel
+ * as long as the sky behind it is the fog colour as well: true for every view direction whose sine of elevation is
+ * at or below the floor -sqrt(floor2) (0 = the horizon; the sunset glow needs a lower floor toward the sun). A
+ * section is hidden when its highest point (top + pad) stays at or below that floor as seen from the eye; for a
+ * point below the eye the elevation is highest at the column's farthest corner (far2 = squared horizontal distance
+ * to it). Within a pass the section tops only grow upward, so the hidden sections are a bottom run.
+ * @param {ArrayLike<number>} top section tops (world y, -Infinity = empty section) at top[base + sy], sy 0..7
+ * @param {number} base @param {number} ey eye y @param {number} far2 @param {number} floor2 @param {number} pad
+ * @returns {number} 0..8: draw sections >= this one (8 = nothing)
+ */
+export function fogCutFrom(top, base, ey, far2, floor2, pad) {
+  for (let sy = 0; sy < 8; sy++) {
+    const t = top[base + sy];
+    if (t === -Infinity) continue;
+    const dy = t + pad - ey;
+    // kept when it rises above the eye, or (below it) above the floor: dy / hypot(far, dy) > -sqrt(floor2)
+    if (dy > 0 || dy * dy < floor2 * (far2 + dy * dy)) return sy;
+  }
+  return 8;
+}

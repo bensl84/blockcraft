@@ -5,8 +5,8 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { SKY_PALETTE, celestialAngle, computeSky, daylightFor } from '../src/render/sky.js';
 import { DynamicScaler, SCALE, detectPreset } from '../src/render/quality.js';
-import { U16_QUADS, degenerateSection, mergeColumnPass, quadCenters, quadIndices, sortQuadsBackToFront, withCorner } from '../src/render/chunkmerge.js';
-import { CHUNK_FRAG, CHUNK_VERT, ENTITY_FRAG, ENTITY_VERT, SKY_FRAG } from '../src/render/shaders.js';
+import { U16_QUADS, degenerateSection, fogCutFrom, mergeColumnPass, quadCenters, quadIndices, sortQuadsBackToFront, withCorner } from '../src/render/chunkmerge.js';
+import { CHUNK_FRAG, CHUNK_VERT, ENTITY_FRAG, ENTITY_VERT, SKY_FRAG, SKY_GLOW_FLOOR } from '../src/render/shaders.js';
 import { lineSegmentsFor, ribbonFor } from '../src/render/outline.js';
 import { SHARED_ENTITY_UNIFORMS, makeEntityMaterial } from '../src/render/entitymat.js';
 
@@ -198,6 +198,37 @@ test('chunkmerge: translucent quads sort back to front', () => {
   for (let k = 1; k < many; k++) assert.ok(d(i2[(k - 1) * 6] / 4) >= d(i2[k * 6] / 4));
 });
 
+test('chunkmerge: the fog cull hides far sections only below the horizon / glow floor (review CORE-R11)', () => {
+  const I = -Infinity, P = 0.5, eye = 71.62, far2 = 100 * 100, glow2 = SKY_GLOW_FLOOR * SKY_GLOW_FLOOR;
+  // [opaque x8, cutout x8, translucent x8]: flat ground at y 70 with grass to 72 and a lake at 62.9
+  const flat = [15.9, 31.9, 47.9, 63.9, 70, I, I, I, I, I, I, I, 72, I, I, I, I, I, I, 62.9, I, I, I, I];
+  assert.equal(fogCutFrom(flat, 0, eye, far2, 0, P), 8, 'ground below the eye: hidden');
+  assert.equal(fogCutFrom(flat, 8, eye, far2, 0, P), 4, 'grass tips above the eye: kept');
+  assert.equal(fogCutFrom(flat, 16, eye, far2, 0, P), 8, 'the lake: hidden');
+  // toward the sun at sunset the sky glows down to SKY_GLOW_FLOOR (sine -0.08): the ground 1.1 below the eye and even
+  // section 3 (top 63.9, sine -0.072) 100 away stay drawn
+  assert.equal(fogCutFrom(flat, 0, eye, far2, glow2, P), 3);
+  assert.equal(fogCutFrom(flat, 0, eye + 20, far2, glow2, P), 8, 'far enough below the eye: hidden again');
+  // a distant mountain: everything from the first section that rises above the eye is drawn
+  const peak = [15.9, 31.9, 47.9, 63.9, 79.9, 95.9, 110, I, ...new Array(16).fill(I)];
+  assert.equal(fogCutFrom(peak, 0, eye, far2, 0, P), 4);
+  assert.equal(fogCutFrom(peak, 0, 150, far2, 0, P), 8, 'seen from above every section is hidden');
+  // property: every hidden section's top (+ pad) stays at or below the floor seen from the far corner, the first
+  // drawn one rises above it
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let n = 0; n < 2000; n++) {
+    const tops = [];
+    let y = 0;
+    for (let sy = 0; sy < 8; sy++) tops.push(rnd() < 0.2 ? I : (y = sy * 16 + rnd() * 16));
+    const ey = rnd() * 140, fd = 60 + rnd() * 140, fl = rnd() < 0.5 ? 0 : glow2;
+    const from = fogCutFrom(tops, 0, ey, fd * fd, fl, P);
+    const sine = (t) => (t + P - ey) / Math.hypot(fd, t + P - ey);
+    for (let sy = 0; sy < from; sy++) if (tops[sy] !== I) assert.ok(sine(tops[sy]) <= -Math.sqrt(fl) + 1e-12, `hidden section ${sy} is below the floor`);
+    if (from < 8) assert.ok(sine(tops[from]) > -Math.sqrt(fl) - 1e-12, 'the first drawn section rises above the floor');
+  }
+});
+
 /* ------------------------------------------------------------------ shaders */
 test('shaders: chunk contract (SPEC §5.5.3) is present', () => {
   for (const s of [CHUNK_VERT]) for (const k of ['aTex', 'flat out float vLayer', 'aTex.yz / 256.0', 'uAnimFps', 'uWave']) assert.ok(s.includes(k), k);
@@ -209,6 +240,10 @@ test('shaders: chunk contract (SPEC §5.5.3) is present', () => {
   for (const k of ['uParts[PARTS]', 'aPart', 'ATLAS', 'MAP']) assert.ok(ENTITY_VERT.includes(k), k);
   for (const k of ['uLightSky', 'uLightBlock', 'uTint', 'uAlphaTest']) assert.ok(ENTITY_FRAG.includes(k), k);
   assert.ok(SKY_FRAG.includes('uSunset') && SKY_FRAG.includes('uFogColor'));
+  // the fog cull relies on these (review CORE-R11): at and below the horizon the gradient is exactly the fog colour,
+  // and the sunset glow is 0 at and below SKY_GLOW_FLOOR
+  assert.ok(SKY_FRAG.includes('float t = clamp(h * 2.6, 0.0, 1.0);') && SKY_FRAG.includes('vec3 col = mix(uFogColor, uSkyColor, t);'));
+  assert.ok(SKY_FRAG.includes(`smoothstep(${SKY_GLOW_FLOOR.toFixed(2)}, 0.02, h)`) && SKY_GLOW_FLOOR < 0);
 });
 
 /* ------------------------------------------------------------------ outline */
