@@ -11,6 +11,7 @@ import { registerEntityType } from './entity.js';
 import { registerEntityInteract, registerItemUse, registerPreUse, hooks } from '../core/hooks.js';
 import { mobTypeDef } from './mob.js';
 import { ANIMAL_CLASSES } from './animals.js';
+import { MORE_CLASSES } from './more_mobs.js';
 import { Arrow, MONSTER_CLASSES, fireArrow } from './monsters.js';
 import { Boat, XpOrb, waterSurface } from './vehicles.js';
 import { registerItemEntityType } from './item_entity.js';
@@ -21,7 +22,7 @@ import { renderCacheStats } from './mob_render.js';
 import { raycast } from '../player/raycast.js';
 import { lookDir } from '../core/math.js';
 
-const CLASSES = { ...ANIMAL_CLASSES, ...MONSTER_CLASSES };
+const CLASSES = { ...ANIMAL_CLASSES, ...MONSTER_CLASSES, ...MORE_CLASSES };
 
 /**
  * Spawn-egg cap (judge ROB-8): eggs bypass the natural-spawn caps, and mashing the pig egg on the default hotbar
@@ -188,7 +189,7 @@ export function createMobsSystem(game) {
       game.events.emit('mobs:eggRefused', { x, y, z });
     },
 
-    /** Counts by category within the loaded area: {creature, monster}. */
+    /** Counts by category within the loaded area: {creature, monster, water} (water mobs are not in creature). */
     counts() { return spawner.counts(); },
 
     /** Experience orbs worth `amount` points (P1). */

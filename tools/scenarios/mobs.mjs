@@ -187,7 +187,7 @@ export default [
       t.assert(spawnsChunkgen[0] > 0, 'chunk generation spawned some animals');
       t.assert(spawnsChunkgen[1] === spawnsChunkgen[0] && spawnsChunkgen[2] === spawnsChunkgen[0], `revisited columns never repopulate (${spawnsChunkgen})`);
       const cache = await t.eval(() => window.__game.game.mobs.renderStats());
-      t.assert(cache.geometries <= 16 && cache.materials <= 64, `shared render caches stay bounded (${JSON.stringify(cache)})`);
+      t.assert(cache.geometries <= 40 && cache.materials <= 64, `shared render caches stay bounded (${JSON.stringify(cache)})`);
     },
   },
   {
@@ -567,6 +567,46 @@ export default [
       t.assert(r.diamond >= 3 && r.diamond <= 7, `diamond ore gives 3-7 XP (${r.diamond})`);
       t.assert(r.byHand === 0, 'no drops, no XP');
       t.assert(r.smelted === 4 && (r.smeltXp === 2 || r.smeltXp === 3), `taking 4 iron ingots gives 2-3 XP (${r.smeltXp})`);
+    },
+  },
+  {
+    name: 'mobs-new-kinds', requires: ['mobs'],
+    async run(t) {
+      // judge FID-6: ten more mob kinds - each is one draw call, lives 100 ticks without errors, fish stay in water
+      // (the slime stands 30+ blocks from the iron golem, which would otherwise fight it)
+      await t.call('startWorld', NO_SPAWN);
+      await t.call('setFlying', false);
+      const p = await t.call('pos');
+      const ids = await t.eval(({ x, y, z }) => {
+        const g = window.__game.game, W = window.__game.blockId('water');
+        g.setDifficulty('easy'); g.setRule('hostileMobs', true);
+        for (let i = -3; i <= 3; i++) for (let k = -2; k <= 1; k++) for (let yy = 1; yy <= 3; yy++) g.world.setBlock(Math.floor(x) - 12 + i, yy, Math.floor(z) - 8 + k, W, 0, { cause: 'test' });
+        const row = [['cod', -14, 2.2, -8], ['tropical_fish', -12, 2.2, -8], ['squid', -10.5, 1.4, -8.5], ['rabbit', -6, 4, -8], ['fox', -3.5, 4, -8], ['bee', -1, 5.5, -8],
+          ['enderman', 2, 4, -9, { carried: 'sand' }], ['slime', -22, 4, -8, { size: 2 }], ['villager', 8, 4, -8, { variant: 'cleric' }], ['iron_golem', 11.5, 4, -9]];
+        const out = [];
+        for (const [type, dx, yy, dz, o] of row) { const e = g.mobs.spawnMob(type, x + dx, yy, z + dz, o || {}); if (e) out.push(e.id); }
+        return out;
+      }, p);
+      t.assert(ids.length === 10, `all ten new kinds spawned (${ids.length})`);
+      await t.call('setLook', 0, -10);
+      await t.call('runTicks', 100);
+      await t.call('waitFrames', 3);
+      const all = await t.eval((ids) => ids.map((id) => { const e = window.__game.game.entities.get(id); return e ? e.type + (e.removed ? ':removed' : '') + (e.object3d ? '' : ':nomesh') : 'gone:' + id; }), ids);
+      t.note('kinds', all);
+      const alive = await t.eval((ids) => ids.map((id) => window.__game.game.entities.get(id)).filter((e) => e && !e.removed && e.object3d).map((e) => ({ type: e.type, inWater: !!e.inWater, water: !!(e.def && e.def.water) })), ids);
+      t.assert(alive.length === 10, `all ten alive with a mesh after 100 ticks (${alive.length})`);
+      t.assert(alive.filter((a) => a.water).every((a) => a.inWater), 'fish and squid are still in the pond');
+      const setVis = (v) => t.eval((v) => { for (const e of window.__game.game.entities.all()) if (e.object3d) e.object3d.visible = v; }, v);
+      let entityDraws = Infinity;
+      for (let i = 0; i < 4; i++) {
+        await setVis(false); await t.call('waitFrames', 3);
+        const without = (await t.call('stats')).drawCalls;
+        await setVis(true); await t.call('waitFrames', 3);
+        entityDraws = Math.min(entityDraws, (await t.call('stats')).drawCalls - without);
+      }
+      t.note('entityDraws', entityDraws);
+      t.assert(entityDraws <= 10 + 2, `about one draw call per mob (${entityDraws})`);
+      await t.shot('mobs-new-kinds');
     },
   },
 ];

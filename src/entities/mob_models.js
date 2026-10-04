@@ -174,6 +174,126 @@ export const MODELS = {
       B(4, [3, 7, 0], [19, 9, 2], 'leg'), B(5, [3, 7, 2], [19, 9, 4], 'leg'),
     ],
   },
+  /* ---------------- judge FID-6: more mob kinds (original box designs) ---------------- */
+  cod: {
+    kind: 'fish', head: -1, tail: 1,
+    parts: [P('body', [0, 2, 0]), P('tail', [0, 2, 3.5], 0)],
+    boxes: [
+      B(0, [-1, 0, -3.5], [1, 4, 3.5], 'body'),
+      B(0, [-1, 0.5, -6], [1, 3.5, -3.5], 'head'),
+      B(0, [-0.5, 4, -2], [0.5, 5, 2], 'fin'),
+      B(1, [-0.5, 0, 3.5], [0.5, 4, 7], 'tail'),
+    ],
+  },
+  tropical_fish: {
+    kind: 'fish', head: -1, tail: 1,
+    parts: [P('body', [0, 2.5, 0]), P('tail', [0, 2.5, 2], 0)],
+    boxes: [
+      B(0, [-1, 0, -2.5], [1, 5, 2], 'body'),
+      B(0, [-0.5, 5, -1], [0.5, 7, 2], 'fin'),
+      B(1, [-0.5, 0.5, 2], [0.5, 4.5, 5], 'tail'),
+    ],
+  },
+  squid: {
+    kind: 'squid', head: -1, tentacles: [1, 2, 3, 4],
+    parts: [P('body', [0, 8, 0]), P('tentN', [0, 8, -4]), P('tentE', [4, 8, 0]), P('tentS', [0, 8, 4]), P('tentW', [-4, 8, 0])],
+    boxes: [
+      B(0, [-5, 8, -5], [5, 20, 5], 'body'),
+      B(1, [-3, 0, -5], [-1, 8, -3], 'tent'), B(1, [1, 0, -5], [3, 8, -3], 'tent'),
+      B(2, [3, 0, -3], [5, 8, -1], 'tent'), B(2, [3, 0, 1], [5, 8, 3], 'tent'),
+      B(3, [1, 0, 3], [3, 8, 5], 'tent'), B(3, [-3, 0, 3], [-1, 8, 5], 'tent'),
+      B(4, [-5, 0, 1], [-3, 8, 3], 'tent'), B(4, [-5, 0, -3], [-3, 8, -1], 'tent'),
+    ],
+  },
+  rabbit: {
+    kind: 'rabbit', head: 1, legF: 2, legB: 3,
+    parts: [P('body', [0, 4, 0]), P('head', [0, 6, -3]), P('legF', [0, 3, -2.5]), P('legB', [0, 2, 2])],
+    boxes: [
+      B(0, [-2.5, 2, -3], [2.5, 6.5, 4], 'body'),
+      B(0, [-1, 4, 4], [1, 6, 5], 'tail'),
+      B(1, [-2, 5, -6.5], [2, 9, -2.5], 'head'),
+      B(1, [-1.5, 9, -4], [-0.5, 13, -3], 'ear'),
+      B(1, [0.5, 9, -4], [1.5, 13, -3], 'ear'),
+      B(1, [-0.5, 5.5, -7], [0.5, 6.5, -6.5], 'nose'),
+      B(2, [-2, 0, -3], [-1, 3, -2], 'leg'), B(2, [1, 0, -3], [2, 3, -2], 'leg'),
+      B(3, [-2.5, 0, 0], [-0.5, 1.5, 4], 'foot'), B(3, [0.5, 0, 0], [2.5, 1.5, 4], 'foot'),
+    ],
+  },
+  fox: {
+    kind: 'quad', head: 1, legs: [2, 3, 4, 5], tail: 6,
+    sleep: { bodyTy: -3.5, legRx: 1.45, legTy: -1.5, headTy: -4.5, headTz: 1, headRy: 0.6, headRx: 0.25, tailRy: 1.3, tailTy: 0 },
+    parts: [P('body', [0, 7, 0]), P('head', [0, 8, -5]), ...quadLegParts(1.5, 4, -3, 4), P('tail', [0, 7.5, 5], 0)],
+    boxes: [
+      B(0, [-2.5, 4, -5], [2.5, 9, 5], 'body'),
+      B(1, [-3, 6, -10], [3, 11, -5], 'head'),
+      B(1, [-1, 6, -13], [1, 8, -10], 'snout'),
+      B(1, [-3, 11, -8], [-1, 13, -7], 'ear'),
+      B(1, [1, 11, -8], [3, 13, -7], 'ear'),
+      ...quadLegs(2, 1.5, 2, 4, -3, 4),
+      B(6, [-1.5, 5, 5], [1.5, 9, 13], 'tail'),
+    ],
+  },
+  bee: {
+    kind: 'bee', head: -1, wings: [1, 2], legsPart: 3,
+    parts: [P('body', [0, 5, 0]), P('wingL', [-1.5, 9, -1]), P('wingR', [1.5, 9, -1]), P('legs', [0, 2, 0])],
+    boxes: [
+      B(0, [-3.5, 2, -5], [3.5, 9, 5], 'body'),
+      B(0, [-0.5, 4.5, 5], [0.5, 5.5, 7], 'stinger'),
+      B(0, [-2, 7, -8], [-1, 8, -5], 'antenna'),
+      B(0, [1, 7, -8], [2, 8, -5], 'antenna'),
+      B(1, [-9.5, 9, -2], [-0.5, 9.5, 4], 'wing'),
+      B(2, [0.5, 9, -2], [9.5, 9.5, 4], 'wing'),
+      B(3, [-2, 0, -2], [2, 2, 2], 'legs'),
+    ],
+  },
+  enderman: {
+    kind: 'humanoid', head: 0, arms: [2, 3], legs: [4, 5], blockPart: 6, longLimbs: true,
+    parts: [P('head', [0, 38, 0]), P('body', [0, 38, 0]), P('armR', [-5, 36, 0]), P('armL', [5, 36, 0]), P('legR', [-2, 26, 0]), P('legL', [2, 26, 0]), P('block', [0, 26, -6])],
+    boxes: [
+      B(0, [-4, 38, -4], [4, 46, 4], 'head'),
+      B(1, [-4, 26, -2], [4, 38, 2], 'body'),
+      B(2, [-6, 7, -1], [-4, 37, 1], 'arm'),
+      B(3, [4, 7, -1], [6, 37, 1], 'arm'),
+      B(4, [-3, 0, -1], [-1, 26, 1], 'leg'),
+      B(5, [1, 0, -1], [3, 26, 1], 'leg'),
+      B(6, [-4, 22, -12], [4, 30, -4], 'block', { variant: 'block' }),
+    ],
+  },
+  slime: {
+    kind: 'slime', head: -1,
+    parts: [P('body', [0, 0, 0])],
+    boxes: [B(0, [-4, 0, -4], [4, 8, 4], 'outer')],
+  },
+  villager: {
+    kind: 'villager', head: 0, legs: [3, 4],
+    parts: [P('head', [0, 24, 0]), P('body', [0, 24, 0]), P('arms', [0, 22, -1]), P('legR', [-2, 12, 0]), P('legL', [2, 12, 0])],
+    boxes: [
+      B(0, [-4, 24, -4], [4, 34, 4], 'head'),
+      B(0, [-1, 23, -6], [1, 27, -4], 'nose'),
+      B(1, [-4, 12, -3], [4, 24, 3], 'body'),
+      B(1, [-4.5, 5, -3.5], [4.5, 12, 3.5], 'robe'),
+      B(2, [-4, 16, -6], [4, 20, -2], 'arms'),
+      B(2, [-6, 16, -4], [-4, 23, 0], 'arm'),
+      B(2, [4, 16, -4], [6, 23, 0], 'arm'),
+      B(3, [-4, 0, -2], [0, 12, 2], 'leg'),
+      B(4, [0, 0, -2], [4, 12, 2], 'leg'),
+    ],
+  },
+  iron_golem: {
+    kind: 'humanoid', head: 0, arms: [2, 3], legs: [4, 5], flowerArm: 3,
+    parts: [P('head', [0, 31, -2]), P('body', [0, 31, 0]), P('armR', [-11, 31, 0]), P('armL', [11, 31, 0]), P('legR', [-4, 15, 0]), P('legL', [4, 15, 0])],
+    boxes: [
+      B(0, [-4, 31, -7.5], [4, 41, 0.5], 'head'),
+      B(0, [-1, 31, -9.5], [1, 35, -7.5], 'nose'),
+      B(1, [-9, 21, -6], [9, 33, 5], 'body'),
+      B(1, [-4.5, 15, -3], [4.5, 21, 3], 'waist'),
+      B(2, [-13, 3, -3], [-9, 33, 3], 'arm'),
+      B(3, [9, 3, -3], [13, 33, 3], 'arm'),
+      B(4, [-7, 0, -2.5], [-1, 15, 2.5], 'leg'),
+      B(5, [1, 0, -2.5], [7, 15, 2.5], 'leg'),
+      B(3, [10, 0, -5], [12, 5, -3], 'flower', { variant: 'flower' }),
+    ],
+  },
   boat: {
     kind: 'boat', head: -1,
     parts: [P('hull', [0, 0, 0]), P('paddleL', [-9, 9, -2]), P('paddleR', [9, 9, -2])],
@@ -313,6 +433,14 @@ export function poseModel(model, e, t, out) {
       out[0].rx = st.body; out[0].ty = st.bodyTy;
       if (h) { h.ty = st.headTy || 0; h.tz = st.headTz || 0; }
     }
+    if (e.sleeping && model.sleep) {
+      // fox asleep: lying down, legs tucked under, head resting on the side, tail curled round
+      const sl = model.sleep;
+      out[0].ty = sl.bodyTy;
+      out[fl].rx = out[fr].rx = -sl.legRx; out[bl].rx = out[br].rx = sl.legRx;
+      for (const k of [fl, fr, bl, br]) { out[k].ty = sl.legTy; out[k].s = 0.01; }   // legs tucked out of sight
+      if (h) { h.ty = sl.headTy; h.tz = sl.headTz; h.ry = sl.headRy; h.rx = sl.headRx; }
+    }
     if (e.eating > 0 && h) {
       // sheep grazing: head down to the grass
       const k = Math.min(1, e.eating / 6) * Math.min(1, (40 - e.eating) / 6 + 0.001);
@@ -320,12 +448,25 @@ export function poseModel(model, e, t, out) {
     }
   } else if (model.kind === 'humanoid') {
     const [ar, al] = model.arms, [lr, ll] = model.legs;
-    out[lr].rx = swing(0); out[ll].rx = swing(Math.PI);
+    const k = model.longLimbs ? 0.5 : 1;   // long thin limbs swing less (enderman)
+    out[lr].rx = swing(0) * k; out[ll].rx = swing(Math.PI) * k;
     if (e.armsUp) {
       out[ar].rx = out[al].rx = -Math.PI / 2 + Math.sin(t * 0.1) * 0.05;
       out[ar].rz = 0.08; out[al].rz = -0.08;
-    } else { out[ar].rx = swing(Math.PI) * 0.8; out[al].rx = swing(0) * 0.8; }
+    } else { out[ar].rx = swing(Math.PI) * 0.8 * k; out[al].rx = swing(0) * 0.8 * k; }
     if (e.aiming && model.bowArm !== undefined) { out[ar].rx = -Math.PI / 2; out[ar].ry = -0.1 + (h ? h.ry : 0); out[al].rx = -Math.PI / 2; out[al].ry = 0.4; }
+    if (model.blockPart !== undefined) {
+      // enderman: arms forward round a carried block; an angry enderman's head lifts and trembles
+      out[model.blockPart].s = e.carrying ? 1 : 0;
+      if (e.carrying) { out[ar].rx = out[al].rx = -0.6; out[ar].rz = 0.1; out[al].rz = -0.1; }
+      if (e.angry && h) { h.ty = 2.5; h.tx = Math.sin(t * 2.7) * 0.4; }
+    }
+    if (e.attackAnim > 0) {
+      // iron golem swing: both arms up and down again
+      const a = Math.sin(Math.min(1, e.attackAnim) * Math.PI);
+      out[ar].rx = out[al].rx = -2.0 * a;
+    }
+    if (model.flowerArm !== undefined && e.offer) out[model.flowerArm].rx = -1.15;
   } else if (model.kind === 'chicken') {
     const [lL, lR] = model.legs, [wL, wR] = model.wings;
     out[lL].rx = swing(0); out[lR].rx = swing(Math.PI);
@@ -341,6 +482,30 @@ export function poseModel(model, e, t, out) {
   } else if (model.kind === 'boat') {
     const a = e.paddle || 0;
     out[1].rx = Math.sin(a) * 0.6; out[2].rx = Math.sin(a) * 0.6;
+  } else if (model.kind === 'fish') {
+    // tail beat: faster when swimming fast, a lazy wiggle when idle
+    out[model.tail].ry = Math.sin(t * (0.35 + amt * 0.6)) * (0.25 + amt * 0.35);
+  } else if (model.kind === 'squid') {
+    // tentacles open and close with each push through the water
+    const a = 0.12 + (e.tentacles || 0) * 0.75;
+    const [n, ea, s, w] = model.tentacles;
+    out[n].rx = a; out[s].rx = -a; out[ea].rz = a; out[w].rz = -a;
+  } else if (model.kind === 'rabbit') {
+    const hop = Math.min(1, e.hop || 0);
+    out[model.legF].rx = 0.15 + hop * 0.8;
+    out[model.legB].rx = -hop * 1.0;
+    out[0].rx = -0.12 * hop;
+  } else if (model.kind === 'bee') {
+    const [wl, wr] = model.wings;
+    const f = 0.3 + Math.sin(t * 2.3) * 0.6;
+    out[wl].rz = f; out[wr].rz = -f;
+    out[model.legsPart].rx = 0.5;
+    out[0].ty = Math.sin(t * 0.18) * 0.6;
+  } else if (model.kind === 'villager') {
+    const [lr, ll] = model.legs;
+    out[lr].rx = swing(0) * 0.8; out[ll].rx = swing(Math.PI) * 0.8;
+    if (e.shake > 0 && h) h.ry = Math.sin(t * 1.5) * 0.55;   // "no" (nothing to swap for that)
+    if (e.nod > 0 && h) h.rx = 0.35 + Math.sin(t * 1.2) * 0.25;
   }
   if (model.tail !== undefined) {
     const tl = out[model.tail];
@@ -350,6 +515,10 @@ export function poseModel(model, e, t, out) {
       if (e.wag) tl.ry = Math.sin(t * 0.5) * 0.5;
     } else if (e.type === 'cat') { tl.rx = -0.6 + Math.sin(t * 0.08) * 0.15; tl.ry = Math.sin(t * 0.05) * 0.3; }
     else if (e.type === 'horse') { tl.rx = -(0.15 + amt * 0.5); tl.ry = Math.sin(t * 0.07) * 0.15; }
+    else if (e.type === 'fox') {
+      if (e.sleeping && model.sleep) { tl.ry = model.sleep.tailRy; tl.ty = model.sleep.tailTy; tl.rx = 0.1; }
+      else { tl.rx = -0.25 - amt * 0.2; tl.ry = Math.sin(t * 0.09) * 0.2; }
+    }
   }
   if (model.saddlePart !== undefined) out[model.saddlePart].s = e.saddled ? 1 : 0;
   return out;

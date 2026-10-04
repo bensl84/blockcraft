@@ -4,6 +4,44 @@ Branch `lane/mobs` · worktree `C:\Users\BSLeo\AppData\Roaming\Claude\scratch-wo
 
 <!-- newest first: date · what changed · commands run + results (copy the PASS/FAIL lines) · remaining · blockers · spec conflicts -->
 
+## 2026-10-04 · Judge round 1 fixes (FID-1, KID-3, KID-6, KID-7, FID-6, FID-10, FID-12, ROB-8)
+
+`git merge main` fast-forwarded to `7f105b0` first.
+
+### What changed, per finding
+
+| Id | Change | Proof |
+|---|---|---|
+| FID-1 (major) | `monsters.js`: skeletons aim at `p.y + p.height * 0.3333` (Java `getY(0.3333)`), `shootArrow` keeps the `+0.2 * h` arc lift; `Arrow.tick` widens the player box by 0.3 on every side. Arrow hits now carry `projectile: true` in the hurt source. | Real Chrome, flat survival normal at night, player standing still: 6/10/14 blocks -> 5/5, 6/6, 6/6 hits (was 0 of 18). Scenario `mobs-skeleton-aim`, unit test, `fid1-arrow-incoming.png`. |
+| KID-3 (major) | `animals.js` Pig: a saddled pig mounts with any non-food item, the saddle still in hand included (first saddle tap still only saddles). | Real mouse taps: saddle tap -> saddled, second tap -> riding (`judge1-kid3-*`). Scenario `mobs-kid-ride-pet-horse`. |
+| KID-6 | `mob.js`: petting. A tap with an empty hand, or with an item that has no animal use (block, tool, dye on a cow...), on a passive or tamed mob: idle voice, 1-2 hearts, it stops and looks at her for 2 s, 15-tick cooldown, never love mode; event `mob:petted`. Food, eggs, buckets, bows, boats, flint keep their own use. | Real mouse: empty-hand tap on a sheep -> `mob:petted`, idle voice, love 0, health 8 (`judge1-kid6-pet-sheep.png`, hearts visible); dirt in hand pets too. |
+| KID-7 | `animals.js` Horse: kid worlds (`animalsCanDie` false) tame on the first mount (no bucking); Space gets off an unsaddled horse (a saddled one still jumps); a tamed horse without a saddle shows a floating saddle item picture in front of the rider (and over its head otherwise) and emits `mobs:needSaddle` (KID may add its own hint); the taming hearts are placed 3 blocks along her view (`mob:tamed` x/y/z) instead of on her camera. | Real mouse/keys: one tap -> tamed + riding, saddle picture visible (`judge1-kid7-saddle-picture.png`), Space -> off, saddle tap -> saddled, up arrow 19.8 blocks in 2 s, Space keeps her on. |
+| FID-6 (major) | Ten new mob kinds (`src/entities/more_mobs.js`, models + original skins in `mob_models.js` / `mob_skins.js`): **cod, tropical fish** (6 patterns; schools, 3D swimming, flop on land, run out of air outside kid worlds), **squid** (pulse swimming, ink cloud when hurt), **rabbit** (hops; brown/black/salt/spotted, white in snow, gold in desert; shy in survival), **fox** (red / snow; naps curled up by day, wakes when tapped), **bee** (flies flower to flower and hovers with pollen sparkles; stings once when hit in survival, swarm anger), **enderman** (neutral; angry when stared at or hit, dodges arrows by teleporting, teleports from water and in daylight, carries a block with mobGriefing), **slime** (sizes 1/2/4, hops, splits into 2-4 when it dies, spawns below y 40), **villager** (5 professions; an emerald buys a small gift, anything else gets a head shake and a floating emerald picture), **iron golem** (fights monsters, a tap gives the child a poppy, an iron ingot mends it). Water mobs spawn in fresh columns with 3+ deep water (own per-column RNG, so land spawns of a seed are unchanged) and by top-up, under their own cap `WATER_CAP = 12`; rabbits/foxes may spawn on sand / snow layers; monsters are weighted (endermen rare, slimes only underground); sounds are pitched stand-ins from the existing catalogue via `sound` events. | `tools/mobs-play.mjs newmobs` 20 PASS (real world): all 14 spawned and drawn (`newmobs-gallery.png`), fish/squid stay in the pond and swim (`newmobs-pond-underwater.png`), fish flop on land, fox naps (`newmobs-fox-asleep.png`) and wakes on a tap, rabbit hops to a carrot, bee hovers over a poppy (`newmobs-bee-on-flower.png`), villager trade + head shake (`newmobs-villager-wants-emerald.png`), golem poppy (`newmobs-golem-offers-poppy.png`) and golem beats a zombie, enderman stare anger (`newmobs-enderman-angry.png`) + arrow dodge, slime split (`newmobs-slime-split.png`), islands world has 12 water mobs (`newmobs-wild-water-squid.png`), snowy world has foxes + rabbits, picker Animals tab shows the 8 non-hostile new eggs (`newmobs-picker-animals.png`). Scenario `mobs-new-kinds` (10 kinds, 10 entity draw calls). |
+| FID-10 | `animals.js` Sheep: dye works on a sheared sheep (dye used up, colour stored, regrows in it); the sheared body now shows short stubble tinted with the wool colour so the dye is visible at once. | `judge1-fid10-sheared-dyed-blue.png`, `judge1-fid10-regrown-blue.png`; scenario `mobs-sheared-dye`. |
+| FID-12 | New `src/entities/xp_sources.js`: ores broken by the player with drops give the blocks.js `xp` range (coal 0-2, lapis 2-5, redstone 1-5, diamond/emerald 3-7); furnace XP (INV already banks recipe XP in `be.xp`) pops at the player when the output count goes down (taken out) and at the furnace when it is broken. Breeding XP (1-7) already existed (the judge's orbs were collected before counting). | Real mouse: diamond ore mined with an iron pickaxe -> +3 XP; two cows bred -> +5 XP; furnace opened by a tap, 4 raw iron smelted, output shift-clicked -> +3 XP. Scenario `mobs-xp-sources`. |
+| ROB-8 | `mobs.js`: a spawn egg (item use or same-type egg on a mob) is refused - small puff, soft `entity.poof`, egg kept, `mobs:eggRefused` - while 64 living mobs are within 48 blocks or 100 are loaded. | Real mouse: 300 pig-egg taps -> 64 mobs, extra eggs puff (`judge1-rob8-capped-pigs.png`), mob tick 0.27 ms. Scenario `mobs-egg-cap`. |
+
+### Files outside this lane (merger: expect these)
+
+- `src/data/mobs.js` (LEAD data): ten new `MOBS` entries appended at the end (no existing entry changed). Needed for spawn eggs, the picker, AUDIO's voice table (each `voice` is an existing catalogue voice so `test/audio.test.mjs` stays green) and the foundation item-reference test.
+- `src/data/items.js` (LEAD data): ONE added line after the egg loop that registers the ten new `*_spawn_egg` items (priority P2).
+
+### Commands run and results (2026-10-04, this worktree)
+
+- `node build.mjs --dev --out .tmp/build-mobs` -> `0.1.0-f1291f34-dev` built.
+- `npm run test:unit` -> `tests 237 · pass 237 · fail 0` (mobs: 28 tests, 6 new).
+- `node tools/smoke.mjs --tag mobs` -> `[smoke] {"PASS":166,"SKIP":5}` (the 5 SKIP need `--touch`; `node tools/smoke.mjs --touch --scenario touch-controls,coree-touch,kid-touch-overlay,kid-touch-world,menus-touch` -> 6 PASS).
+- `node tools/mobs-play.mjs` -> all sections PASS after two test fixes (`kidhit` now lets the pig's panic run out between holds - the old 12-tick wait flaked when the pig ran out from under the cursor; `spawning` excludes fish from the "sky-lit ground" rule). `--touch touch` 5 PASS.
+
+### Notes for other lanes
+
+- **AUDIO**: no voices exist for the new kinds; `more_mobs.js` plays pitched stand-ins (`player.splash`, `chicken.hurt` x1.6, `wolf.whine` x1.55, `zombie.idle` x0.55, `pig.idle` x0.6, `block.*.metal`...). Real voices (fish splash, squid, rabbit squeak, fox yip, bee buzz, enderman vwoop, slime squish, villager "hmm", golem clank) would replace the `VOICE` table.
+- **LEAD data**: the drops are limited to existing items. Missing Java items: cod / salmon / tropical fish (+ fish buckets), ink sac (black dye stands in), rabbit hide / raw rabbit (leather stands in), slime ball, ender pearl, sweet berries (foxes eat apples), honeycomb, bee nests.
+- **FID-5 (villages)**: spawn villagers with `game.mobs.spawnMob('villager', x, y, z, { variant: 'farmer'|'librarian'|'cleric'|'smith'|'shepherd' })` and a golem with `spawnMob('iron_golem', ...)`; they never spawn naturally yet.
+- **KID**: new events `mob:petted`, `mobs:needSaddle`, `mobs:eggRefused`, `mobs:trade`, `mobs:gift`, `mobs:ink`, `mobs:teleport`, `mobs:enderAngry`.
+- **FX**: `mob:tamed` for a horse tamed by mounting carries the hearts position (3 blocks along the rider's view), not the horse's feet.
+- **CORE-E**: the hold-on-animal -> block breaking issue (cross-lane defect 4 below) is unchanged.
+
 ## 2026-10-03 · Phase 2: merged the real core, in-world verification
 
 ### What changed

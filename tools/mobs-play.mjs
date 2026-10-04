@@ -347,7 +347,9 @@ const SECTIONS = {
       await page.mouse.move(s.x, s.y); await page.mouse.down(); await page.waitForTimeout(450);
       const e = await ent(pig); if (e.vy > 0.1 || !e.onGround) hopped = true;
       if (i === 2) { await settle(1); await shot('kidhit-pig-hop'); }
-      await page.mouse.up(); await call('waitTicks', 12);
+      // let the panic (100 ticks) run out so every hold starts on a calm pig (a panicking pig can run out from under
+      // the cursor before the hold registers - a timing flake, not a mob defect)
+      await page.mouse.up(); await call('waitTicks', 4); await call('runTicks', 100);
     }
     const e = await ent(pig);
     check(e && e.health === 10, 'kidhit: 12 holds on a pig in a kid world: health stays 10', e && e.health);
@@ -432,12 +434,12 @@ const SECTIONS = {
         const below = gm.world.getBlock(Math.floor(e.x), Math.floor(e.y - 0.01), Math.floor(e.z));
         const light = gm.world.getSkyLight(Math.floor(e.x), Math.floor(e.y + 0.5), Math.floor(e.z));
         const col = gm.world.getColumn(Math.floor(e.x) >> 4, Math.floor(e.z) >> 4);
-        if (e.data.wild && e.age < 100 && light < 9) bad.push({ type: e.type, light });
+        if (e.data.wild && e.age < 100 && light < 9 && !(e.def && e.def.water)) bad.push({ type: e.type, light });   // fish live under water
         void below; void col;
       }
       return { out, bad };
     });
-    check(Object.keys(animals.out).length >= 3 && animals.bad.length === 0, 'spawning: chunk-gen animals of several kinds, all on sky-lit ground', animals);
+    check(Object.keys(animals.out).length >= 3 && animals.bad.length === 0, 'spawning: chunk-gen animals of several kinds, land animals all on sky-lit ground', animals);
     // biome check: where did wolves / horses spawn
     const byBiome = await ev(() => {
       const gm = window.__game.game, r = {};
@@ -758,6 +760,177 @@ const SECTIONS = {
     await call('runTicks', 40);
     const xp5 = await xp();
     check(xp5.xp + xp5.level * 100 > xp4.xp + xp4.level * 100 && (await ev(() => window.__game.game.inventory.count('iron_ingot'))) === 4, 'FID-12: taking the iron out of the furnace gives the smelting XP', { before: xp4, after: xp5, realClick: !!outSel });
+    await call('closeUI');
+  },
+
+  /** Judge FID-6: the ten new mob kinds in the real world (models, behaviour, spawning, picker eggs). */
+  async newmobs() {
+    const unfreeze = () => ev(() => { for (const e of window.__game.game.entities.all()) if (e.__tick) { e.tick = e.__tick; delete e.__tick; } });
+    const G = (fn, arg) => ev(fn, arg);
+    await startFlat({ difficulty: 'easy', rules: { hostileMobs: true } });
+    // --- gallery: every new kind side by side (frozen), day
+    const p = await call('pos');
+    const ids = await G(({ x, y, z }) => {
+      const gm = window.__game.game, W = window.__game.blockId('water');
+      // a little pond for the water mobs
+      for (let i = -3; i <= 3; i++) for (let k = -2; k <= 1; k++) for (let yy = 1; yy <= 3; yy++) gm.world.setBlock(Math.floor(x) - 12 + i, yy, Math.floor(z) - 8 + k, W, 0, { cause: 'test' });
+      const row = [['cod', -14, 2.2, -8], ['tropical_fish', -12.5, 2.4, -8, { variant: 1 }], ['squid', -10.5, 1.4, -8.5],
+        ['rabbit', -7, 4, -7, { coat: 'brown' }], ['rabbit', -6, 4, -6, { coat: 'white' }], ['fox', -4, 4, -7], ['fox', -2.5, 4, -6, { variant: 'snow' }], ['bee', -0.5, 5.2, -7],
+        ['enderman', 2, 4, -9, { carried: 'grass_block' }], ['slime', 4.5, 4, -7, { size: 2 }], ['slime', 6, 4, -6, { size: 1 }], ['villager', 8, 4, -8, { variant: 'farmer' }], ['villager', 10, 4, -8, { variant: 'librarian' }], ['iron_golem', 13, 4, -9]];
+      const out = [];
+      for (const [type, dx, yy, dz, o] of row) { const e = gm.mobs.spawnMob(type, x + dx, yy, z + dz, o || {}); if (e) out.push(e.id); }
+      return out;
+    }, p);
+    check(ids.length === 14, 'newmobs: 14 new-kind mobs spawned (cod, tropical fish, squid, rabbits, foxes, bee, enderman, slimes, villagers, golem)', ids.length);
+    await call('runTicks', 2);
+    await freezeAll();
+    await settle(40);   // the spawn puffs clear
+    await G(() => { for (const e of window.__game.game.entities.all()) { e.yaw = e.prevYaw = Math.PI * 0.82; e.headYaw = 0; } });
+    await call('teleport', p.x, p.y, p.z + 4); await call('setLook', 0, -14);
+    await settle(8); await shot('newmobs-gallery');
+    await call('teleport', p.x - 3, p.y, p.z - 2); await call('lookAt', p.x - 5, 4.6, p.z - 7); await settle(6); await shot('newmobs-close-rabbit-fox-bee');
+    await call('teleport', p.x + 8, p.y, p.z - 3); await call('lookAt', p.x + 8, 5.5, p.z - 8); await settle(6); await shot('newmobs-close-villager-slime-enderman');
+    await call('teleport', p.x - 12, p.y, p.z - 5.2); await call('lookAt', p.x - 12, 2.2, p.z - 8); await settle(6); await shot('newmobs-close-pond');
+    await call('setFlying', true); await call('teleport', Math.floor(p.x) - 9 + 0.5, 1, Math.floor(p.z) - 8 + 0.5); await call('lookAt', p.x - 13, 2.0, p.z - 8.2); await settle(6); await shot('newmobs-pond-underwater'); await call('setFlying', false);
+    await call('teleport', p.x + 2, p.y, p.z - 6); await call('lookAt', p.x + 2, 5.6, p.z - 9); await settle(6); await shot('newmobs-close-enderman-block');
+    await unfreeze();
+
+    // --- water: fish and squid stay in the pond and swim about; a fish on land flops and (kid world) never dies
+    const pond = await G(({ x, z }) => {
+      const gm = window.__game.game;
+      return gm.entities.all().filter((e) => e.def && e.def.water).map((e) => ({ id: e.id, x: e.x, y: e.y, z: e.z }));
+    }, p);
+    await call('runTicks', 300);
+    const pond2 = await G((list) => list.map((a) => { const e = window.__game.game.entities.get(a.id); return e ? { moved: Math.hypot(e.x - a.x, e.y - a.y, e.z - a.z), inWater: e.inWater } : null; }), pond);
+    check(pond2.every((q) => q && q.inWater) && pond2.some((q) => q.moved > 0.8), 'newmobs: fish and squid stay in the water and swim', pond2.map((q) => q && +q.moved.toFixed(1)));
+    const flop = await spawn('cod', 2, -2);
+    const f0 = await ent(flop);
+    let maxY = f0.y;
+    for (let i = 0; i < 40; i++) { await call('runTicks', 2); const e = await ent(flop); maxY = Math.max(maxY, e.y); }
+    const f1 = await ent(flop);
+    check(maxY > f0.y + 0.3 && f1 && f1.health === 3, 'newmobs: a fish on land flops about (and is not hurt in a kid world)', { jump: +(maxY - f0.y).toFixed(2), health: f1 && f1.health });
+
+    // --- fox naps in the daytime; a tap wakes it (petting)
+    await fresh();
+    const fox = await spawn('fox', 0, -3);
+    let slept = false;
+    for (let i = 0; i < 30 && !slept; i++) { await call('runTicks', 50); slept = await G((id) => !!window.__game.game.entities.get(id).sleeping, fox); }
+    check(slept, 'newmobs: a fox curls up for a nap in the daytime');
+    await freezeAll(); await face(fox, 2.5, 0, 0.3); await settle(4); await shot('newmobs-fox-asleep');
+    await unfreeze(); await hotbar(0, null);
+    await tapEntity(fox, 0.3);
+    check(!(await G((id) => window.__game.game.entities.get(id).sleeping, fox)), 'newmobs: tapping the sleeping fox wakes it up');
+
+    // --- rabbits hop toward a carrot
+    await fresh();
+    const rb = await spawn('rabbit', 0, -7);
+    await hotbar(0, 'carrot', 4);
+    const r0 = await ent(rb);
+    const hops = await G((id) => { const gm = window.__game.game, e = gm.entities.get(id); let n = 0, prev = true; for (let i = 0; i < 120; i++) { gm.stepTicks(1); if (prev && !e.onGround && e.vy > 0) n++; prev = e.onGround; } return n; }, rb);
+    const r1 = await ent(rb);
+    const pp = await call('pos');
+    check(hops >= 3 && Math.hypot(r1.x - pp.x, r1.z - pp.z) < Math.hypot(r0.x - pp.x, r0.z - pp.z) - 2, 'newmobs: a rabbit hops over to the child holding a carrot', { hops, from: +Math.hypot(r0.x - pp.x, r0.z - pp.z).toFixed(1), to: +Math.hypot(r1.x - pp.x, r1.z - pp.z).toFixed(1) });
+
+    // --- bees fly from flower to flower
+    await fresh();
+    const q = await call('pos');
+    await G(({ x, z }) => { const gm = window.__game.game; for (const [dx, dz, n] of [[3, -4, 'poppy'], [-3, -5, 'dandelion'], [0, -8, 'cornflower']]) gm.world.setBlock(Math.floor(x) + dx, 4, Math.floor(z) + dz, window.__game.blockId(n), 0, { cause: 'test' }); }, q);
+    const bee = await spawn('bee', 0, -4);
+    let hovered = false, minAbove = 9;
+    for (let i = 0; i < 60 && !hovered; i++) { await call('runTicks', 10); const b = await G((id) => { const e = window.__game.game.entities.get(id); return { hover: e.hover, y: e.y }; }, bee); hovered = b.hover > 0; minAbove = Math.min(minAbove, b.y - 4); }
+    check(hovered && minAbove > -0.05, 'newmobs: the bee flies to a flower and hovers over it (never lands)', { minAbove: +minAbove.toFixed(2) });
+    await freezeAll(); await face(bee, 2.5, 20, 0.5); await settle(4); await shot('newmobs-bee-on-flower'); await unfreeze();
+
+    // --- villager: an emerald buys a gift; anything else gets a head shake and the emerald picture
+    await fresh();
+    const vil = await spawn('villager', 0, -3, { variant: 'farmer' });
+    await freezeAll(); await face(vil, 3, 0, 0.6); await unfreeze();
+    await hotbar(0, null);
+    await tapEntity(vil, 0.6);
+    await call('runTicks', 3); await settle(4);
+    check(await G((id) => window.__game.game.entities.get(id).wishTicks > 0, vil), 'newmobs: an empty-hand tap makes the villager shake its head and show an emerald');
+    await shot('newmobs-villager-wants-emerald');
+    await hotbar(0, 'emerald', 3);
+    const tr0 = await evCount('mobs:trade');
+    await face(vil, 3, 0, 0.6); await tapEntity(vil, 0.6);
+    check((await evCount('mobs:trade')) - tr0 === 1, 'newmobs: tapping the villager with an emerald trades it for a gift');
+    await call('runTicks', 30);
+    check((await G(() => ['bread', 'carrot', 'apple'].reduce((n, k) => n + window.__game.game.inventory.count(k), 0))) > 0, 'newmobs: the gift lands in her inventory');
+
+    // --- iron golem hands her a poppy
+    await fresh();
+    const golem = await spawn('iron_golem', 0, -4);
+    await freezeAll(); await face(golem, 4, 0, 0.6); await unfreeze();
+    await hotbar(0, null);
+    const poppies0 = await G(() => window.__game.game.inventory.count('poppy'));
+    await tapEntity(golem, 0.6);
+    await call('runTicks', 4); await settle(4); await shot('newmobs-golem-offers-poppy');
+    await call('runTicks', 40);
+    check((await G(() => window.__game.game.inventory.count('poppy'))) > poppies0, 'newmobs: tapping the iron golem gives her a poppy');
+
+    // --- survival night: golem fights a zombie; enderman gets angry when stared at and dodges arrows; slime splits
+    await call('exitToTitle');
+    await call('startWorld', { preset: 'flat', seed: 3, mode: 'survival', difficulty: 'normal', rules: { passiveMobs: false, hostileMobs: true, daylightCycle: false } });
+    await call('setFlying', false); await call('waitTicks', 5); await call('setTime', 18000);
+    await G(() => { const gm = window.__game.game; gm.player.health = 20; });
+    const s0 = await call('pos');
+    const gol = await spawn('iron_golem', 4, -6), zom = await spawn('zombie', 6, -10);
+    let zgone = false;
+    for (let i = 0; i < 30 && !zgone; i++) { await call('runTicks', 10); const z = await ent(zom); zgone = !z || z.health <= 0; await G(() => { window.__game.game.player.health = 20; }); }
+    check(zgone, 'newmobs: the iron golem fights off a zombie');
+    await G(() => { const gm = window.__game.game; for (const e of gm.entities.all()) if (e.type !== 'iron_golem') gm.entities.remove(e, 'test'); });
+    await G((id) => window.__game.game.entities.remove(window.__game.game.entities.get(id), 'test'), gol);
+    const end = await spawn('enderman', 0, -10);
+    await call('runTicks', 2);
+    await G(() => { window.__game.game.time.setTime(18000); });
+    // look straight at its head
+    const ee = await ent(end);
+    await call('lookAt', ee.x, ee.y + 2.55, ee.z);
+    let angry = false;
+    for (let i = 0; i < 20 && !angry; i++) { await call('runTicks', 2); angry = await G((id) => { const e = window.__game.game.entities.get(id); return !!(e && e.angryTicks > 0); }, end); }
+    check(angry, 'newmobs: staring at an enderman makes it angry');
+    await settle(3); await shot('newmobs-enderman-angry');
+    const tp0 = await evCount('mobs:teleport');
+    const h0 = (await ent(end)).health;
+    await G((id) => { const gm = window.__game.game, e = gm.entities.get(id), p = gm.player; const dx = e.x - p.x, dy = e.y + 1.5 - (p.y + 1.5), dz = e.z - p.z, l = Math.hypot(dx, dy, dz);
+      gm.entities.spawn('arrow', p.x + dx / l, p.y + 1.5 + dy / l, p.z + dz / l, { vx: dx / l * 3, vy: dy / l * 3, vz: dz / l * 3, shooter: p, damage: 6, fromPlayer: true }); }, end);
+    await call('runTicks', 10);
+    const e2 = await ent(end);
+    check((await evCount('mobs:teleport')) > tp0 && e2 && e2.health === h0, 'newmobs: an arrow never hits an enderman - it teleports away', { teleports: (await evCount('mobs:teleport')) - tp0, health: e2 && e2.health });
+    await G(() => { const gm = window.__game.game; for (const e of gm.entities.all()) gm.entities.remove(e, 'test'); gm.player.health = 20; });
+    const sl = await spawn('slime', 0, -4, { size: 4 });
+    for (let i = 0; i < 12; i++) { await G((id) => window.__game.game.mobs.hit(id, 4), sl); await call('runTicks', 11); }
+    await call('runTicks', 25);
+    const kids = await G(() => { const p = window.__game.game.player; return window.__game.game.entities.all().filter((e) => e.type === 'slime' && !e.deathTime && Math.hypot(e.x - p.x, e.z - p.z) < 12).map((e) => e.data.size); });
+    check(kids.length >= 2 && kids.every((s) => s === 2), 'newmobs: a big slime splits into 2-4 smaller slimes', kids);
+    await call('lookAt', s0.x, 4.4, s0.z - 4); await settle(3); await shot('newmobs-slime-split');
+
+    // --- natural spawning: water mobs in the islands preset, rabbits / foxes in the snowy preset
+    await call('exitToTitle');
+    await call('startWorld', { preset: 'islands', seed: 4242, mode: 'creative', difficulty: 'peaceful' });
+    await call('waitTicks', 60);
+    const wc = await G(() => { const gm = window.__game.game; const c = gm.mobs.counts(); const types = {}; for (const e of gm.entities.all()) if (e.def && e.def.water) types[e.type] = (types[e.type] || 0) + 1; return { ...c, types, allInWater: gm.entities.all().filter((e) => e.def && e.def.water).every((e) => e.inWater) }; });
+    check(wc.water > 0 && wc.water <= 12 && wc.allInWater, 'newmobs: the islands world has fish / squid in its water (own cap 12)', wc);
+    const fish = await G(() => { const gm = window.__game.game, p = gm.player; let best = null, bd = 1e9; for (const e of gm.entities.all()) if (e.def && e.def.water) { const d = Math.hypot(e.x - p.x, e.z - p.z); if (d < bd) { bd = d; best = e; } } return best ? { x: best.x, y: best.y, z: best.z, type: best.type } : null; });
+    if (fish) { await call('setFlying', true); await call('teleport', fish.x + 2.5, fish.y + 3, fish.z + 2.5); await call('lookAt', fish.x, fish.y, fish.z); await settle(8); await shot('newmobs-wild-water-' + fish.type); }
+    await call('exitToTitle');
+    await call('startWorld', { preset: 'snowy', seed: 77, mode: 'creative', difficulty: 'peaceful' });
+    await call('waitTicks', 60);
+    const snow = await G(() => { const out = {}; for (const e of window.__game.game.entities.all()) if (e.def) out[e.type] = (out[e.type] || 0) + 1; return out; });
+    console.log('  snowy world animals', JSON.stringify(snow));
+    check((snow.rabbit || 0) + (snow.fox || 0) > 0, 'newmobs: rabbits or foxes live in the snowy world', snow);
+
+    // --- creative picker: the new eggs are in the Animals tab
+    await call('exitToTitle');
+    await startFlat();
+    const shown = await G(() => { const gm = window.__game.game; return ['cod', 'tropical_fish', 'squid', 'rabbit', 'fox', 'bee', 'villager', 'iron_golem'].filter((t) => window.__game.game.entities && true); });
+    void shown;
+    await call('openInventory'); await settle(6);
+    const tab = await G(() => { const b = [...document.querySelectorAll('[data-tab], [data-picker-tab], button')].find((el) => /animals/i.test(el.dataset.tab || el.dataset.pickerTab || el.getAttribute('aria-label') || '')); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+    if (tab) { await page.mouse.click(tab.x, tab.y, { delay: 40 }); await settle(6); }
+    const eggs = await G(() => [...document.querySelectorAll('[data-item]')].map((el) => el.dataset.item).filter((k) => /_spawn_egg$/.test(k)));
+    check(['cod', 'tropical_fish', 'squid', 'rabbit', 'fox', 'bee', 'villager', 'iron_golem'].every((t) => eggs.includes(t + '_spawn_egg')), 'newmobs: the picker Animals tab shows the new spawn eggs', eggs);
+    await shot('newmobs-picker-animals');
     await call('closeUI');
   },
 

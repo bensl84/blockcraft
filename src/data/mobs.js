@@ -72,6 +72,55 @@ export const MOBS = Object.freeze({
     attack: { easy: 2, normal: 2 }, climbsWalls: true, neutralAtLight: 12, leap: true,
     drops: [{ item: 'string', min: 0, max: 2 }], xp: [5, 5], voice: 'spider',
   },
+  // ---- judge FID-6 (round 1): more mob kinds, added by the MOBS lane (behaviour: src/entities/more_mobs.js).
+  // `water`: swims, spawned in water by spawning.js (own cap), never by the land spawner. `voice` must be one of the
+  // AUDIO catalogue voices (more_mobs.js plays pitched stand-ins until AUDIO adds real voices). Drops only use items
+  // that exist: no cod / ink sac / rabbit hide / slime ball / ender pearl / sweet berries items yet (black dye is the
+  // ink stand-in, leather the hide, apple the berries).
+  cod: {
+    category: 'creature', priority: 'P2', water: true, school: true, hp: 3, w: 0.5, h: 0.3, eye: 0.2, speed: 0.1,
+    group: [3, 6], xp: [1, 3], voice: 'chicken',
+  },
+  tropical_fish: {
+    category: 'creature', priority: 'P2', water: true, school: true, warm: true, hp: 3, w: 0.5, h: 0.4, eye: 0.25, speed: 0.1,
+    group: [3, 6], xp: [1, 3], voice: 'chicken',
+  },
+  squid: {
+    category: 'creature', priority: 'P2', water: true, hp: 10, w: 0.8, h: 0.95, eye: 0.6, speed: 0.1, minDepth: 4,
+    drops: [{ item: 'black_dye', min: 1, max: 3 }], group: [1, 3], xp: [1, 3], voice: 'cow',
+  },
+  rabbit: {
+    category: 'creature', priority: 'P2', hp: 3, w: 0.4, h: 0.5, eye: 0.4, speed: 0.3,
+    drops: [{ item: 'leather', min: 0, max: 1 }], breed: ['carrot', 'dandelion'], tempt: ['carrot', 'dandelion'],
+    biomes: ['desert', 'snowy', 'taiga', 'birch_forest'], spawnOn: ['grass_block', 'sand', 'snow'], group: [2, 3], xp: [1, 3], voice: 'chicken',
+  },
+  fox: {
+    category: 'creature', priority: 'P2', hp: 10, w: 0.6, h: 0.7, eye: 0.4, speed: 0.3,
+    breed: ['apple'], tempt: ['apple'], sleepsByDay: true,
+    biomes: ['taiga', 'snowy'], spawnOn: ['grass_block', 'snow'], group: [2, 4], xp: [1, 3], voice: 'wolf',
+  },
+  bee: {
+    category: 'creature', priority: 'P2', hp: 10, w: 0.7, h: 0.6, eye: 0.3, speed: 0.3, flies: true, attack: { easy: 2, normal: 2 },
+    breed: ['dandelion', 'poppy', 'cornflower', 'orange_tulip', 'pink_tulip', 'allium', 'lily_of_the_valley', 'blue_orchid'],
+    tempt: ['dandelion', 'poppy', 'cornflower', 'orange_tulip', 'pink_tulip', 'allium', 'lily_of_the_valley', 'blue_orchid'],
+    biomes: ['plains', 'forest'], group: [1, 3], xp: [1, 3], voice: 'spider',
+  },
+  enderman: {
+    category: 'monster', priority: 'P2', hp: 40, w: 0.6, h: 2.9, eye: 2.55, speed: 0.3, attack: { easy: 4.5, normal: 7 },
+    neutral: true, teleports: true, spawnWeight: 10, xp: [5, 5], voice: 'zombie',
+  },
+  slime: {
+    category: 'monster', priority: 'P2', hp: 4, w: 0.52, h: 0.52, eye: 0.325, speed: 0.3, sizes: [1, 2, 4], splits: true,
+    spawnWeight: 30, maxSpawnY: 40, xp: [1, 4], voice: 'spider',
+  },
+  villager: {
+    category: 'creature', priority: 'P2', hp: 20, w: 0.6, h: 1.95, eye: 1.62, speed: 0.2,
+    professions: ['farmer', 'librarian', 'cleric', 'smith', 'shepherd'], group: [1, 1], voice: 'pig',
+  },
+  iron_golem: {
+    category: 'creature', priority: 'P2', hp: 100, w: 1.4, h: 2.7, eye: 2.3, speed: 0.25, attack: { easy: 7, normal: 10 },
+    drops: [{ item: 'iron_ingot', min: 3, max: 5 }, { item: 'poppy', min: 0, max: 2 }], group: [1, 1], voice: 'zombie',
+  },
 });
 
 /** Spawning (SPEC §2.6). Kid-scaled caps: fewer than Java's 70 monsters for weak laptops. */

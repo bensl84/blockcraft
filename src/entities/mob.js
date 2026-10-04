@@ -31,7 +31,7 @@ const tmpBox = {};
 
 /** Keys copied from spawn opts / saved data into entity.data. */
 const DATA_KEYS = ['baby', 'grow', 'color', 'sheared', 'tamed', 'owner', 'sitting', 'saddled', 'coat', 'speed', 'jump', 'hp', 'temper',
-  'love', 'cooldown', 'wild', 'eggTimer', 'rainbow', 'dyes', 'variant', 'name', 'leashed'];
+  'love', 'cooldown', 'wild', 'eggTimer', 'rainbow', 'dyes', 'variant', 'name', 'leashed', 'size', 'carried', 'nectar', 'stung'];
 
 export class Mob extends Entity {
   /**
@@ -52,9 +52,9 @@ export class Mob extends Entity {
     this.persistent = this.category !== 'monster';
     for (const k of DATA_KEYS) if (opts[k] !== undefined) this.data[k] = opts[k];
     if (opts.tamedBy) { this.data.tamed = true; this.data.owner = opts.tamedBy; }
+    this.stepHeight = 0.6;            // before initData: fish and bees set 0
     this.initData(game, opts);
     if (this.data.baby && !(this.data.grow > 0)) this.data.grow = SPAWN.BABY_GROW_TICKS;
-    this.stepHeight = 0.6;
     this.speedAttr = Array.isArray(this.def.speed) ? (this.data.speed || this.def.speed[0]) : (this.def.speed || 0.25);
     this.maxHealth = this.baseMaxHealth();
     this.health = this.maxHealth;

@@ -13,7 +13,7 @@ import { createSimpleMesh } from './mob_render.js';
 
 const DIFF = (g) => (g.meta ? g.meta.difficulty : 'peaceful');
 
-class Monster extends Mob {
+export class Monster extends Mob {
   constructor(game, type, x, y, z, opts) {
     super(game, type, x, y, z, opts);
     this.persistent = false;
@@ -246,7 +246,7 @@ export class Arrow extends Entity {
         game.entities.remove(this, 'hit'); return;
       }
       if (hit && entT < blockT) {
-        hit.entity.hurt(this.damage, { type: this.fromPlayer ? 'player' : 'mob', player: this.fromPlayer, entity: this.shooter || this });
+        hit.entity.hurt(this.damage, { type: this.fromPlayer ? 'player' : 'mob', player: this.fromPlayer, entity: this.shooter || this, projectile: true });
         game.entities.remove(this, 'hit'); return;
       }
       if (blockT !== Infinity) {
