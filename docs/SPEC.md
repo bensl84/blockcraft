@@ -1593,7 +1593,7 @@ tick ; frame
 **Targeting (every frame)**
 
 - The ray starts at the interpolated eye and goes through `input.aim`: unproject the NDC with the camera, or use the centre when locked.
-- Block hit within `reach()`; entity hit through `entities.raycast` within the entity reach; the nearer one wins. *(v1.6)* A non-solid cross plant (grass tuft, fern, flower, sapling) never hides an entity behind it: the entity wins, so a child's tap on a pig standing in tall grass reaches the pig.
+- Block hit within `reach()`; entity hit through `entities.raycast` within the entity reach; the nearer one wins. *(v1.6)* A non-solid cross plant (grass tuft, fern, flower, sapling) never hides an entity standing in it or up to 1.5 blocks behind it: the entity wins, so a child's tap on a pig in tall grass reaches the pig, while an animal farther back does not steal a tap meant for the grass cell.
 - Call `renderer.setHighlight` only when the target changes.
 - Kid scheme: no target while the cursor is outside the canvas (`aimActive` false), unless a touch is active.
 
@@ -2039,6 +2039,7 @@ No frame above 50 ms during the TNT chain on the RTX machine.
   - Stars (`starBrightness`).
   - Flat clouds at `CLOUD_HEIGHT` (108), drifting +X at 0.03 b/t, procedural cloud map, toggled by `settings.clouds`.
   - *(v1.5, review CORE-R11)* No sun, moon or stars at or below the horizon, and clouds use the shared fog uniforms, so the renderer's fog cull stays picture-neutral (§5.5.4).
+  - *(v1.6)* Cloud fragments farther than `uFogFar` + 0.5 horizontally are discarded at or below the camera's height (everywhere while the eye is in water or lava), exactly where the fog cull may hide terrain. The flat low-preset cloud layer writes depth, so far fogged water drawn after it can no longer paint over a nearer cloud. Before this, the low preset changed about 400 pixels between cull off and on from high up (`cored-fog` under SwiftShader).
 - **Crack overlay:** a box at 1.002 scale using the `crack_<stage>` layers with multiply-style blending, `depthWrite: false` and polygonOffset −1. Driven by `interaction.mining` and `block:mining`.
 - **Kid ghost block:** a translucent (α 0.35) preview of the held placeable block at the target cell, kid scheme only, while the cursor hovers. Pulses gently.
 - **Bed nap:** fade plus a starry sky for `sleep:start {nap: true}`.

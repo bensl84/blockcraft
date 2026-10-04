@@ -148,15 +148,19 @@ export class Celestial {
       uFadeNear: { value: 110 }, uFadeFar: { value: 180 },
       uAlpha: { value: 0.8 },
       uDepthFar: { value: 120 },
+      // the renderer's fog cull (SPEC 5.5.6) hides fully fogged terrain past uFogFar + 0.5 where the sky behind is
+      // the fog colour: clouds there must be invisible too, or hiding the terrain would reveal them (LEAD integration)
+      uCullFar: { value: 1e9 }, uCullAll: { value: 0 },
     };
     const cloudVert = /* glsl */`
       uniform float uDepthFar;
-      in float aShade; out float vShade; out float vDist;
+      in float aShade; out float vShade; out float vDist; out vec3 vRel;
       void main() {
         vShade = aShade;
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         vec4 wp = modelMatrix * vec4(position, 1.0);
-        vDist = length((wp.xyz - cameraPosition).xz);
+        vRel = wp.xyz - cameraPosition;
+        vDist = length(vRel.xz);
         // Clouds reach past the camera's far plane (the terrain fog distance), which would cut them off in a hard
         // straight line. Pull far vertices in ALONG THE VIEW RAY (same pixel on screen) with a monotonic squeeze
         // into [0.6, 0.97] x far: near clouds keep their true depth, far ones keep their order.
@@ -167,8 +171,11 @@ export class Celestial {
       }`;
     const cloudFrag = /* glsl */`
       uniform vec3 uCloudColor; uniform vec3 uFogColor; uniform float uFadeNear; uniform float uFadeFar; uniform float uAlpha;
-      in float vShade; in float vDist;
+      uniform float uCullFar; uniform float uCullAll;
+      in float vShade; in float vDist; in vec3 vRel;
       void main() {
+        // fully fogged like the terrain: past the fog, at or below the horizon (everywhere in water or lava)
+        if (length(vRel.xz) > uCullFar + 0.5 && (vRel.y <= 0.0 || uCullAll > 0.5)) discard;
         float f = smoothstep(uFadeNear, uFadeFar, vDist);
         if (f >= 0.999) discard;
         vec3 c = mix(uCloudColor * vShade, uFogColor, f * 0.85);
@@ -190,7 +197,12 @@ export class Celestial {
     flatGeo.setIndex(new THREE.BufferAttribute(fg.index, 1));
     this.flatCloudGeo = flatGeo;
     this.flatCloudQuads = fg.quads;
-    this.cloudFlat = new THREE.Mesh(flatGeo, this.cloudMat);
+    // the flat layer has no depth pre-pass: it writes depth itself, so far fogged water drawn after it can no longer
+    // paint over a nearer cloud (that ordering also made the fog cull change pixels on the low preset; LEAD integration)
+    this.cloudFlatMat = this.cloudMat.clone();
+    this.cloudFlatMat.uniforms = this.cloudUniforms;
+    this.cloudFlatMat.depthWrite = true;
+    this.cloudFlat = new THREE.Mesh(flatGeo, this.cloudFlatMat);
     this.cloudFlat.renderOrder = -10;
     this.cloudFlat.visible = false;
     this.flat = false;
@@ -254,6 +266,10 @@ export class Celestial {
       const oz = Math.round(cam.position.z / period) * period;
       this.clouds.position.set(ox, CLOUD_HEIGHT, oz);
       this.cloudUniforms.uDepthFar.value = cam.far || 120;
+      if (r.uniforms && r.uniforms.uFogFar) {
+        this.cloudUniforms.uCullFar.value = r.uniforms.uFogFar.value;
+        this.cloudUniforms.uCullAll.value = r.uniforms.uFogSphere ? r.uniforms.uFogSphere.value : 0;
+      }
       // low preset (SwiftShader, Intel HD): flat single-pass clouds cost ~1/4 of the fancy ones
       const flat = !!(r.quality && r.quality.preset === 'low');
       if (flat !== this.flat) {
@@ -287,7 +303,7 @@ export class Celestial {
   dispose() {
     for (const o of [this.group, this.clouds]) if (o.parent) o.parent.remove(o);
     for (const m of [this.sun, this.moon, this.stars]) m.geometry.dispose();
-    for (const m of [this.sunMat, this.moonMat, this.starMat, this.cloudMat, this.cloudDepthMat]) m.dispose();
+    for (const m of [this.sunMat, this.moonMat, this.starMat, this.cloudMat, this.cloudFlatMat, this.cloudDepthMat]) m.dispose();
     this.cloudGeo.dispose(); this.flatCloudGeo.dispose(); this.sunTex.dispose(); this.moonTex.dispose();
   }
 }

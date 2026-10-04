@@ -80,6 +80,8 @@ export function createInteractionSystem(game) {
   // Kid scheme: a hold that hit an entity stays an entity hold until it is released, so an animal that hops
   // away never turns the hold into digging the block behind it (12 holds on a pig dug 11 holes in kid creative).
   let attackOnEntity = false;
+  /** How far behind a grass tuft or flower an entity still wins the target (blocks). */
+  const SEE_THROUGH_PLANT = 1.5;
   let useRepeat = 0;
   let useRepeatPlaces = false;
   // targeting scratch (allocation-free per frame)
@@ -287,14 +289,15 @@ export function createInteractionSystem(game) {
     ix.getAimRay(ray, render);
     const hit = raycast(w, ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, ix.reach(), RAY_OPTS);
     let ent = null;
-    // a grass tuft or flower (non-solid cross plant) in front never hides an animal behind it: a child tapping the
-    // pig standing in tall grass means the pig (LEAD integration, found in the end-to-end play)
+    // a grass tuft or flower (non-solid cross plant) never hides an animal standing in it or right behind it: a child
+    // tapping the pig in tall grass means the pig (LEAD integration, found in the end-to-end play). An animal farther
+    // back does not steal a tap meant for the grass cell.
     const seeThrough = !!hit && !B_SOLID[hit.id] && B_SHAPE[hit.id] === SHAPE.CROSS;
     if (game.entities && game.entities.raycast) {
-      const maxD = Math.min(ix.entityReach(), hit && !seeThrough ? hit.dist : Infinity);
+      const maxD = Math.min(ix.entityReach(), hit ? hit.dist + (seeThrough ? SEE_THROUGH_PLANT : 0) : Infinity);
       try { ent = game.entities.raycast(ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, maxD, targetableEntity); } catch { ent = null; }
     }
-    if (ent && hit && ent.dist > hit.dist && !seeThrough) ent = null;
+    if (ent && hit && ent.dist > hit.dist + (seeThrough ? SEE_THROUGH_PLANT : 0)) ent = null;
     ix.targetEntity = ent;
     ix.target = hit;
     if (ent) setHighlight(null);

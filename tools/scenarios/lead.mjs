@@ -363,6 +363,15 @@ export default [
       const r = await t.eval(() => { const g = window.__game.game.interaction; return { ent: g.targetEntity && g.targetEntity.entity.id, block: g.target && g.target.id }; });
       t.note('target', r);
       t.assert(r.ent === id, `the pig behind the grass and the poppy is targeted (${JSON.stringify(r)})`);
+      // an animal well behind the grass does not steal a tap meant for the grass cell
+      await t.call('setBlock', x, 4, z - 3, 'air');
+      await t.eval(({ id, x, z }) => { const e = window.__game.game.entities.get(id); e.x = e.prevX = x + 0.5; e.z = e.prevZ = z - 5.5; }, { id, x, z });
+      await t.call('lookAt', x + 0.5, 4.2, z - 1.5);
+      await t.call('waitFrames', 3);
+      const far = await t.eval(() => { const g = window.__game.game.interaction; return { ent: g.targetEntity && g.targetEntity.entity.id, block: g.target && g.target.id }; });
+      t.note('far', far);
+      t.assert(!far.ent, `a pig 4 blocks behind the grass is not targeted (${JSON.stringify(far)})`);
+      await t.call('lookAt', x + 0.5, 4.3, z - 3.4);
       // a solid block in front still hides it
       await t.call('setBlock', x, 4, z - 2, 'stone');
       await t.call('setBlock', x, 5, z - 2, 'stone');
