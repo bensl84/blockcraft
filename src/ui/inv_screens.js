@@ -37,7 +37,7 @@ function dollCanvas(skin, scale) {
   const c = document.createElement('canvas');
   c.width = 12; c.height = 26;
   const x = c.getContext('2d');
-  const s = { hair: '#5a3a1e', shirt: '#2f8fd8', pants: '#3a3a8a', skin: '#e8b48a', ...(skin || {}) };
+  const s = { hair: '#6a3a1a', shirt: '#f2c230', pants: '#2a7f7a', skin: '#e8b48a', ...(skin || {}) };
   const r = (col, a, b, w, h) => { x.fillStyle = col; x.fillRect(a, b, w, h); };
   // round-ish head with a side-swept fringe, dot eyes, rosy cheeks and a smile (original kid-friendly face)
   r(s.skin, 2, 1, 8, 7); r(s.skin, 3, 0, 6, 1);

@@ -40,8 +40,12 @@ export const DEFAULT_SETTINGS = Object.freeze({
   speakNames: false,          // text-to-speech block names (local voices only)
   // misc
   lastWorldId: null,
-  skin: { hair: '#5a3a1e', shirt: '#2f8fd8', pants: '#3a3a8a', skin: '#e8b48a' },
+  // an original explorer: sunny yellow shirt, teal trousers (v1.6: the old blue shirt + indigo trousers + brown hair
+  // was the famous default character's palette, INV request 1 / originality D9)
+  skin: { hair: '#6a3a1a', shirt: '#f2c230', pants: '#2a7f7a', skin: '#e8b48a' },
 });
+/** The pre-v1.6 default skin: a saved copy of it (never chosen by anyone) is moved to the new default. */
+const OLD_DEFAULT_SKIN = JSON.stringify({ hair: '#5a3a1e', shirt: '#2f8fd8', pants: '#3a3a8a', skin: '#e8b48a' });
 
 /** Load settings (merged over defaults). Never throws. */
 export function loadSettings() {
@@ -54,6 +58,7 @@ export function loadSettings() {
   if (saved && typeof saved === 'object') {
     for (const k of Object.keys(s)) if (k in saved && typeof saved[k] === typeof s[k]) s[k] = saved[k];
     if (saved.lastWorldId !== undefined) s.lastWorldId = saved.lastWorldId;
+    if (JSON.stringify(s.skin) === OLD_DEFAULT_SKIN) s.skin = structuredCloneSafe(DEFAULT_SETTINGS.skin);
   }
   return s;
 }

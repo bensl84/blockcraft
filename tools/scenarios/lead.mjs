@@ -345,4 +345,29 @@ export default [
       await t.shot('lead-starter-animals');
     },
   },
+  {
+    // Integration (found in the end-to-end play): a tap on an animal standing behind a grass tuft or a flower hits
+    // the animal, not the plant.
+    name: 'lead-entity-through-grass', requires: ['mobs', 'interaction', 'raycast'],
+    async run(t) {
+      await t.call('startWorld', { ...FLAT, rules: { passiveMobs: false } });
+      await t.call('setFlying', false);
+      await t.call('waitTicks', 5);
+      const p = await t.call('pos');
+      const x = Math.floor(p.x), z = Math.floor(p.z);
+      await t.call('setBlock', x, 4, z - 2, 'short_grass');
+      await t.call('setBlock', x, 4, z - 3, 'poppy');
+      const id = await t.eval(({ x, z }) => { const e = window.__game.game.mobs.spawnMob('pig', x + 0.5, 4, z - 3.5); e.tick = function () { this.age++; }; return e.id; }, { x, z });
+      await t.call('lookAt', x + 0.5, 4.3, z - 3.4);
+      await t.call('waitFrames', 3);
+      const r = await t.eval(() => { const g = window.__game.game.interaction; return { ent: g.targetEntity && g.targetEntity.entity.id, block: g.target && g.target.id }; });
+      t.note('target', r);
+      t.assert(r.ent === id, `the pig behind the grass and the poppy is targeted (${JSON.stringify(r)})`);
+      // a solid block in front still hides it
+      await t.call('setBlock', x, 4, z - 2, 'stone');
+      await t.call('setBlock', x, 5, z - 2, 'stone');
+      await t.call('waitFrames', 3);
+      t.assert(!(await t.eval(() => window.__game.game.interaction.targetEntity)), 'a stone wall still hides the pig');
+    },
+  },
 ];

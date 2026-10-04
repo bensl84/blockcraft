@@ -34,7 +34,13 @@ export const ITEMS = new Map();
 /** Items in creative/display order. */
 export const ITEM_LIST = [];
 
-function titleCase(key) { return key.split('_').map((w) => w[0].toUpperCase() + w.slice(1)).join(' '); }
+/** Display name from a key: 'lily_of_the_valley' -> 'Lily of the Valley', 'tnt' -> 'TNT' (LEAD: no 'Tnt' popups). */
+const SMALL_WORDS = new Set(['of', 'the', 'a', 'and', 'on', 'o']);
+const SPECIAL_NAMES = { tnt: 'TNT', jack_o_lantern: "Jack o'Lantern" };
+function titleCase(key) {
+  if (SPECIAL_NAMES[key]) return SPECIAL_NAMES[key];
+  return key.split('_').map((w, i) => (i > 0 && SMALL_WORDS.has(w) ? w : w[0].toUpperCase() + w.slice(1))).join(' ');
+}
 
 function item(key, props = {}) {
   if (ITEMS.has(key)) throw new Error(`duplicate item ${key}`);

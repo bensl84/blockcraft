@@ -1593,7 +1593,7 @@ tick ; frame
 **Targeting (every frame)**
 
 - The ray starts at the interpolated eye and goes through `input.aim`: unproject the NDC with the camera, or use the centre when locked.
-- Block hit within `reach()`; entity hit through `entities.raycast` within the entity reach; the nearer one wins.
+- Block hit within `reach()`; entity hit through `entities.raycast` within the entity reach; the nearer one wins. *(v1.6)* A non-solid cross plant (grass tuft, fern, flower, sapling) never hides an entity behind it: the entity wins, so a child's tap on a pig standing in tall grass reaches the pig.
 - Call `renderer.setHighlight` only when the target changes.
 - Kid scheme: no target while the cursor is outside the canvas (`aimActive` false), unless a touch is active.
 

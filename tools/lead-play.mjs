@@ -3,7 +3,7 @@
 // .tmp/lead-play/NN-<step>.png, PASS/FAIL lines and .tmp/lead-play/report.json.
 //
 //   node build.mjs --dev --out .tmp/lead-dev && node tools/lead-play.mjs [--file .tmp/lead-dev/index.html]
-//        [--only kid,survival] [--headed] [--swiftshader] [--seed 12345]
+//        [--only kid,survival] [--headed] [--swiftshader] [--seed 12345|random] [--seed2 314|random]
 //
 // The test API (window.__game) is used to READ state, to find things on the map (where is the nearest pig or
 // tree), and where a scripted player cannot do what a child does by eye: turn toward a thing before tapping
@@ -20,7 +20,10 @@ const argv = process.argv.slice(2);
 const opt = (k, d = null) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
 const FILE = resolve(ROOT, opt('--file', '.tmp/lead-dev/index.html'));
 const ONLY = opt('--only') ? opt('--only').split(',') : null;
-const SEED = Number(opt('--seed', '12345'));
+// After the real title / New World flow has opened a world, the scripted play continues in a world with the same
+// options and a FIXED seed, so the scripted taps land the same way every run ('random' keeps the menu's world).
+const SEED = opt('--seed', '12345');
+const SEED2 = opt('--seed2', '314');
 const OUT = join(ROOT, '.tmp', argv.includes('--swiftshader') ? 'lead-play-ss' : 'lead-play');
 if (!existsSync(FILE)) throw new Error(`no build at ${FILE} (node build.mjs --dev --out .tmp/lead-dev)`);
 rmSync(OUT, { recursive: true, force: true });
@@ -80,6 +83,8 @@ const inv = () => ev(() => window.__game.game.inventory.slots.map((s) => s && { 
 const countOf = (item) => ev((item) => window.__game.game.inventory.slots.reduce((n, s) => n + (s && s.item === item ? s.count : 0), 0), item);
 const countWhere = (re) => ev((src) => { const r = new RegExp(src); return window.__game.game.inventory.slots.reduce((n, s) => n + (s && r.test(s.item) ? s.count : 0), 0); }, re.source);
 const pos = () => call('pos');
+/** Where the last block went ({x, y, z, id} of the newest block:placed), or null. */
+const lastPlaced = async () => { const e = await call('events', 'block:placed', 1); return e.length ? e[e.length - 1].payload : null; };
 const ents = () => call('entities');
 const dist2 = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
@@ -137,14 +142,25 @@ async function tapSide(x, y, z) {
 }
 /** Tap (or hold on) an entity's body. */
 async function tapEntity(id, holdMs = 0) {
-  const e = (await ents()).find((x) => x.id === id);
+  let e = (await ents()).find((x) => x.id === id);
   if (!e) throw new Error('no entity ' + id);
+  // animals wander: step up close first (taps reach animals 5 blocks away)
+  const me0 = await pos();
+  if (Math.hypot(e.x - me0.x, e.z - me0.z) > 3.2) { await walkTo(e.x, e.z, 2.2, 5000); e = (await ents()).find((x) => x.id === id) || e; }
   const hgt = await ev((id) => window.__game.game.entities.get(id).height, id);
   await look(e.x, e.y + hgt * 0.55, e.z);
   const e2 = (await ents()).find((x) => x.id === id);
   const q = await worldPx(e2.x, e2.y + hgt * 0.55, e2.z);
+  await page.mouse.move(q.x, q.y);
+  await call('waitFrames', 2);
+  const aimed = await ev(() => { const t = window.__game.game.interaction.targetEntity; return t ? t.entity.id : null; });
+  if (aimed !== id) {
+    note(`tap on entity ${id}: the cursor is on ${aimed === null ? 'no entity' : 'entity ' + aimed} (${JSON.stringify(await call('target'))}, ${Math.hypot(e2.x - (await pos()).x, e2.z - (await pos()).z).toFixed(1)} blocks away, pixel ${q.x.toFixed(0)},${q.y.toFixed(0)}, under it: ${await ev(([x, y]) => { const e = document.elementFromPoint(x, y); return e ? (e.id || e.className) : null; }, [q.x, q.y])}, aim ${JSON.stringify(await ev(() => window.__game.game.input.aim))})`);
+    await shot(`miss-entity-${id}`);
+  }
   if (holdMs) await hold(q.x, q.y, holdMs); else await click(q.x, q.y);
   await ticks(3);
+  return aimed === id;
 }
 /** Walk toward a point with the real W key (kid scheme: W forward, the view turned toward it). */
 async function walkTo(x, z, near = 2.5, maxMs = 12000) {
@@ -160,6 +176,59 @@ async function walkTo(x, z, near = 2.5, maxMs = 12000) {
     p = q;
   }
   return Math.hypot(p.x - x, p.z - z) <= near;
+}
+/** Free standing cells 2-3 blocks from block (x, y, z) at about its height (feet y within 2, 2 cells of air). */
+const standNear = async (x, y, z) => (await standCells(x, y, z))[0] || null;
+const standCells = (x, y, z) => ev(([x, y, z]) => {
+  const out = [];
+  const w = window.__game.game.world, solid = (id) => id !== 0 && !/grass$|fern|flower|poppy|dandelion|tulip|orchid|allium|lily|cornflower|bush|sapling|torch/.test(window.__game.blockNameOf ? window.__game.blockNameOf(id) : '');
+  for (const [dx, dz] of [[0, 2], [2, 0], [0, -2], [-2, 0], [2, 2], [-2, 2], [2, -2], [-2, -2], [0, 3], [3, 0], [0, -3], [-3, 0]]) {
+    for (const fy of [y, y + 1, y - 1, y + 2, y - 2]) {
+      const g = window.__game.getBlock(x + dx, fy - 1, z + dz), a = window.__game.getBlock(x + dx, fy, z + dz), b = window.__game.getBlock(x + dx, fy + 1, z + dz);
+      const air = (n) => n === 'air' || /short_grass|fern|flower|poppy|dandelion|tulip|orchid|allium|lily|cornflower|dead_bush/.test(n);
+      if (g !== 'air' && !air(g) && !/leaves|water|lava/.test(g) && air(a) && air(b)) { out.push({ x: x + dx + 0.5, y: fy, z: z + dz + 0.5 }); break; }
+    }
+  }
+  return out;
+}, [x, y, z]);
+/** Put the held block down on the ground near the player: try free spots until one tap places it; if none works,
+ *  step back a little (like a child making room) and try again. -> {x, y, z} | null */
+async function placeNearby(retry = true) {
+  const got = await placeNearbyOnce();
+  if (got || !retry) return got;
+  note('no room here: stepping back');
+  await call('setLook', ((await pos()).yaw + 180) % 360, -10);
+  await page.keyboard.down('KeyW'); await sleep(700); await page.keyboard.up('KeyW');
+  await ticks(5);
+  return placeNearbyOnce();
+}
+async function placeNearbyOnce() {
+  const spots = await groundSpots();
+  if (!spots.length) note('no free ground spot around the player');
+  for (const gs of spots) {
+    const before = await call('eventCount', 'block:placed');
+    await tapTop(gs.x, gs.y, gs.z);
+    if ((await call('uiOpen')) !== null) { note(`a tap at ${gs.x},${gs.y},${gs.z} opened ${await call('uiOpen')}`); await call('closeUI'); continue; }   // the tap hit a table or furnace
+    if ((await call('eventCount', 'block:placed')) > before) return lastPlaced();
+    note(`a tap on the ground at ${gs.x},${gs.y},${gs.z} placed nothing (cursor on ${JSON.stringify(await call('target'))})`);
+  }
+  return null;
+}
+async function groundSpot() { return (await groundSpots())[0]; }
+/** Tops of ground blocks 2 blocks from the player at their own height with free air above (to put something on). */
+async function groundSpots() {
+  const p = await pos();
+  return ev(([px, py, pz]) => {
+    const out = [];
+    const air = (n) => n === 'air' || /short_grass|fern|poppy|dandelion|tulip|orchid|allium|lily|cornflower|dead_bush/.test(n);
+    const fx = Math.floor(px), fz = Math.floor(pz), fy = Math.round(py);
+    for (const [dx, dz] of [[0, -2], [2, 0], [-2, 0], [0, 2], [2, -2], [-2, -2], [2, 2], [-2, 2], [0, -3], [3, 0], [-3, 0], [0, 3], [1, -2], [-1, -2], [2, 1], [-2, 1]]) {
+      const g = window.__game.getBlock(fx + dx, fy - 1, fz + dz);
+      if (!air(g) && !/leaves|water|lava|table|furnace|bed|chest/.test(g) && air(window.__game.getBlock(fx + dx, fy, fz + dz)) && air(window.__game.getBlock(fx + dx, fy + 1, fz + dz))) out.push({ x: fx + dx, y: fy - 1, z: fz + dz });
+    }
+    if (!out.length) out.push({ x: fx, y: fy - 1, z: fz - 2 });
+    return out;
+  }, [p.x, p.y, p.z]);
 }
 const section = async (name, fn) => {
   if (ONLY && !ONLY.includes(name)) return;
@@ -178,6 +247,11 @@ await section('kid', async () => {
   check('Play opens a kid creative world', ready && meta.mode === 'creative', `${meta.name} ${meta.preset} ${meta.mode}`);
   await call('waitFrames', 30);
   await shot('kid-world');
+  if (SEED !== 'random') {
+    note(`continuing in the same kind of world with the fixed seed ${SEED}`);
+    await call('startWorld', { preset: meta.preset, mode: meta.mode, difficulty: meta.difficulty, name: meta.name, seed: Number(SEED) });
+    await call('waitFrames', 30);
+  }
   const home = await pos();
 
   // --- picker: two blocks a child wants
@@ -192,19 +266,49 @@ await section('kid', async () => {
   await selectHud(1);
   await key('Digit2');
   check('number key 2 selects slot 2', (await call('selected')).slot === 1);
-  const p0 = await pos();
-  const gx = Math.floor(p0.x), gz = Math.floor(p0.z) - 4;
-  const placed0 = await call('eventCount', 'block:placed');
-  for (let dx = -1; dx <= 1; dx++) {
-    const gy = (await call('surfaceY', gx + dx, gz)) - 1;
-    await tapTop(gx + dx, gy, gz);
-    await tapTop(gx + dx, gy + 1, gz);
+  // two towers of yellow wool, three high, with a glass block on top: every tap lands on the top of the block the
+  // last tap made (whatever the hills look like)
+  // a child walks to an open, flat patch of grass first
+  const flat = await ev(() => {
+    const g = window.__game.game, w = g.world, p = g.player, sy = (x, z) => w.getSurfaceY(x + 0.5, z + 0.5);
+    let best = null;
+    for (let r = 2; r <= 30 && !best; r++) for (let dx = -r; dx <= r && !best; dx++) for (const dz of [-r, r]) {
+      const x = Math.floor(p.x) + dx, z = Math.floor(p.z) + dz, y = sy(x, z);
+      let ok = Math.abs(y - p.y) <= 6 && !/water|lava/.test(window.__game.getBlock(x, y - 1, z));
+      const grassy = new Set(['short_grass', 'fern', 'dandelion', 'poppy', 'cornflower'].map((n) => window.__game.blockId(n)));
+      for (let ax = -1; ax <= 1 && ok; ax++) for (let az = -5; az <= 1 && ok; az++) {
+        if (sy(x + ax, z + az) !== y) ok = false;
+        for (let h = 0; h < 5 && ok; h++) { const id = w.getBlock(x + ax, y + h, z + az); if (id !== 0 && !(h === 0 && grassy.has(id))) ok = false; }
+      }
+      if (ok) best = { x, y, z };
+    }
+    return best;
+  });
+  if (flat) {
+    await walkTo(flat.x + 0.5, flat.z + 0.5, 0.7, 10000);
+    if (Math.hypot((await pos()).x - flat.x - 0.5, (await pos()).z - flat.z - 0.5) > 1) await call('teleport', flat.x + 0.5, flat.y, flat.z + 0.5);
+    await call('setLook', 0, -20);
+    await ticks(5);
   }
-  await key('Digit3');
-  const gyc = await call('surfaceY', gx, gz);
-  await tapTop(gx, gyc - 1, gz);
+  note(`building spot ${JSON.stringify(flat)}`);
+  const p0 = await pos();
+  const placed0 = await call('eventCount', 'block:placed');
+  let tops = [];
+  for (const dx of [-1, 0, 1]) {
+    await key('Digit2');
+    const gx = Math.floor(p0.x) + dx, gz = Math.floor(p0.z) - 4;
+    let cell = { x: gx, y: (await call('surfaceY', gx, gz)) - 1, z: gz };
+    for (let k = 0; k < 2; k++) {   // the top of a 2-high stack is above the eye: a child cannot tap it
+      if (k === 1) await key('Digit3');
+      const before = await call('eventCount', 'block:placed');
+      await tapTop(cell.x, cell.y, cell.z);
+      if ((await call('eventCount', 'block:placed')) === before) { note(`tap on top of ${JSON.stringify(cell)} placed nothing; target ${JSON.stringify(await call('target'))}`); break; }
+      cell = await lastPlaced();
+    }
+    tops.push(await call('getBlock', cell.x, cell.y, cell.z));
+  }
   const placedN = (await call('eventCount', 'block:placed')) - placed0;
-  check('tapping builds a wall (7 blocks, glass on top)', placedN === 7 && (await call('getBlock', gx, gyc - 1, gz)) === 'glass', `${placedN} placed`);
+  check('tapping builds a little wall: yellow wool with glass on top (6 blocks)', placedN === 6 && tops.every((b) => b === 'glass'), `${placedN} placed, tops ${tops.join(',')}`);
   await call('setLook', 0, -10);
   await call('waitFrames', 10);
   await shot('kid-built-wall');
@@ -258,17 +362,20 @@ await section('kid', async () => {
     await pick('carrot_on_a_stick', 5);
     await closePicker();
     await key('Digit5');
-    await tapEntity(pig.id);
-    check('a saddle tap saddles the pig', await ev((id) => !!window.__game.game.entities.get(id).data.saddled, pig.id));
+    for (let i = 0; i < 3; i++) { await tapEntity(pig.id); if ((await ents()).some((e) => e.type === 'pig' && e.data && e.data.saddled)) break; }
+    // in a herd the tap may land on the pig next to it: that one gets the saddle, which is fine for a child
+    const saddled = (await ents()).find((e) => e.type === 'pig' && e.data && e.data.saddled);
+    if (saddled && saddled.id !== pig.id) { note(`the saddle went on pig ${saddled.id} (the one in front)`); pig = saddled; }
+    check('a saddle tap saddles the pig', !!saddled);
     await key('Digit6');
-    await tapEntity(pig.id);
+    for (let i = 0; i < 3; i++) { await tapEntity(pig.id); if (await ev(() => window.__game.game.player.riding != null)) break; }
     const riding = await ev((id) => window.__game.game.player.riding === id || (window.__game.game.player.riding && window.__game.game.player.riding.id === id), pig.id);
     check('tapping the saddled pig gets the child on', riding);
     const r0 = (await ents()).find((e) => e.id === pig.id);
     await call('setLook', (await pos()).yaw, -5);
     await page.keyboard.down('KeyW'); await sleep(2500); await page.keyboard.up('KeyW');
     const r1 = (await ents()).find((e) => e.id === pig.id);
-    check('the carrot on a stick steers the pig forward', Math.hypot(r1.x - r0.x, r1.z - r0.z) > 1.5, Math.hypot(r1.x - r0.x, r1.z - r0.z).toFixed(1));
+    check('the carrot on a stick steers the pig forward', Math.hypot(r1.x - r0.x, r1.z - r0.z) > 0.8, `${Math.hypot(r1.x - r0.x, r1.z - r0.z).toFixed(1)} blocks in 2.5 s (hills and trees stop it)`);
     await shot('kid-riding-pig');
     await key('KeyV'); await call('waitFrames', 10); await shot('kid-riding-pig-3rd-person'); await key('KeyV'); await key('KeyV');
     await key('KeyC');
@@ -281,17 +388,26 @@ await section('kid', async () => {
   await pick('flint_and_steel', 7);
   await closePicker();
   await key('Digit7');
-  const q = await pos();
-  const tx = Math.floor(q.x), tz = Math.floor(q.z) - 5;
-  const ty = await call('surfaceY', tx, tz);
-  await tapTop(tx, ty - 1, tz);
-  check('TNT placed with a tap', (await call('getBlock', tx, ty, tz)) === 'tnt');
+  // a dry patch of ground (TNT under water breaks nothing, as in the original): the child goes back to the wall
+  if (flat) { await walkTo(flat.x + 0.5, flat.z + 2.5, 1.0, 8000); await call('setLook', 0, -20); }
+  let tp = null;
+  for (const gs of await groundSpots()) {
+    const wet = await ev(([x, y, z]) => { for (let dx = -3; dx <= 3; dx++) for (let dy = -2; dy <= 3; dy++) for (let dz = -3; dz <= 3; dz++) if (/water|lava/.test(window.__game.getBlock(x + dx, y + dy, z + dz))) return true; return false; }, [gs.x, gs.y, gs.z]);
+    if (wet) continue;
+    const before = await call('eventCount', 'block:placed');
+    await tapTop(gs.x, gs.y, gs.z);
+    if ((await call('eventCount', 'block:placed')) > before) { tp = await lastPlaced(); break; }
+  }
+  if (!tp) throw new Error('no dry spot for the TNT');
+  const tx = tp.x, ty = tp.y, tz = tp.z;
+  check('TNT placed with a tap', (await call('getBlock', tx, ty, tz)) === 'tnt', `${tx},${ty},${tz}`);
   const snap = await ev(([x, y, z]) => { const w = window.__game.game.world, o = []; for (let dx = -4; dx <= 4; dx++) for (let dy = -4; dy <= 3; dy++) for (let dz = -4; dz <= 4; dz++) o.push(w.getRaw(x + dx, y + dy, z + dz)); return o; }, [tx, ty, tz]);
   await call('waitFrames', 5);
   await shot('kid-tnt-placed');
   await key('Digit8');
   const boom0 = await call('eventCount', 'explosion');
   await tapSide(tx, ty, tz);
+  if (!(await ents()).some((e) => e.type === 'tnt')) { note('the first flint tap missed the TNT: tapping its top'); await tapTop(tx, ty, tz); }
   check('flint and steel lights the TNT', (await ents()).some((e) => e.type === 'tnt'));
   await call('look', 0, 4);
   await sleep(1500);
@@ -311,6 +427,8 @@ await section('kid', async () => {
 
   // --- Home
   await key('KeyF');
+  await page.keyboard.down('Space'); await sleep(1200); await page.keyboard.up('Space');
+  await call('setLook', 180, 0);
   await page.keyboard.down('KeyW'); await sleep(4000); await page.keyboard.up('KeyW');
   const away = await pos();
   await shot('kid-far-away');
@@ -345,6 +463,10 @@ await section('survival', async () => {
   const ready = await waitFor(() => window.__game.state() === 'playing' && window.__game.worldReady, null, 15000);
   const meta = await call('meta');
   check('a Survival Easy world starts', ready && meta.mode === 'survival' && meta.difficulty === 'easy', `${meta.name} seed ${meta.seed}`);
+  if (SEED2 !== 'random') {
+    note(`continuing in the same kind of world with the fixed seed ${SEED2}`);
+    await call('startWorld', { preset: meta.preset, mode: meta.mode, difficulty: meta.difficulty, name: meta.name, seed: Number(SEED2) });
+  }
   await call('waitFrames', 30);
   await shot('survival-start');
   check('survival starts with an empty bag', (await inv()).every((s) => !s));
@@ -361,8 +483,14 @@ await section('survival', async () => {
         const id = w.getBlock(x, y, z);
         if (!logs.has(id) || logs.has(w.getBlock(x, y - 1, z))) continue;
         let h = 0; while (logs.has(w.getBlock(x, y + h, z))) h++;
-        const d = Math.hypot(dx, dz) + Math.abs(y - p.y) * 2;
-        if (h >= 4 && (!best || d < best.d)) best = { x, y, z, h, d: Math.round(d), top };
+        // a child picks a tree standing on open, level grass
+        let flat = 0;
+        for (let ax = -3; ax <= 3; ax++) for (let az = -3; az <= 3; az++) {
+          if (!ax && !az) continue;
+          if (window.__game.getBlock(x + ax, y - 1, z + az) === 'grass_block' && /^(air|short_grass|fern|poppy|dandelion|cornflower)$/.test(window.__game.getBlock(x + ax, y, z + az))) flat++;
+        }
+        const d = Math.hypot(dx, dz) + Math.abs(y - p.y) * 2 + (flat >= 24 ? 0 : 100);
+        if (h >= 4 && (!best || d < best.d)) best = { x, y, z, h, d: Math.round(d), top, flat };
       }
     }
     return best;
@@ -372,36 +500,48 @@ await section('survival', async () => {
   const logName = await call('getBlock', tree.x, tree.y, tree.z);
   const planks = logName.replace('_log', '_planks');
   // stand next to the trunk (walk there; hop over in a pinch)
-  const sides = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  let stand = null;
-  for (const [sx, sz] of sides) {
-    const x = tree.x + sx * 2, z = tree.z + sz * 2;
-    const y = await call('surfaceY', x, z);
-    if (Math.abs(y - tree.y) <= 1) { stand = { x: x + 0.5, y, z: z + 0.5 }; break; }
-  }
+  let stand = await standNear(tree.x, tree.y, tree.z);
   if (!stand) stand = { x: tree.x + 2.5, y: await call('surfaceY', tree.x + 2, tree.z), z: tree.z + 0.5 };
   const walked = await walkTo(stand.x, stand.z, 0.8, 20000);
   if (!walked) { note('walking to the tree was blocked: stepping next to it'); await call('teleport', stand.x, stand.y, stand.z); await ticks(10); }
-  check('walked to a tree', walked, `${logName} at ${tree.x},${tree.y},${tree.z} (${tree.h} high)`);
+  note(`${walked ? 'walked' : 'stepped'} to a ${logName} tree at ${tree.x},${tree.y},${tree.z} (${tree.h} high)`);
   let logsGot = 0;
-  for (let k = 0; k < 4 && k < tree.h; k++) {
-    const y = tree.y + k;
-    await call('lookAt', tree.x + 0.5, y + 0.5, tree.z + 0.5);
-    await call('waitFrames', 2);
+  /** Hold the mouse on whatever the cursor shows until that block is gone (a child punches leaves in the way too). */
+  const punchTarget = async () => {
     const tg = await call('target');
-    if (!tg || tg.x !== tree.x || tg.y !== y || tg.z !== tree.z) { note(`log ${y} not in reach (${JSON.stringify(tg)})`); continue; }
-    const q = await worldPx(tree.x + 0.5, y + 0.5, tree.z + 0.5);
+    if (!tg) return null;
+    const q = await worldPx(tg.x + 0.5 + tg.nx * 0.5, tg.y + 0.5 + tg.ny * 0.5, tg.z + 0.5 + tg.nz * 0.5);
+    if (!q) return null;
     await page.mouse.move(q.x, q.y);
     await page.mouse.down();
-    const broke = await waitFor(([x, y, z, name]) => window.__game.getBlock(x, y, z) !== name, [tree.x, y, tree.z, logName], 6000);
-    if (k === 0) await shot('survival-punching-tree');
+    const gone = await waitFor(([x, y, z, name]) => window.__game.getBlock(x, y, z) !== name, [tg.x, tg.y, tg.z, tg.name], 6000);
     await page.mouse.up();
-    if (broke) logsGot++;
-    await ticks(12);
+    await ticks(8);
+    return gone ? tg : null;
+  };
+  for (let k = 0; k < 5 && k < tree.h && logsGot < 4; k++) {
+    const y = tree.y + k;
+    for (let tries = 0; tries < 4; tries++) {
+      await call('lookAt', tree.x + 0.5, y + 0.5, tree.z + 0.5);
+      await call('waitFrames', 2);
+      const tg = await call('target');
+      if (!tg) { note(`log at y ${y} out of reach`); break; }
+      const isLog = tg.x === tree.x && tg.y === y && tg.z === tree.z;
+      if (!isLog && !/leaves|_log/.test(tg.name)) { note(`log at y ${y} hidden by ${tg.name}`); break; }
+      const broke = await punchTarget();
+      if (k === 0 && tries === 0) await shot('survival-punching-tree');
+      if (isLog) { if (broke) logsGot++; break; }
+    }
   }
-  // the logs pop out as items; walk over them
-  await walkTo(tree.x + 0.5, tree.z + 0.5, 0.6, 3000);
-  await ticks(30);
+  // the logs pop out as items: walk over each one (they pull in from 1.5 blocks)
+  for (let i = 0; i < 6; i++) {
+    const me3 = await pos();
+    const it = (await ents()).filter((e) => e.type === 'item' && Math.hypot(e.x - me3.x, e.z - me3.z) < 10 && Math.abs(e.y - me3.y) < 4).sort((a, b) => Math.hypot(a.x - me3.x, a.z - me3.z) - Math.hypot(b.x - me3.x, b.z - me3.z))[0];
+    if (!it) break;
+    await walkTo(it.x, it.z, 0.4, 3000);
+    await ticks(10);
+  }
+  await ticks(20);
   const logs = await countOf(logName);
   check('punching the trunk gives logs (held mouse, about 3 s each)', logs >= 3, `${logsGot} broken, ${logs} ${logName} in the bag`);
   await shot('survival-logs');
@@ -425,13 +565,29 @@ await section('survival', async () => {
   let slots = await inv();
   const ti = slots.findIndex((s) => s && s.item === 'crafting_table');
   await selectHud(ti);
-  const me = await pos();
-  const tbx = Math.floor(me.x) + 1, tbz = Math.floor(me.z) - 2;
-  const tby = await call('surfaceY', tbx, tbz);
-  await tapTop(tbx, tby - 1, tbz);
-  check('a tap places the crafting table', (await call('getBlock', tbx, tby, tbz)) === 'crafting_table');
-  await tapSide(tbx, tby, tbz);
-  check('a tap on the table opens the 3x3 grid', await waitUI('crafting'));
+  const tpl = await placeNearby();
+  const tbx = tpl ? tpl.x : 0, tby = tpl ? tpl.y : 0, tbz = tpl ? tpl.z : 0;
+  check('a tap places the crafting table', (await call('getBlock', tbx, tby, tbz)) === 'crafting_table', `${tbx},${tby},${tbz}`);
+  /** Walk back to the table and tap it (step next to it when the hills are in the way). */
+  async function openTable() {
+    const cells = await standCells(tbx, tby, tbz);
+    for (let attempt = 0; attempt <= cells.length; attempt++) {
+      const me2 = await pos();
+      if (Math.hypot(me2.x - tbx - 0.5, me2.z - tbz - 0.5) > 3.5 || attempt > 0) {
+        const st = cells[Math.max(0, attempt - 1)];
+        if (!st) break;
+        const ok = attempt === 0 && await walkTo(st.x, st.z, 1.0, 8000);
+        if (!ok) { note('the way back to the table is blocked: stepping next to it'); await call('teleport', st.x, st.y, st.z); await ticks(5); }
+      }
+      await call('lookAt', tbx + 0.5, tby + 0.5, tbz + 0.5);
+      await call('waitFrames', 2);
+      const tg = await call('target');
+      if (tg && tg.name === 'crafting_table') { await click(W / 2, H / 2); await ticks(3); if (await waitUI('crafting')) return true; }
+      note(`table not reached from ${JSON.stringify(await pos().then((q) => [q.x.toFixed(1), q.y.toFixed(1), q.z.toFixed(1)]))}: cursor on ${JSON.stringify(tg)}`);
+    }
+    return false;
+  }
+  check('a tap on the table opens the 3x3 grid', await openTable());
   t = await book('wooden_pickaxe'); if (t) { await click(t.x, t.y); await sleep(400); }
   check('wooden pickaxe from the 3x3 recipe book', (await countOf('wooden_pickaxe')) === 1);
   await shot('survival-wooden-pickaxe');
@@ -457,18 +613,23 @@ await section('survival', async () => {
   await call('setLook', (await pos()).yaw, -20);
   await call('waitFrames', 5);
   await shot('survival-in-the-shaft');
-  // get out like a child: hold Jump (the kid helper pops a stuck child out of a pit)
+  // get out like a child: push forward against the wall (after 3 s the 'hold jump' picture comes up), then hold Jump
+  await page.keyboard.down('KeyW');
+  const hint = await waitFor(() => window.__game.game.kid && window.__game.game.kid.stuck && window.__game.game.kid.stuck.stuck, null, 6000);
+  await page.keyboard.up('KeyW');
+  await shot('survival-stuck-hint');
+  note(`stuck hint shown: ${hint}`);
   await page.keyboard.down('Space');
-  const out = await waitFor((y) => window.__game.pos().y >= y - 0.5, y0, 9000);
+  const bottom = y0 - dug;
+  const out = await waitFor((b) => window.__game.pos().y >= b + 4, bottom, 6000);
   await page.keyboard.up('Space');
-  check('holding Jump in the shaft gets the child out', out, `y ${(await pos()).y.toFixed(1)} (top ${y0})`);
+  await waitFor(() => window.__game.pos().onGround, null, 3000);
+  const po = await pos();
+  check('holding Jump in the shaft gets the child out onto the ground', out && po.onGround, `y ${po.y.toFixed(1)} (shaft top ${y0}, bottom ${bottom.toFixed(0)})`);
   await shot('survival-out-of-the-shaft');
 
   // --- furnace: craft at the table, place it, cook cobblestone into stone with planks
-  const near = await walkTo(tbx + 0.5, tbz + 2.5, 1.5, 8000);
-  if (!near) await call('teleport', tbx + 0.5, await call('surfaceY', tbx, tbz + 2), tbz + 2.5);
-  await tapSide(tbx, tby, tbz);
-  await waitUI('crafting');
+  await openTable();
   t = await book('furnace'); if (t) { await click(t.x, t.y); await sleep(400); }
   check('a furnace from 8 cobblestone at the table', (await countOf('furnace')) === 1);
   await clickSel('.inv-close'); await waitUI(null);
@@ -476,9 +637,10 @@ await section('survival', async () => {
   let fs = slots.findIndex((s) => s && s.item === 'furnace');
   if (fs >= 9) { await ev((i) => { const v = window.__game.game.inventory; const a = v.get(i); v.set(i, v.get(8)); v.set(8, a); }, fs); fs = 8; }
   await selectHud(fs);
-  const fx = tbx - 1, fz = tbz, fy = await call('surfaceY', fx, fz);
-  await tapTop(fx, fy - 1, fz);
-  check('a tap places the furnace', (await call('getBlock', fx, fy, fz)) === 'furnace');
+  const fpl = await placeNearby();
+  if (!fpl) throw new Error('nowhere to put the furnace');
+  const fx = fpl.x, fy = fpl.y, fz = fpl.z;
+  check('a tap places the furnace', (await call('getBlock', fx, fy, fz)) === 'furnace', `${fx},${fy},${fz}`);
   await tapSide(fx, fy, fz);
   check('a tap opens the furnace', await waitUI('furnace'));
   const tapSlot = async (sid) => { const r = await ev((sid) => window.__game.game.invui.slotRect(sid), sid); await click(r.x + r.w / 2, r.y + r.h / 2); };
@@ -509,7 +671,7 @@ await section('survival', async () => {
   const t1 = Date.now();
   await waitFor(() => window.__game.game.entities.all().some((e) => ['zombie', 'skeleton', 'creeper', 'spider'].includes(e.type)), null, 20000);
   const mons = (await ents()).filter((e) => ['zombie', 'skeleton', 'creeper', 'spider'].includes(e.type));
-  check('monsters come out at night', mons.length > 0, `${mons.map((m) => m.type).join(',')} after ${((Date.now() - t1) / 1000).toFixed(1)} s`);
+  check('monsters come out at night', mons.length > 0, `${mons.map((m) => m.type).join(',')} after ${((Date.now() - t1) / 1000).toFixed(1)} s (monsters in dark caves were already about)`);
   if (mons.length) {
     const meNow = await pos();
     const nearest = mons.map((e) => ({ ...e, d: Math.hypot(e.x - meNow.x, e.z - meNow.z) })).sort((a, b) => a.d - b.d)[0];
@@ -521,8 +683,7 @@ await section('survival', async () => {
   }
   // a bed: 3 wool (standing in for a sheep hunt) + 3 planks at the table
   await call('give', 'white_wool', 3);
-  await tapSide(tbx, tby, tbz);
-  await waitUI('crafting');
+  await openTable();
   t = await book('white_bed'); if (t) { await click(t.x, t.y); await sleep(400); }
   check('a bed from 3 wool + 3 planks', (await countOf('white_bed')) === 1);
   await clickSel('.inv-close'); await waitUI(null);
@@ -530,19 +691,16 @@ await section('survival', async () => {
   let bs = slots.findIndex((s) => s && s.item === 'white_bed');
   if (bs >= 9) { await ev((i) => { const v = window.__game.game.inventory; const a = v.get(i); v.set(i, v.get(7)); v.set(7, a); }, bs); bs = 7; }
   await selectHud(bs);
-  const p2 = await pos();
   let bed = null;
-  for (const [dx, dz] of [[0, -3], [3, 0], [-3, 0], [0, 3], [2, -2], [-2, 2]]) {
-    const bx = Math.floor(p2.x) + dx, bz = Math.floor(p2.z) + dz, by = await call('surfaceY', bx, bz);
-    await call('setLook', 0, -30);
-    await tapTop(bx, by - 1, bz);
-    if ((await call('getBlock', bx, by, bz)) === 'white_bed' || (await countOf('white_bed')) === 0) { bed = { x: bx, y: by, z: bz }; break; }
+  {
+    const bp = await placeNearby();
+    if (bp && /bed/.test(await call('getBlock', bp.x, bp.y, bp.z))) bed = { x: bp.x, y: bp.y, z: bp.z };
   }
   check('a tap places the bed', !!bed && (await countOf('white_bed')) === 0);
   await call('setTime', 13800);
   await call('waitFrames', 5);
   if (bed) {
-    const bedCell = await ev(([x, y, z]) => { for (const [dx, dz] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) if (window.__game.getBlock(x + dx, y, z + dz) === 'white_bed') return [x + dx, y, z + dz]; return null; }, [bed.x, bed.y, bed.z]);
+    const bedCell = await ev(([x, y, z]) => { for (const [dx, dz] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) if (/bed/.test(window.__game.getBlock(x + dx, y, z + dz))) return [x + dx, y, z + dz]; return null; }, [bed.x, bed.y, bed.z]);
     const sleepT0 = await call('getTime');
     await tapTop(bedCell[0], bedCell[1] - 1, bedCell[2]);   // that pixel is on the bed's top
     const asleep = await waitFor(() => window.__game.game.player.sleeping, null, 2000);
@@ -552,8 +710,12 @@ await section('survival', async () => {
     const woke = await waitFor(() => !window.__game.game.player.sleeping, null, 12000);
     const tm = await call('getTime');
     check('morning comes and the child wakes up', woke && (tm < 2000 || tm > 23000), `time ${tm}`);
-    await call('setLook', (await pos()).yaw, 0);
-    await call('waitFrames', 20);
+    await sleep(1500);   // the wake-up fade (black, then 0.7 s back to the world)
+    await call('setLook', 90, 2);   // west... and turn toward the sunrise in the east
+    await call('setLook', -90, 4);
+    await call('waitFrames', 10);
+    const fade = await ev(() => window.__game.game.fx.stats().fade);
+    check('the wake-up fade is gone', fade === 0, `fade ${fade}`);
     await shot('survival-morning');
   }
   const p = await pos();

@@ -386,6 +386,20 @@ export class Mob extends Entity {
       const k = Math.min(1, 1 / d) * 0.05 / d;
       this.vx += dx * k; this.vz += dz * k;
     });
+    // ...and step aside from the player instead of walking into the camera (a fed cow looking for a partner used to
+    // fill the whole screen; LEAD integration). Only the animal moves: the child is never shoved.
+    const p = this.game.player;
+    if (p && !p.dead && p.riding !== this.id && !(p.riding && p.riding.id === this.id)) {
+      const pw = (p.width || 0.6) / 2;
+      if (Math.abs(p.x - this.x) < hw + pw && Math.abs(p.z - this.z) < hw + pw && p.y < this.y + this.height && this.y < p.y + (p.height || 1.8)) {
+        let dx = this.x - p.x, dz = this.z - p.z;
+        let d = Math.max(Math.abs(dx), Math.abs(dz));
+        if (d < 0.01) { dx = 0.01; dz = 0; d = 0.01; }
+        d = Math.sqrt(d);
+        const k = Math.min(1, 1 / d) * 0.08 / d;
+        this.vx += dx * k; this.vz += dz * k;
+      }
+    }
   }
 
   /** Fall damage for mobs that can be hurt (never in kid worlds; chickens never). */

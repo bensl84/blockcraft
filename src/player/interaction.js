@@ -287,11 +287,14 @@ export function createInteractionSystem(game) {
     ix.getAimRay(ray, render);
     const hit = raycast(w, ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, ix.reach(), RAY_OPTS);
     let ent = null;
+    // a grass tuft or flower (non-solid cross plant) in front never hides an animal behind it: a child tapping the
+    // pig standing in tall grass means the pig (LEAD integration, found in the end-to-end play)
+    const seeThrough = !!hit && !B_SOLID[hit.id] && B_SHAPE[hit.id] === SHAPE.CROSS;
     if (game.entities && game.entities.raycast) {
-      const maxD = Math.min(ix.entityReach(), hit ? hit.dist : Infinity);
+      const maxD = Math.min(ix.entityReach(), hit && !seeThrough ? hit.dist : Infinity);
       try { ent = game.entities.raycast(ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, maxD, targetableEntity); } catch { ent = null; }
     }
-    if (ent && hit && ent.dist > hit.dist) ent = null;
+    if (ent && hit && ent.dist > hit.dist && !seeThrough) ent = null;
     ix.targetEntity = ent;
     ix.target = hit;
     if (ent) setHighlight(null);

@@ -2,11 +2,11 @@
 // (no fonts needed, so no glyph ever renders as a box). Pure strings - no DOM access at import time.
 //
 // Map legend: '.' empty, W white, K outline, Y yellow, O orange, R red, D dark red, G green, L light green,
-// B brown, N dark brown, C sky blue, U blue, V dark blue, P skin, H hair, S light grey, A grey.
+// B brown, N dark brown, C sky blue, U shirt (yellow), V trousers (teal), P skin, H hair, S light grey, A grey.
 
 const PALETTE = {
   W: '#ffffff', K: '#1d1d1d', Y: '#ffd400', O: '#f39a1c', R: '#d8432f', D: '#8e2a1e', G: '#4f9a2e', L: '#8fd86a',
-  B: '#8b5a2b', N: '#5a3b22', C: '#7fd0ff', U: '#2f8fd8', V: '#3a3a8a', P: '#f0c08f', H: '#5a3a1e', S: '#d6d6d6', A: '#8b8b8b',
+  B: '#8b5a2b', N: '#5a3b22', C: '#7fd0ff', U: '#f2c230', V: '#2a7f7a', P: '#f0c08f', H: '#6a3a1a', S: '#d6d6d6', A: '#8b8b8b',
 };
 
 /** Convert a pixel map (array of equal-length strings) into an SVG string (horizontal runs merged). */

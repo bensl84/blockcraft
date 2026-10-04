@@ -87,8 +87,8 @@ export function buildPlayerGeometry() {
  */
 export function paintSkin(colors = {}) {
   const C = {
-    hair: hexToRgb(colors.hair || '#5a3a1e'), shirt: hexToRgb(colors.shirt || '#2f8fd8'),
-    pants: hexToRgb(colors.pants || '#3a3a8a'), skin: hexToRgb(colors.skin || '#e8b48a'),
+    hair: hexToRgb(colors.hair || '#6a3a1a'), shirt: hexToRgb(colors.shirt || '#f2c230'),
+    pants: hexToRgb(colors.pants || '#2a7f7a'), skin: hexToRgb(colors.skin || '#e8b48a'),
   };
   const shoe = [70, 52, 40], sole = [235, 235, 230], white = [250, 250, 250], eye = [40, 60, 120];
   const data = new Uint8Array(SKIN_W * SKIN_H * 4);

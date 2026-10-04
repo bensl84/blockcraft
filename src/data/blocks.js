@@ -99,7 +99,13 @@ export const BLOCKS = [];
 /** @type {Map<string, object>} */
 export const BLOCK_BY_NAME = new Map();
 
-function titleCase(name) { return name.split('_').map((w) => w[0].toUpperCase() + w.slice(1)).join(' '); }
+/** Display name from a key: 'lily_of_the_valley' -> 'Lily of the Valley', 'tnt' -> 'TNT' (LEAD: no 'Tnt' popups). */
+const SMALL_WORDS = new Set(['of', 'the', 'a', 'and', 'on', 'o']);
+const SPECIAL_NAMES = { tnt: 'TNT', jack_o_lantern: "Jack o'Lantern" };
+function titleCase(key) {
+  if (SPECIAL_NAMES[key]) return SPECIAL_NAMES[key];
+  return key.split('_').map((w, i) => (i > 0 && SMALL_WORDS.has(w) ? w : w[0].toUpperCase() + w.slice(1))).join(' ');
+}
 
 function def(id, name, props = {}) {
   if (BLOCKS[id]) throw new Error(`duplicate block id ${id}`);
