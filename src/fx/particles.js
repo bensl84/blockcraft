@@ -38,7 +38,9 @@ export function lightAround(world, x, y, z) {
 export const PARTICLE_VIEW_DIST = 48;
 
 const SIDE_FACES = [0, 1, 4, 5];
-const F_FULLBRIGHT = 1, F_COLLIDE = 2, F_SHRINK = 4, F_WATER = 8, F_ANIM_REV = 16, F_ANIM_LOOP = 32;
+const F_FULLBRIGHT = 1, F_COLLIDE = 2, F_SHRINK = 4, F_WATER = 8, F_ANIM_REV = 16, F_ANIM_LOOP = 32, F_NOFOG = 64;
+/** Particle flags (exported for tests). */
+export const PARTICLE_FLAGS = Object.freeze({ F_FULLBRIGHT, F_COLLIDE, F_SHRINK, F_WATER, F_ANIM_REV, F_ANIM_LOOP, F_NOFOG });
 
 /** Every particle kind FX understands (SPEC §8.7 plus 'item' crumbs and 'drip'). */
 export const PARTICLE_KINDS = Object.freeze(['block', 'smoke', 'explosion', 'heart', 'sparkle', 'splash', 'bubble',
@@ -221,8 +223,9 @@ export class ParticleSim {
           this.vx[i] = (R() - 0.5) * 0.02; this.vy[i] = 0.01 + R() * 0.02; this.vz[i] = (R() - 0.5) * 0.02; baseV(i);
           this.grav[i] = -0.002; this.drag[i] = 0.85;
           this.life[i] = 8 + Math.floor(R() * 32);
-          this.size[i] = (opts.size ?? 0.1) * (0.7 + R() * 0.6);
-          this.layer[i] = -1 - SPRITE.BUBBLE; this.flags[i] = F_WATER;
+          // small, bright and unfogged: lit + fogged like terrain the white ring turned slate grey under water
+          this.size[i] = (opts.size ?? 0.05) * (0.7 + R() * 0.6);
+          this.layer[i] = -1 - SPRITE.BUBBLE; this.flags[i] = F_WATER | F_FULLBRIGHT | F_NOFOG;
         });
         break;
       case 'flame':
@@ -436,8 +439,10 @@ export class ParticleMesh {
         out vec4 vCol;
         out vec3 vLight;
         out float vDist;
+        out float vNoFog;
         ${GLSL_LIGHT}
         void main() {
+          vNoFog = iMisc.w > 1.5 ? 1.0 : 0.0;
           vec4 mv = modelViewMatrix * vec4(iPos.xyz, 1.0);
           float c = cos(iMisc.z), s = sin(iMisc.z);
           vec2 corner = vec2(c * position.x - s * position.y, s * position.x + c * position.y);
@@ -459,6 +464,7 @@ export class ParticleMesh {
         in vec4 vCol;
         in vec3 vLight;
         in float vDist;
+        in float vNoFog;
         ${GLSL_LIGHT}
         void main() {
           vec4 t;
@@ -471,7 +477,7 @@ export class ParticleMesh {
           }
           if (t.a < 0.5) discard;
           vec3 c = t.rgb * vCol.rgb * vLight;
-          gl_FragColor = vec4(bcFog(c, vDist), 1.0);
+          gl_FragColor = vec4(vNoFog > 0.5 ? c : bcFog(c, vDist), 1.0);
         }`,
     });
     this.mesh = new THREE.Mesh(g, this.material);
@@ -492,7 +498,7 @@ export class ParticleMesh {
       P[o + 3] = s.drawSize(i, alpha);
       U[o] = s.drawLayer(i); U[o + 1] = s.u0[i]; U[o + 2] = s.v0[i]; U[o + 3] = s.span[i];
       C[o] = s.r[i]; C[o + 1] = s.g[i]; C[o + 2] = s.b[i]; C[o + 3] = 1;
-      M[o] = s.sky[i]; M[o + 1] = s.block[i]; M[o + 2] = s.rot[i]; M[o + 3] = (s.flags[i] & F_FULLBRIGHT) ? 1 : 0;
+      M[o] = s.sky[i]; M[o + 1] = s.block[i]; M[o + 2] = s.rot[i]; M[o + 3] = (s.flags[i] & F_FULLBRIGHT) ? ((s.flags[i] & F_NOFOG) ? 2 : 1) : 0;
     }
     if (n || this.lastCount) {
       for (let k = 0; k < 4; k++) {

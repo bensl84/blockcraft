@@ -28,6 +28,15 @@
 }
 #fx-layer .fx-inblock.on { opacity: 1; }
 
+/* the burning player: two sheets of the animated fire texture rising from the bottom corners (big pixels) */
+#fx-layer .fx-fire { display: none; overflow: hidden; }
+#fx-layer .fx-fire.on { display: block; }
+#fx-layer .fx-fire > .fx-fire-sheet {
+  position: absolute; bottom: -14vh; left: -4vw; width: 56vw; height: 62vh;
+  background-repeat: no-repeat; background-position: 0 0; image-rendering: pixelated; opacity: 0.88;
+}
+#fx-layer .fx-fire > .fx-fire-sheet.r { left: auto; right: -4vw; transform: scaleX(-1); }
+
 /* hurt: red vignette only (the camera tilt belongs to the player lane) */
 #fx-layer .fx-hurt {
   background: radial-gradient(ellipse at center, rgba(200, 0, 0, 0) 45%, rgba(200, 0, 0, 0.55) 85%, rgba(160, 0, 0, 0.75) 100%);

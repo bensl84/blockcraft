@@ -113,11 +113,14 @@ export function makeLightHook(game) {
 
 /**
  * Block-model material using the chunk vertex format (position, aTex u16x4, aLight u8x4) - meshBlockModel()
- * geometry. mode: 'lit' (items, held block, ghost) | 'crack' (multiply-blended crack overlay).
+ * geometry. mode: 'lit' (items, held block) | 'ghost' (kid placement preview: the texture lifted toward white,
+ * no world light, so it reads as a bright preview against sky, leaves or a dark cave) | 'crack' (multiply-blended
+ * crack overlay).
  * opts: {alpha, transparent, fog (default true), side}
  */
 export function createAtlasMaterial(shared, texRef, mode = 'lit', opts = {}) {
   const crack = mode === 'crack';
+  const ghost = mode === 'ghost';
   const fog = opts.fog !== false;
   const uniforms = {
     ...shared,
@@ -129,7 +132,7 @@ export function createAtlasMaterial(shared, texRef, mode = 'lit', opts = {}) {
   };
   const m = new THREE.ShaderMaterial({
     uniforms,
-    defines: { ...(crack ? { CRACK: 1 } : {}), ...(fog ? { USE_BCFOG: 1 } : {}) },
+    defines: { ...(crack ? { CRACK: 1 } : {}), ...(ghost ? { GHOST: 1 } : {}), ...(fog ? { USE_BCFOG: 1 } : {}) },
     vertexShader: /* glsl */`
       in vec4 aTex;
       in vec4 aLight;
@@ -170,18 +173,34 @@ export function createAtlasMaterial(shared, texRef, mode = 'lit', opts = {}) {
         gl_FragColor = vec4(c, 1.0);
       #else
         if (t.a < 0.1) discard;
+        #ifdef GHOST
+        vec3 c = mix(t.rgb * mix(1.0, vShade, 0.5), vec3(1.0), 0.4);
+        #else
         vec3 c = t.rgb * vShade * bcLight(uLightSky, uLightBlock);
+        #endif
         c = mix(c, uTint.rgb, uTint.a);
         #ifdef USE_BCFOG
         c = bcFog(c, vDist);
         #endif
+        #ifdef GHOST
+        // "lighten" blend (src ONE, dst 1 - a): a touch brighter than plain alpha, so the preview stays light
+        // over dark leaves or a cave and still shows as a pale block against a bright sky
+        gl_FragColor = vec4(c * min(1.0, uAlpha * 1.35), uAlpha);
+        #else
         gl_FragColor = vec4(c, (t.a < 0.99 ? t.a : 1.0) * uAlpha);
+        #endif
       #endif
       }`,
     transparent: crack || !!opts.transparent,
     depthWrite: !crack && !opts.transparent,
     side: opts.side ?? THREE.FrontSide,
   });
+  if (ghost) {
+    m.blending = THREE.CustomBlending;
+    m.blendEquation = THREE.AddEquation;
+    m.blendSrc = THREE.OneFactor;
+    m.blendDst = THREE.OneMinusSrcAlphaFactor;
+  }
   if (crack) {
     m.blending = THREE.CustomBlending;
     m.blendEquation = THREE.AddEquation;
