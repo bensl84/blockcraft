@@ -1,6 +1,6 @@
 # Blockcraft — Engineering Specification
 
-Version 1.6 · 2026-10-04 · owner: LEAD (architect / integrator) · v1.1 applies the independent review (lane isolation, persistence, undo data, test API, kid controls, content gaps) · v1.2 records the CORE integration (lanes A–E merged): light curve with the brightness lift, accepted lane spec conflicts, streaming radii, new lane events and decisions D14–D15 · v1.3 applies the CORE review (CORE-R1…R9): meshing one ring beyond the fog with a crisp linear fog, quad flip, leaves and water textures, tap classification by event time, `unmeshedWithin` after a teleport, capsule kid outline, larger climate regions, moonlit night tint · v1.4 applies the CORE review recheck (CORE-R10, CORE-R2): columns wholly beyond the fog are not drawn, and smooth light and AO are blended bilinearly per pixel from each quad's four corners (mesh contract: `corner` array, flag bits 7–8; chunk geometry uploads no `aLight`) · v1.5 applies CORE-R11: the fog cull hides fully fogged geometry only where the sky behind it is the fog colour, so the picture never changes and distant fogged mountains stay; the sky keeps an exact fog-colour horizon and FX draws no sky objects below it · v1.6 records the FEATURE integration (lanes INV, MENUS, AUDIO, FX, MOBS, MECH, KID merged): placer return contract, kid entity holds, new-world resets, a frozen renderer behind menus, the in-block overlay, autosave natural causes, item pickup reach, touch column clear of the HUD, dirt under generated pumpkins and boulders, creeper blasts through MECH
+Version 1.7 · 2026-10-04 · owner: LEAD (architect / integrator) · v1.1 applies the independent review (lane isolation, persistence, undo data, test API, kid controls, content gaps) · v1.2 records the CORE integration (lanes A–E merged): light curve with the brightness lift, accepted lane spec conflicts, streaming radii, new lane events and decisions D14–D15 · v1.3 applies the CORE review (CORE-R1…R9): meshing one ring beyond the fog with a crisp linear fog, quad flip, leaves and water textures, tap classification by event time, `unmeshedWithin` after a teleport, capsule kid outline, larger climate regions, moonlit night tint · v1.4 applies the CORE review recheck (CORE-R10, CORE-R2): columns wholly beyond the fog are not drawn, and smooth light and AO are blended bilinearly per pixel from each quad's four corners (mesh contract: `corner` array, flag bits 7–8; chunk geometry uploads no `aLight`) · v1.5 applies CORE-R11: the fog cull hides fully fogged geometry only where the sky behind it is the fog colour, so the picture never changes and distant fogged mountains stay; the sky keeps an exact fog-colour horizon and FX draws no sky objects below it · v1.6 records the FEATURE integration (lanes INV, MENUS, AUDIO, FX, MOBS, MECH, KID merged): placer return contract, kid entity holds, new-world resets, a frozen renderer behind menus, the in-block overlay, autosave natural causes, item pickup reach, touch column clear of the HUD, dirt under generated pumpkins and boulders, creeper blasts through MECH · v1.7 records judge round 1 (eleven lanes merged) and the LEAD findings: a difficulty change never rewrites a rule switch (FID-3), survival weather and the Survival Normal death screen (FID-11), bounded test API copies (KID-12), a bigger building palette with double chests (FID-7, ids 142–182, shapes trapdoor, lantern, pot, sign) and the Nether portal with a small kid-safe Nether (FID-8, §2.8, ids 183–187); texture layers may pass 256 with a fit rule (D5)
 
 This file is the single source of truth for Blockcraft. Two kinds of files back it up:
 
@@ -152,7 +152,7 @@ These are the defaults for a new world when nobody changes anything.
 ### 1.4 Non-goals
 
 - Multiplayer, accounts, chat.
-- Nether and End, enchanting, potions, redstone circuits beyond what is listed as P2, villages (P2).
+- The End, enchanting, potions, redstone circuits beyond what is listed as P2, villages (P2). *(v1.7: the Nether is in, §2.8; LEAD scope decision D16.)*
 - Hard difficulty, hardcore mode.
 
 ---
@@ -176,7 +176,7 @@ Each lane implements its P0 items first, then P1, then P2.
 | Player (E) | Java-accurate walk, jump, step, sneak-edge, fly, swim, ladder; kid controls (no Shift); classic pointer lock; DDA raycast; break and place with the correct rules (fence/pane connections) | Sprint-jump tuning, view bobbing, third person; slab merging into double slabs | Swim sprint, crawling |
 | Mobs (MOBS) | Pig, cow, sheep (shear, dye, regrow), chicken (eggs), wolf (tame, sit, follow, teleport); breeding with hearts; babies; natural spawns that never pile up; dropped items with magnet; survival health, hunger, fall and drown damage | Cat; horse riding with saddle; pig riding; **boats**; zombie, skeleton, creeper, spider; sun burning; XP orbs; bow; armour; rainbow-sheep easter egg | Slimes, more animals, leads |
 | Inventory (INV) | Hotbar HUD; survival inventory with 2×2 crafting; crafting table 3×3; furnace; chest; kid creative picker (8 tabs); **recipe book (tap to craft) in survival worlds** | Armour slots; XP bar | Creative search, saved hotbars |
-| Mechanics (MECH) | Falling sand and gravel; TNT and explosions with chain reactions; torches and plants need support; doors; beds (set spawn, sleep; nap when the day is locked); water flow and buckets; farming (hoe, wheat, carrots, potatoes, bone meal, saplings) | Lava with obsidian, cobblestone and stone; fire (never spreads by default); cake; sugar cane and cactus growth; **fences with connections, fence gates, glass panes, paintings**; double slabs, stacking snow layers, leaf decay, grass spreading, sugar cane needs water, snowy grass | Snow accumulation, ice melt |
+| Mechanics (MECH) | *(v1.7)* doors, gates, trapdoors of every wood; flower pots; double chests; the Nether portal (§2.8). Falling sand and gravel; TNT and explosions with chain reactions; torches and plants need support; doors; beds (set spawn, sleep; nap when the day is locked); water flow and buckets; farming (hoe, wheat, carrots, potatoes, bone meal, saplings) | Lava with obsidian, cobblestone and stone; fire (never spreads by default); cake; sugar cane and cactus growth; **fences with connections, fence gates, glass panes, paintings**; double slabs, stacking snow layers, leaf decay, grass spreading, sugar cane needs water, snowy grass | Snow accumulation, ice melt |
 | Audio (AUDIO) | Material dig, place and step sounds; pickup pop; UI click; gentle hurt; animal voices; explosion; limiter | Generative piano music with reverb; hostile voices; door, eat and bucket sounds | Positional mixing polish |
 | Menus (MENUS) | Title with Play; world picker; new-world presets; pause; death screen; loading; IndexedDB save and load with autosave; settings behind the parent gate | Thumbnails; backups; original pixel font | Export and import |
 | Touch and kid (KID) | Touch D-pad, jump and fly buttons, hotbar, inventory, pause, Home; Home teleport; void rescue; undo; stuck rescue; exit guards | Onboarding hints; text-to-speech names; home arrow; soft border | Photo button |
@@ -598,6 +598,16 @@ Owner: FEATURE-KID.
 - **Hints:** after 6–8 s without progress, show an animated pictogram for walk, turn, place, break, pick a block, fly. Each hint loops at most 3 times per session. A sparkle and chime on success.
 - **Exit guards:** see §8.5.
 
+### 2.8 The Nether (v1.7, LEAD, judge FID-8)
+
+A small, kid-safe Nether. Code: `core/nether.js` (constants, pure), `world/gen_nether.js` (columns), `mechanics/nether.js` (system `nether`, registered after `mechanics`).
+
+- **Where:** every world keeps its Nether in a strip far to the east, `x >= NETHER_EDGE` (28672). The overworld can never reach it (the soft border is at most 2048 from the spawn). Columns there come from `generateNetherColumn` (worldgen routes `isNetherColumn(cx)`), are saved like any other column and stream normally. Scale 1:8: overworld (x, z) ↔ Nether (32768 + x/8, z/8).
+- **Shape:** bedrock floor and roof (y 0 and 127, ragged 4 deep, so no sky light), netherrack caverns from a coarse 3D density grid (about 37 % open), a lava sea up to y 31, soul sand and gravel on low floors, glowstone clusters under the roof, nether quartz ore (drops `quartz`; 4 make a quartz block). Biome id 2 (dry).
+- **Portal:** flint and steel on or inside an obsidian frame (interior 2×3 up to 21×21, all air or fire, corners optional) fills it with `nether_portal` (cause `player`, the press's action, so one Undo removes it). MECH's support rule removes a sheet cell whose in-plane neighbours are not portal or obsidian (cascade, no drops): break the frame and the sheet goes. The sheet has no collision, emits light 11 and breaks at a touch.
+- **Travel:** walking into the sheet (creative, 4 ticks) or standing in it for 2.5 s (survival, 50 ticks) while a purple glow grows. The destination area is generated at once (`world.ensureColumn`, 3×3 around it); a portal within 16 blocks (x/z) is reused, else a 4×5 frame is built: on the surface in the overworld, in the Nether on a 10×7 obsidian balcony with a see-through railing (nether bricks + glass panes; auto-jump would take a 1-high rim) after lava next to it turns to netherrack. The child arrives in front of the sheet facing away and must step out of a portal before one can take her again. Not while riding. Events `portal:lit`, `nether:travel`.
+- **In the Nether:** the renderer's sky and fog are a warm haze (`NETHER_FOG`, fog 10–56 blocks, flat sky) and the light floor rises to 0.3 (`renderer.nether`); FX draws no sun, moon, stars, clouds or rain (`fx.weather.rain` reads 0, so no rain sound either); nothing spawns (MOBS); the kid border is around the spawn's Nether point with radius `max(64, worldBorder / 8)`; Home still brings the child home.
+
 ---
 
 ## 3. Architecture
@@ -633,6 +643,7 @@ Owner: FEATURE-KID.
 | `src/index.template.html`, `src/styles.css`, `src/main.js` | LEAD | Shell, base UI kit, bootstrap, loop |
 | `src/core/constants.js`, `events.js`, `math.js`, `registry.js`, `hooks.js`, `settings.js`, `dom.js`, `stubs.js`, `types.js`, `time.js`, `testapi.js` | LEAD | Shared, frozen foundations |
 | `src/ui/screens.js` | LEAD | Screen manager (`game.ui`) |
+| `src/core/worldrules.js`, `src/core/nether.js`, `src/world/gen_nether.js`, `src/mechanics/nether.js`, `src/textures/tex_palette.js`, `test/nether.test.mjs` | LEAD (v1.7) | New-world rules and Peaceful (FID-3, FID-11); the Nether (§2.8, FID-8); building palette art (FID-7, CORE-A style) |
 | `src/data/blocks.js`, `items.js`, `recipes.js`, `mobs.js` | LEAD | Content data (frozen; changes go through the integrator) |
 | `src/textures/textures.js`, `toolkit.js`, `src/textures/*` | **CORE-A** | Procedural textures, item icons, pixel toolkit |
 | `src/world/worldgen.js`, `noise.js`, `src/world/gen_*.js` | **CORE-B** | Terrain, biomes, caves, ores, trees, spawn |
@@ -770,7 +781,11 @@ Steps:
 ```js
 { id: 'w<base36 time><rand>', name: 'Sunny Meadow 12', seed: uint32,
   preset: 'default'|'flat'|'islands'|'snowy', mode: 'creative'|'survival', difficulty: 'peaceful'|'easy'|'normal',
-  rules: { ...DEFAULT_RULES (+ SURVIVAL_RULES for survival; peaceful forces hostileMobs=false, hunger=false) },
+  rules: core/worldrules.js newWorldRules(mode, difficulty, opts.rules): DEFAULT_RULES (+ SURVIVAL_RULES for survival,
+         which include weatherCycle; Survival Normal also sets immediateRespawn false = the big Respawn screen). v1.7
+         (judge FID-3): no rule is forced by the difficulty any more - Peaceful blocks monsters and hunger at run time
+         (spawning hostileAllowed, survival hungerOn, ruleInEffect), and game.setDifficulty never writes a rule, so
+         Peaceful -> Easy brings monsters back. The settings screen shows Monsters and Hunger off and greyed on Peaceful.
   createdAt, lastPlayed, playTicks, spawn: {x,y,z}, home: {x,y,z,yaw}|null, thumbnail: dataURL|null,
   formatVersion: 1, systems: { time:{}, player:{}, survival:{}, invui:{inventory json}, entities:{list (loaded + parked)}, mobs:{populated}, mechanics:{}, kid:{} } }
 ```
@@ -864,7 +879,7 @@ Per-world rules live in `game.meta.rules` (§1.3, `DEFAULT_RULES` / `SURVIVAL_RU
 
 ### 4.1 Overview
 
-**Blocks** (`src/data/blocks.js`): 142 blocks with stable ids 0–141 (append-only). Appendix A has the full table.
+**Blocks** (`src/data/blocks.js`): 188 blocks with stable ids 0–187 (append-only). Appendix A has the full table. *(v1.7: 142–182 the building palette, judge FID-7: stone, brick, sandstone, birch and spruce slabs and stairs, stone brick stairs, birch and spruce doors, fences and gates, three trapdoors, lantern, flower pot, sign, 16 concrete colours, quartz block, prismarine; 183–187 the Nether: netherrack, soul sand, nether quartz ore, nether bricks, nether portal.)*
 
 - Terrain: stone, grass, dirt, cobble, bedrock, sand, gravel, sandstone, clay, snow block and layer, ice, water, lava, obsidian, mossy cobble, granite, diorite, andesite.
 - 7 ores.
@@ -876,7 +891,7 @@ Per-world rules live in `game.meta.rules` (§1.3, `DEFAULT_RULES` / `SURVIVAL_RU
 - 7 storage blocks; hay; 3 slabs, 2 stairs, fence, fence gate, glass pane, fire, cake.
 - Wool ×16, stained glass ×16, carpet ×16; brown and red mushrooms.
 
-**Items** (`src/data/items.js`): 276 items. Appendix B lists them by data tab; the kid picker groups them into 8 picture tabs (`PICKER_TABS`, §8.2.4).
+**Items** (`src/data/items.js`): 332 items (v1.7; 21 spawn eggs, `quartz`). Appendix B lists them by data tab; the kid picker groups them into 8 picture tabs (`PICKER_TABS`, §8.2.4).
 
 - One block item for every block with an item.
 - 25 tools (5 types × 5 tiers), shears, flint and steel, buckets ×4.
@@ -884,9 +899,9 @@ Per-world rules live in `game.meta.rules` (§1.3, `DEFAULT_RULES` / `SURVIVAL_RU
 - Saddle, carrot on a stick, bow and arrow, boat, lead, painting.
 - 11 spawn eggs.
 
-**Recipes** (`src/data/recipes.js`): 191 crafting recipes (shaped and shapeless, with tags `#planks`, `#logs`, `#wool`, `#coals`) and 19 smelting recipes.
+**Recipes** (`src/data/recipes.js`): 232 crafting recipes (v1.7: every new block; concrete straight from dye + 4 sand + 4 gravel; a specific wood's door, gate, trapdoor before the `#planks` oak fallback) (shaped and shapeless, with tags `#planks`, `#logs`, `#wool`, `#coals`) and 19 smelting recipes.
 
-**Mobs** (`src/data/mobs.js`): 11 types plus the spawn constants. `MOBS[type].biomes` is the only biome list (`mobsForBiome`); `attack` is always `{easy, normal}`.
+**Mobs** (`src/data/mobs.js`): 21 types plus the spawn constants (v1.7: MOBS FID-6 added cod, tropical fish, squid, rabbit, fox, bee, enderman, slime, villager, iron golem). `MOBS[type].biomes` is the only biome list (`mobsForBiome`); `attack` is always `{easy, normal}`.
 
 ### 4.2 Registry API (`src/core/registry.js`, LEAD, pure)
 
@@ -938,12 +953,17 @@ Per-world rules live in `game.meta.rules` (§1.3, `DEFAULT_RULES` / `SURVIVAL_RU
 | carpet | 16 carpets | — | 1/16 | |
 | farmland | farmland | 0–2 moisture (7 = wet) | 15/16 | top texture dry or wet |
 | cactus | cactus | 0–3 age | collision inset 1/16 and 15/16 high; selection inset, full height | side faces inset by 1/16 |
-| chest | chest | 0–1 facing | inset 1/16, 14/16 high | box model with front texture on the facing side |
+| chest | chest | 0–1 facing; *(v1.7)* bit 2 = the other half of a double chest is at facing+1 (clockwise), bit 3 = at facing+3 | inset 1/16, 14/16 high; a double chest's halves reach their shared edge | box model with front texture on the facing side |
 | cake (P1) | cake | 0–2 bites | x from (1+2·bites)/16 to 15/16, 8/16 high | west face shows `cake_inner` once bitten |
 | fence (P1) | oak_fence | bits 0–3 connections N/E/S/W (`connectionState`) | post 4/16 wide plus one arm per bit; collision 1.5 high, selection 1.0 | post plus two rails per connected side |
 | gate (P1) | oak_fence_gate | 0–1 facing, bit 2 open | closed: 4/16-thick panel across the facing axis, collision 1.5; open: no collision, same selection | two posts plus rails; open = rails swung inward |
 | pane (P1) | glass_pane | bits 0–3 connections | post 2/16 plus arms, full height | thin glass; cutout pass |
 | fire (P1) | fire | 0–3 age | none / 1/16 | 4 inward-tilted planes, animated |
+| trapdoor (v1.7) | 3 trapdoors | 0–1 hinge side, bit 2 open, bit 3 top half | closed: 3/16 hatch at the bottom (or top) of the cell; open: 3/16 panel on the hinge edge | boxes, cutout (4 little holes) |
+| lantern (v1.7) | lantern | bit 0 hanging | 6×7×6 px body + 4×2×4 cap; hanging: 1 px higher plus a 2×6×2 hook | boxes; textures sampled with uv-lock (`tex_palette.js` header) |
+| pot (v1.7) | flower_pot | 0–3 plant (`POT_PLANTS` index, 0 empty) | 6×6×6 px | pot box + a small cross of the plant's texture, no sway |
+| sign (v1.7) | oak_sign | 0–1 facing (writing side), bit 2 on a wall | no collision; standing: post + 8/16 board across the cell; wall: 2/16 board on the edge behind | boxes |
+| portal (v1.7) | nether_portal | bit 0 axis (0 along X, 1 along Z) | no collision; 4/16 thick sheet | translucent, same-id faces culled |
 
 ### 4.4 Block def fields
 
@@ -1476,7 +1496,9 @@ Use `game.events.on(name, fn) → unsubscribe`, `emit(name, payload)`. Delivery 
 | `mob:tamed` / `mob:bred` / `mob:sheared` / `mob:love` | MOBS | `{id, type, x, y, z}` | fx (hearts), audio |
 | `explosion` | MECH | `{x, y, z, power, source, action, count, blocks: [{x, y, z, id, state}]}` (`blocks` is always an array) | audio, fx, kid (one undo entry), mobs (damage is done by MECH) |
 | `tnt:primed` | MECH | `{id, x, y, z, fuse}` | audio (fuse hiss) |
-| `door:toggle` | MECH | `{x, y, z, open, kind: 'door'\|'gate'}` | audio |
+| `door:toggle` | MECH | `{x, y, z, open, kind: 'door'\|'gate'\|'trapdoor'}` | audio |
+| `pot:changed` | MECH (v1.7) | `{x, y, z, plant}` (`''` = taken out) | — |
+| `portal:lit` / `nether:travel` | nether (v1.7) | `{x, y, z, axis, w, h}` / `{to: 'nether'\|'overworld', x, y, z}` | audio, fx |
 | `bonemeal` | MECH | `{x, y, z}` | fx (sparkles), audio |
 | `sleep:start` / `sleep:end` | MECH | `{nap}` | fx (fade, starry sky), audio |
 | `ui:open` / `ui:close` | LEAD (`game.ui`) | `{screen, opts}` / `{screen}` | audio, kid, touch |
@@ -2182,7 +2204,7 @@ Owner LEAD (`src/core/testapi.js`). Additive changes only.
 | `setRandomSeed(seed)` | fix `game.rand()` (every gameplay roll, §0.3) |
 | `waitFor(predicate, timeoutMs)` | poll until true → bool. In the page: a function `(api, game) => bool`. From the harness: `t.call('waitFor', 'expression', ms)` (polled from Node because the page CSP forbids compiling strings) or `t.waitFor(fn, arg, ms)` |
 | `audioStats()` | `{voices, byName}` from AUDIO |
-| `events(name, limit)` → `[{tick, payload}]`, `eventCount(name)` | event log (last 400) |
+| `events(name, limit)` → `[{tick, payload}]`, `eventCount(name)` | event log (last 400). *(v1.7, judge KID-12)* Payloads are bounded plain copies: nesting depth 4, an entity becomes `{id, type, x, y, z}` and a system `{system}` (a live mob in `player:hurt` used to serialize the whole game). `meta()`, `settings()`, entity `data` keep depth 16. |
 | `save()`, `listWorlds()`, `settings()`, `setSetting(k, v)`, `blockId(name)` | persistence and misc |
 
 ---
@@ -2329,7 +2351,7 @@ Each lane is done when all of the following hold:
 | D2 | Kid scheme A/D = turn (no strafe) | Turn | Matches Bedrock "player relative" and 5-year-olds' sense of left and right. Classic scheme keeps strafe. |
 | D3 | World height 128, sea level 48 | as stated | Halves gen and memory compared with 256. Mountains are capped at about 110. |
 | D4 | No tint attribute; biome colours baked | Single grass and leaf colours per species | Less biome colour variety. Revisit as P2 (it would need a vertex attribute and a texture change). |
-| D5 | Texture layers ≈ 238 | under 256 | Adding many new textures would cross the WebGL2 minimum. CORE-D checks `MAX_ARRAY_TEXTURE_LAYERS` and must split arrays if needed. |
+| D5 | Texture layers: 272 full set (v1.7) | fits the GPU | WebGL2 guarantees 256 layers. The renderer keeps the full set when `MAX_ARRAY_TEXTURE_LAYERS` allows (every desktop and tablet GPU we know: 2048), else builds half-length water and lava (256 layers, nothing shared), else lets `LAYER_FALLBACK` keys share a layer (concrete looks like wool...) until it fits (`buildTextures({maxLayers})`). Unit-tested; new textures must keep the half-animation set at or under 256 or add fallbacks. |
 | D6 | Generation and meshing off the main thread | **Workers P0** (v1.1), main-thread fallback | Kids fly constantly; main-thread streaming at 4 ms/frame leaves holes on weak laptops. Plus the kid flight cap while streaming lags (§2.1 step 11a). |
 | D7 | Saves differ between `file://` and GitHub Pages | separate origins | Parent tip plus export/import (P2). |
 | D8 | Keyboard Lock and fullscreen in headless tests | not testable headless | Manual check. Tests only assert the API presence path doesn't throw. |
@@ -2339,6 +2361,8 @@ Each lane is done when all of the following hold:
 | D12 | Survival-only item sources before P1 monsters | Gravel 5% bone, oak/birch leaves 2% string (original twists) | Gunpowder stays creeper-only, so TNT is creative-only until creepers ship (P1). |
 | D13 | Recipe book priority | **P0 for survival worlds** | A non-reader cannot use survival crafting without it. |
 | D14 | Lava pools in deep caves (CORE-B) | **On**: carved cave cells at y ≤ 6 hold lava | Original-like and very deep, and the pools glow. **Decision for the parent**; `LAVA_LEVEL = 0` in `src/world/worldgen.js` removes them. Caves below sea level otherwise stay dry. |
+| D16 | Nether in scope (LEAD, judge FID-8) | **In** (v1.7): portal + a small Nether, no Nether mobs; the End, enchanting, potions and redstone stay out | The parent's "all of Minecraft" bar. Kid-safe arrival balcony; creative kid worlds take no fire or fall damage. **Decision for the parent** whether to also want redstone basics (lever, lamp, dust) next. |
+| D17 | Survival Normal respawn (LEAD, judge FID-11) | **Big Respawn screen** on Survival Normal; Survival Easy respawns at once; items always kept | A death screen a 5-year-old can read (hearts + one big button). `immediateRespawn` / `keepInventory` in the World settings. |
 | D15 | Kid flight take-off hop (CORE-E) | **On**: switching flight on while standing gives a 0.25 hop in the kid scheme | The child sees that flying started. The original has no hop. `KID_FLY_LIFT` in `src/player/player.js`. |
 
 ---
@@ -2429,9 +2453,9 @@ Generated from `src/data/blocks.js`, which is normative. Hardness is in Java uni
 | 76 | coal_block | cube / opaque | 5 | pickaxe (1) |  | self | opaque flammable |
 | 77 | redstone_block | cube / opaque | 5 | pickaxe (1) |  | self | opaque |
 | 78 | hay_block | cube / opaque | 0.5 | hoe |  | self | opaque flammable axis fall x0.2 |
-| 79 | oak_slab | slab / opaque | 2 | axe |  | self | flammable filter 15 |
-| 80 | cobblestone_slab | slab / opaque | 2 | pickaxe (1) |  | self | filter 15 |
-| 81 | stone_brick_slab | slab / opaque | 2 | pickaxe (1) |  | self | filter 15 |
+| 79 | oak_slab | slab / opaque | 2 | axe |  | special (dropFn) | flammable filter 15 |
+| 80 | cobblestone_slab | slab / opaque | 2 | pickaxe (1) |  | special (dropFn) | filter 15 |
+| 81 | stone_brick_slab | slab / opaque | 2 | pickaxe (1) |  | special (dropFn) | filter 15 |
 | 82 | oak_stairs | stairs / opaque | 2 | axe |  | self | flammable filter 15 |
 | 83 | cobblestone_stairs | stairs / opaque | 2 | pickaxe (1) |  | self | filter 15 |
 | 84 | oak_fence | fence / opaque | 2 | axe |  | self | flammable |
@@ -2492,6 +2516,52 @@ Generated from `src/data/blocks.js`, which is normative. Hardness is in Java uni
 | 139 | black_carpet | carpet / opaque | 0.1 | — |  | self | flammable support:floor |
 | 140 | oak_fence_gate | gate / opaque | 2 | axe |  | self | flammable facing |
 | 141 | glass_pane | pane / cutout | 0.3 | — |  | — |  |
+| 142 | stone_slab | slab / opaque | 2 | pickaxe (1) |  | special (dropFn) | filter 15 |
+| 143 | brick_slab | slab / opaque | 2 | pickaxe (1) |  | special (dropFn) | filter 15 |
+| 144 | sandstone_slab | slab / opaque | 0.8 | pickaxe (1) |  | special (dropFn) | filter 15 |
+| 145 | birch_slab | slab / opaque | 2 | axe |  | special (dropFn) | flammable filter 15 |
+| 146 | spruce_slab | slab / opaque | 2 | axe |  | special (dropFn) | flammable filter 15 |
+| 147 | stone_stairs | stairs / opaque | 2 | pickaxe (1) |  | self | filter 15 |
+| 148 | brick_stairs | stairs / opaque | 2 | pickaxe (1) |  | self | filter 15 |
+| 149 | sandstone_stairs | stairs / opaque | 0.8 | pickaxe (1) |  | self | filter 15 |
+| 150 | stone_brick_stairs | stairs / opaque | 2 | pickaxe (1) |  | self | filter 15 |
+| 151 | birch_stairs | stairs / opaque | 2 | axe |  | self | flammable filter 15 |
+| 152 | spruce_stairs | stairs / opaque | 2 | axe |  | self | flammable filter 15 |
+| 153 | birch_door | door / cutout | 3 | axe |  | special (dropFn) | flammable support:floor |
+| 154 | spruce_door | door / cutout | 3 | axe |  | special (dropFn) | flammable support:floor |
+| 155 | birch_fence | fence / opaque | 2 | axe |  | self | flammable |
+| 156 | spruce_fence | fence / opaque | 2 | axe |  | self | flammable |
+| 157 | birch_fence_gate | gate / opaque | 2 | axe |  | self | flammable facing |
+| 158 | spruce_fence_gate | gate / opaque | 2 | axe |  | self | flammable facing |
+| 159 | oak_trapdoor | trapdoor / cutout | 3 | axe |  | self | flammable |
+| 160 | birch_trapdoor | trapdoor / cutout | 3 | axe |  | self | flammable |
+| 161 | spruce_trapdoor | trapdoor / cutout | 3 | axe |  | self | flammable |
+| 162 | lantern | lantern / cutout | 3.5 | pickaxe | 15 | self | support:floor_or_ceiling |
+| 163 | flower_pot | pot / cutout | 0 | — |  | special (dropFn) | support:floor |
+| 164 | oak_sign | sign / opaque | 1 | axe |  | self | no-collide flammable support:sign |
+| 165 | white_concrete | cube / opaque | 1.8 | pickaxe (1) |  | self | opaque |
+| 166 | orange_concrete | cube / opaque | 1.8 | pickaxe (1) |  | self | opaque |
+| 167 | magenta_concrete | cube / opaque | 1.8 | pickaxe (1) |  | self | opaque |
+| 168 | light_blue_concrete | cube / opaque | 1.8 | pickaxe (1) |  | self | opaque |
+| 169 | yellow_concrete | cube / opaque | 1.8 | pickaxe (1) |  | self | opaque |
+| 170 | lime_concrete | cube / opaque | 1.8 | pickaxe (1) |  | self | opaque |
+| 171 | pink_concrete | cube / opaque | 1.8 | pickaxe (1) |  | self | opaque |
+| 172 | gray_concrete | cube / opaque | 1.8 | pickaxe (1) |  | self | opaque |
+| 173 | light_gray_concrete | cube / opaque | 1.8 | pickaxe (1) |  | self | opaque |
+| 174 | cyan_concrete | cube / opaque | 1.8 | pickaxe (1) |  | self | opaque |
+| 175 | purple_concrete | cube / opaque | 1.8 | pickaxe (1) |  | self | opaque |
+| 176 | blue_concrete | cube / opaque | 1.8 | pickaxe (1) |  | self | opaque |
+| 177 | brown_concrete | cube / opaque | 1.8 | pickaxe (1) |  | self | opaque |
+| 178 | green_concrete | cube / opaque | 1.8 | pickaxe (1) |  | self | opaque |
+| 179 | red_concrete | cube / opaque | 1.8 | pickaxe (1) |  | self | opaque |
+| 180 | black_concrete | cube / opaque | 1.8 | pickaxe (1) |  | self | opaque |
+| 181 | quartz_block | cube / opaque | 0.8 | pickaxe (1) |  | self | opaque |
+| 182 | prismarine | cube / opaque | 1.5 | pickaxe (1) |  | self | opaque |
+| 183 | netherrack | cube / opaque | 0.4 | pickaxe (1) |  | self | opaque |
+| 184 | soul_sand | cube / opaque | 0.5 | shovel |  | self | opaque |
+| 185 | nether_quartz_ore | cube / opaque | 3 | pickaxe (1) |  | quartz 1-2 | opaque |
+| 186 | nether_bricks | cube / opaque | 2 | pickaxe (1) |  | self | opaque |
+| 187 | nether_portal | portal / translucent | 0 | — | 11 | — | no-collide |
 <!-- END:BLOCK_TABLE -->
 
 ## Appendix B. Item list
@@ -2499,13 +2569,13 @@ Generated from `src/data/blocks.js`, which is normative. Hardness is in Java uni
 Generated from `src/data/items.js`, by creative tab. `(P1)`/`(P2)` mark behaviour priority.
 
 <!-- BEGIN:ITEM_LIST -->
-- **building** (30): stone, cobblestone, bedrock, sandstone, obsidian, mossy_cobblestone, oak_planks, birch_planks, spruce_planks, glass, bricks, stone_bricks, mossy_stone_bricks, bookshelf, iron_block, gold_block, diamond_block, emerald_block, lapis_block, coal_block, redstone_block, hay_block, oak_slab, cobblestone_slab, stone_brick_slab, oak_stairs (P1), cobblestone_stairs (P1), oak_fence (P1), oak_fence_gate (P1), glass_pane (P1)
-- **nature** (45): grass_block, dirt, sand, gravel, clay, snow_block, snow, ice, coal_ore, iron_ore, gold_ore, diamond_ore, redstone_ore, lapis_ore, emerald_ore, oak_log, birch_log, spruce_log, oak_leaves, birch_leaves, spruce_leaves, oak_sapling, birch_sapling, spruce_sapling, short_grass, fern, dead_bush, dandelion, poppy, cornflower, blue_orchid, allium, lily_of_the_valley, orange_tulip, pink_tulip, sugar_cane, cactus, pumpkin, melon, brown_mushroom, red_mushroom, granite, diorite, andesite, wheat_seeds
-- **functional** (26): jack_o_lantern, glowstone, crafting_table, furnace, chest, oak_door, ladder, torch, tnt, white_bed, orange_bed, magenta_bed, light_blue_bed, yellow_bed, lime_bed, pink_bed, gray_bed, light_gray_bed, cyan_bed, purple_bed, blue_bed, brown_bed, green_bed, red_bed, black_bed, painting (P1)
+- **building** (48): stone, cobblestone, bedrock, sandstone, obsidian, mossy_cobblestone, oak_planks, birch_planks, spruce_planks, glass, bricks, stone_bricks, mossy_stone_bricks, bookshelf, iron_block, gold_block, diamond_block, emerald_block, lapis_block, coal_block, redstone_block, hay_block, oak_slab, cobblestone_slab, stone_brick_slab, oak_stairs (P1), cobblestone_stairs (P1), oak_fence (P1), oak_fence_gate (P1), glass_pane (P1), stone_slab, brick_slab, sandstone_slab, birch_slab, spruce_slab, stone_stairs (P1), brick_stairs (P1), sandstone_stairs (P1), stone_brick_stairs (P1), birch_stairs (P1), spruce_stairs (P1), birch_fence (P1), spruce_fence (P1), birch_fence_gate (P1), spruce_fence_gate (P1), quartz_block, prismarine, nether_bricks
+- **nature** (48): grass_block, dirt, sand, gravel, clay, snow_block, snow, ice, coal_ore, iron_ore, gold_ore, diamond_ore, redstone_ore, lapis_ore, emerald_ore, oak_log, birch_log, spruce_log, oak_leaves, birch_leaves, spruce_leaves, oak_sapling, birch_sapling, spruce_sapling, short_grass, fern, dead_bush, dandelion, poppy, cornflower, blue_orchid, allium, lily_of_the_valley, orange_tulip, pink_tulip, sugar_cane, cactus, pumpkin, melon, brown_mushroom, red_mushroom, granite, diorite, andesite, netherrack, soul_sand, nether_quartz_ore, wheat_seeds
+- **functional** (34): jack_o_lantern, glowstone, crafting_table, furnace, chest, oak_door, ladder, torch, tnt, birch_door, spruce_door, oak_trapdoor, birch_trapdoor, spruce_trapdoor, lantern, flower_pot, oak_sign, white_bed, orange_bed, magenta_bed, light_blue_bed, yellow_bed, lime_bed, pink_bed, gray_bed, light_gray_bed, cyan_bed, purple_bed, blue_bed, brown_bed, green_bed, red_bed, black_bed, painting (P1)
 - **food** (20): cake (P1), milk_bucket (P1), apple, golden_apple, bread, carrot, potato, baked_potato, porkchop, cooked_porkchop, beef, cooked_beef, chicken, cooked_chicken, mutton, cooked_mutton, rotten_flesh, melon_slice, pumpkin_pie (P1), mushroom_stew (P1)
-- **colors** (64): white_wool, orange_wool, magenta_wool, light_blue_wool, yellow_wool, lime_wool, pink_wool, gray_wool, light_gray_wool, cyan_wool, purple_wool, blue_wool, brown_wool, green_wool, red_wool, black_wool, white_stained_glass, orange_stained_glass, magenta_stained_glass, light_blue_stained_glass, yellow_stained_glass, lime_stained_glass, pink_stained_glass, gray_stained_glass, light_gray_stained_glass, cyan_stained_glass, purple_stained_glass, blue_stained_glass, brown_stained_glass, green_stained_glass, red_stained_glass, black_stained_glass, white_carpet (P1), orange_carpet (P1), magenta_carpet (P1), light_blue_carpet (P1), yellow_carpet (P1), lime_carpet (P1), pink_carpet (P1), gray_carpet (P1), light_gray_carpet (P1), cyan_carpet (P1), purple_carpet (P1), blue_carpet (P1), brown_carpet (P1), green_carpet (P1), red_carpet (P1), black_carpet (P1), white_dye, orange_dye, magenta_dye, light_blue_dye, yellow_dye, lime_dye, pink_dye, gray_dye, light_gray_dye, cyan_dye, purple_dye, blue_dye, brown_dye, green_dye, red_dye, black_dye
+- **colors** (80): white_wool, orange_wool, magenta_wool, light_blue_wool, yellow_wool, lime_wool, pink_wool, gray_wool, light_gray_wool, cyan_wool, purple_wool, blue_wool, brown_wool, green_wool, red_wool, black_wool, white_stained_glass, orange_stained_glass, magenta_stained_glass, light_blue_stained_glass, yellow_stained_glass, lime_stained_glass, pink_stained_glass, gray_stained_glass, light_gray_stained_glass, cyan_stained_glass, purple_stained_glass, blue_stained_glass, brown_stained_glass, green_stained_glass, red_stained_glass, black_stained_glass, white_carpet (P1), orange_carpet (P1), magenta_carpet (P1), light_blue_carpet (P1), yellow_carpet (P1), lime_carpet (P1), pink_carpet (P1), gray_carpet (P1), light_gray_carpet (P1), cyan_carpet (P1), purple_carpet (P1), blue_carpet (P1), brown_carpet (P1), green_carpet (P1), red_carpet (P1), black_carpet (P1), white_concrete, orange_concrete, magenta_concrete, light_blue_concrete, yellow_concrete, lime_concrete, pink_concrete, gray_concrete, light_gray_concrete, cyan_concrete, purple_concrete, blue_concrete, brown_concrete, green_concrete, red_concrete, black_concrete, white_dye, orange_dye, magenta_dye, light_blue_dye, yellow_dye, lime_dye, pink_dye, gray_dye, light_gray_dye, cyan_dye, purple_dye, blue_dye, brown_dye, green_dye, red_dye, black_dye
 - **tools** (29): wooden_pickaxe, stone_pickaxe, iron_pickaxe, golden_pickaxe, diamond_pickaxe, wooden_axe, stone_axe, iron_axe, golden_axe, diamond_axe, wooden_shovel, stone_shovel, iron_shovel, golden_shovel, diamond_shovel, wooden_hoe, stone_hoe, iron_hoe, golden_hoe, diamond_hoe, shears, flint_and_steel, bucket, water_bucket, lava_bucket (P1), saddle (P1), carrot_on_a_stick (P1), lead (P2), oak_boat (P1)
 - **combat** (23): wooden_sword, stone_sword, iron_sword, golden_sword, diamond_sword, bow (P1), arrow (P1), leather_helmet (P1), leather_chestplate (P1), leather_leggings (P1), leather_boots (P1), iron_helmet (P1), iron_chestplate (P1), iron_leggings (P1), iron_boots (P1), golden_helmet (P1), golden_chestplate (P1), golden_leggings (P1), golden_boots (P1), diamond_helmet (P1), diamond_chestplate (P1), diamond_leggings (P1), diamond_boots (P1)
-- **materials** (28): stick, coal, charcoal, raw_iron, raw_gold, iron_ingot, gold_ingot, diamond, emerald, lapis_lazuli, redstone, flint, string, feather, gunpowder, leather, bone, bone_meal, wheat, sugar, clay_ball, brick, paper, book, glowstone_dust, bowl, egg (P1), snowball (P2)
-- **animals** (11): pig_spawn_egg, cow_spawn_egg, sheep_spawn_egg, chicken_spawn_egg, wolf_spawn_egg, cat_spawn_egg (P1), horse_spawn_egg (P1), zombie_spawn_egg (P1), skeleton_spawn_egg (P1), creeper_spawn_egg (P1), spider_spawn_egg (P1)
+- **materials** (29): stick, coal, charcoal, raw_iron, raw_gold, iron_ingot, gold_ingot, diamond, emerald, lapis_lazuli, redstone, flint, string, feather, gunpowder, leather, bone, bone_meal, wheat, sugar, clay_ball, brick, paper, book, glowstone_dust, quartz, bowl, egg (P1), snowball (P2)
+- **animals** (21): pig_spawn_egg, cow_spawn_egg, sheep_spawn_egg, chicken_spawn_egg, wolf_spawn_egg, cat_spawn_egg (P1), horse_spawn_egg (P1), zombie_spawn_egg (P1), skeleton_spawn_egg (P1), creeper_spawn_egg (P1), spider_spawn_egg (P1), cod_spawn_egg (P2), tropical_fish_spawn_egg (P2), squid_spawn_egg (P2), rabbit_spawn_egg (P2), fox_spawn_egg (P2), bee_spawn_egg (P2), enderman_spawn_egg (P2), slime_spawn_egg (P2), villager_spawn_egg (P2), iron_golem_spawn_egg (P2)
 <!-- END:ITEM_LIST -->

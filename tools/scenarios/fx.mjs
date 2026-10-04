@@ -447,9 +447,14 @@ export default [
       await t.call('setTime', 14000);
       const p = await t.call('pos');
       const bx = Math.floor(p.x), by = Math.floor(p.y), bz = Math.floor(p.z) - 3;
-      await t.call('setBlock', bx, by, bz, 'bed', 0);
-      await t.call('setBlock', bx, by, bz - 1, 'bed', 4);
-      const r = await t.eval(([x, y, z]) => window.__game.game.mechanics.trySleep(x, y, z), [bx, by, bz]);
+      // both halves in one evaluation (LEAD integration): with two separate calls a game tick could run in between,
+      // and MECH's bed rule then removed the lonely foot half (seen once under --http: "no_bed")
+      const r = await t.eval(([x, y, z]) => {
+        const api = window.__game;
+        api.setBlock(x, y, z, 'bed', 0);
+        api.setBlock(x, y, z - 1, 'bed', 4);
+        return api.game.mechanics.trySleep(x, y, z);
+      }, [bx, by, bz]);
       t.assert(r && r.ok, `sleep starts (${JSON.stringify(r)})`);
       await t.call('sleep', 900);
       const cam = await t.eval(() => { const c = window.__game.game.renderer.camera; return { y: c.position.y, z: c.position.z, s: window.__game.game.fx.stats() }; });

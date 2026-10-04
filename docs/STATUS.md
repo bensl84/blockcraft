@@ -5,7 +5,7 @@ This is the compact progress record. **Only the integrator (LEAD) edits this fil
 - **Evidence must be reproducible:** a command plus its result, a screenshot path under `.tmp/`, or a report JSON.
 - **Never tick a box from a handoff claim alone.** Re-run the command.
 
-**Build under test:** `0.1.0-84771e68` (root `index.html`, 1275 KB minified, three.js + inlined worker, all 12 lanes) · **Updated:** 2026-10-04 (FEATURE integration: lanes INV, MENUS, AUDIO, FX, MOBS, MECH, KID merged, SPEC v1.6; CORE review second recheck: CORE-R11 fixed on `main`, SPEC v1.5; CORE review recheck: CORE-R10 and CORE-R2 fixed, SPEC v1.4; CORE review findings CORE-R1…R9 fixed, SPEC v1.3; CORE integration: lanes A–E merged, SPEC v1.2)
+**Build under test:** `0.1.0-5578b0f5` (root `index.html`, 1398 KB minified, three.js + inlined worker, 11 of 12 lanes at judge round 1 + LEAD findings) · **Updated:** 2026-10-04 (judge round 1 integration: 11 lane fixer branches merged, LEAD findings KID-12, FID-3, FID-7, FID-8, FID-11 fixed, SPEC v1.7; FEATURE integration: lanes INV, MENUS, AUDIO, FX, MOBS, MECH, KID merged, SPEC v1.6; CORE review second recheck: CORE-R11 fixed on `main`, SPEC v1.5; CORE review recheck: CORE-R10 and CORE-R2 fixed, SPEC v1.4; CORE review findings CORE-R1…R9 fixed, SPEC v1.3; CORE integration: lanes A–E merged, SPEC v1.2)
 
 ## Before dispatching lanes
 
@@ -29,6 +29,65 @@ This is the compact progress record. **Only the integrator (LEAD) edits this fil
 | KID | `src/ui/touch*`, `src/kid/*` | `touch`, `kid` | `bc-kid` · `kid.md` | **merged** `ac1a58a` (lane `dbf6efc`) + `18a6141` | `kid-*` 14 PASS (touch run); `kid-play` 41 PASS |
 | MECH | `src/mechanics/*` | `mechanics` | `bc-mech` · `mech.md` | **merged** `52e8117` (lane `de166a2`) + `1da649c`, `2cd87ba` | `mech-*` 15 PASS; `mech-play` 57/57 |
 | FX | `src/fx/*`, `src/render/celestial*` | `fx` | `bc-fx` · `fx.md` | **merged** `bcf0343` (lane `2a9b281`) + `2dd7115`, `ec50eee`, `ba34de9` | `fx-*` 12 PASS |
+
+**Judge round 1 (2026-10-04):** the fixer branches of CORE-A, CORE-C, CORE-D, CORE-E, MOBS, INV, AUDIO, MENUS, KID, MECH and FX are merged (next section). CORE-B's fixer left no commit on `lane/coreb`; its work is uncommitted in `../bc-coreb`.
+
+## Judge round 1 integration (LEAD, 2026-10-04, SPEC v1.7)
+
+Eleven lane fixer branches merged into `main` with `git merge --no-ff`, one at a time; after each: `npm run build`, `npm run test:unit`, `npm test` (all on the RTX 3080 Ti, headless Chrome). No merge had a conflict (no file was touched by two lanes). `lane/coreb` had **no commit** (its fixer stopped with its work uncommitted in `../bc-coreb`: `gen_structures.js`, `gen_loot.js`, worldgen edits) and was not merged.
+
+| Lane | Merge (lane head) | After the merge | Fix on `main` |
+|---|---|---|---|
+| CORE-C (ROB-1) | `dbaf7cf` (`37bfbec`) | unit 233/233; smoke 161 PASS, 5 SKIP | — |
+| CORE-A (ROB-4, POL-10) | `0952e99` (`5fdc649`) | unit 234/234; smoke 161 PASS, 5 SKIP | — |
+| CORE-D (POL-1, POL-3) | `1d08dad` (`2a1ac05`) | unit 234/234; smoke 161 PASS, 5 SKIP | — |
+| CORE-E (KID-1, -2, -4, -5, -11, FID-4, ROB-9) | `0608d5c` (`8c2e3eb`) | unit 238/238; smoke 161 PASS, 5 SKIP | — |
+| MECH (ROB-3, FID-9) | `0e88721` (`1b02746`) | unit 239/239; smoke 161 PASS, 5 SKIP | — |
+| INV (KID-10, ROB-6, POL-13, ROB-7, …) | `43ef88b` (`1919217`) | unit 241/241; smoke 161 PASS, 5 SKIP | — |
+| KID (KID-8, POL-11, POL-12) | `509c589` (`6f8581c`) | unit 242/242; smoke 161 PASS, 6 SKIP | — |
+| MENUS (KID-9, ROB-2, ROB-5, …) | `b7e1df3` (`8803301`) | unit 248/248; smoke 161 PASS, 6 SKIP | — |
+| FX (FID-2, POL-9, FID-13, …) | `0f4df51` (`3df0e41`) | unit 251/251; smoke 163 PASS, 6 SKIP | — |
+| AUDIO (POL-5…POL-8) | `096ac45` (`77d74cb`) | unit 258/258; smoke 166 PASS, 6 SKIP | — |
+| MOBS (FID-1, KID-3, KID-6, KID-7, FID-10, FID-12, ROB-8, FID-6) | `2672d7f` (`656d1f4`) | unit 263/264, smoke 170 PASS, 2 FAIL | `1eddeb3` → unit 264/264, smoke 172 PASS, 6 SKIP |
+
+Integration fix `1eddeb3` (after MOBS): CORE-A's POL-10 test covers every spawn egg and MOBS added ten eggs that fell back to the spotted egg, so each new kind got an original egg face (cod, tropical fish, squid, rabbit, fox, bee, enderman, slime, villager, iron golem); `mobs-new-kinds` counted draw calls while the pond edit's hot sections were still folding back (13 > 12; settled 7 or fewer), and `mobs-no-pileup` counted a column first loaded in round 2 as a repopulated one (passes alone; under full-suite load streaming had not finished in 60 frames). Both now wait for the renderer / streaming to settle (render distance pinned for the pile-up check).
+
+### LEAD findings fixed on `main`
+
+| Finding | Fix | Proof |
+|---|---|---|
+| **KID-12** `__game.events()` on a payload with a live object serialized the whole game | `testapi.js` copies payloads with a bounded walk (events: depth 4; entities become `{id, type, x, y, z}`, systems `{system}`); `meta()` / `settings()` / entity `data` keep depth 16 | Reproduced: the old replacer turned ONE `player:hurt` in a small flat world into a **21.9 MB** string (559 ms) — 20 of them in a bigger world is the 4 GB OOM (`.tmp/kid12-old2.mjs`). Now **164–326 chars, 0–32 ms**. New `lead-events-live-payload` (a real zombie hit) |
+| **FID-3** Peaceful → Easy left monsters off for good | new `core/worldrules.js`: `newWorldRules` / `ruleInEffect`; `setDifficulty` and `createWorldMeta` never write a rule; Peaceful blocks monsters and hunger at run time (as spawning / survival already did); settings show Monsters and Hunger off and greyed on Peaceful; the picker hides monster eggs on Peaceful | unit test (incl. "setDifficulty writes no rule"); new `lead-difficulty-roundtrip`: Survival Easy → Peaceful (0 monsters) → Easy: `hostileMobs` true, **5 monsters** at night |
+| **FID-11** survival presets never rain, no death screen | `SURVIVAL_RULES.weatherCycle = true`; Survival Normal starts with `immediateRespawn: false` (the existing icon-only death screen: three hearts and one big green Respawn button); items still kept | new `lead-survival-rules`: a real 30-block fall on Survival Normal opens the death screen, no auto-respawn after 60 ticks, a **real mouse click** on Respawn brings her back at 20 HP; rain starts within 18 000 ticks; Easy keeps instant respawn; the kid world has no weather cycle. Picture `.tmp/smoke-lead-lead-survival-death.png` (looked at) |
+| **FID-7** small building palette (`5a2b314`, `1f1f866`) | 41 new blocks (ids 142–182): stone, brick, sandstone, birch, spruce slabs + stairs, stone brick stairs; birch and spruce doors, fences, gates; oak/birch/spruce trapdoors; lantern (standing / hanging); flower pot (15 plants); decorative sign (standing / wall); 16 concrete colours; quartz block; prismarine. Shapes trapdoor / lantern / pot / sign; MECH uses generic per shape (every door, gate, trapdoor); supports for hanging lantern and wall sign; a double slab drops 2; recipes for all (concrete = dye + 4 sand + 4 gravel); original art (`textures/tex_palette.js`), icons and sprites. **Double chests**: two chests side by side join (state bits 2/3), one 54-slot screen, each half keeps its 27 slots in the save, breaking a half leaves a single chest with its items | unit tests (boxes, drops, recipes, picker pages, pairing); `lead-building-palette` (real taps: trapdoor opens, two-high birch door placed and opened, flower pot + poppy, lantern hangs under a block and falls when the ceiling goes) and `lead-double-chest` (real taps place and open; 54 slots; halves keep their items). Pictures `.tmp/pal-row1.png`, `pal-row2a.png`, `pal-row2b.png`, `pal-row3b.png`, `pal-night.png` (lanterns light the ground), `pal-pick-*.png` (picker icons), `.tmp/smoke-dc-lead-double-chest-*.png`, `.tmp/dc-667.png` (54 slots fit 667×375 at 26 px) — all looked at |
+| **FID-8** no Nether (`0506be8`) | **Scope decision (D16): the Nether is in**; the End, enchanting, potions, redstone stay out. Flint and steel lights an obsidian frame (2×3 … 21×21); walking in (creative) / 2.5 s (survival) travels to a kid-safe Nether in a far-east strip of the same world (1:8, `core/nether.js`, `world/gen_nether.js`, system `nether`): netherrack caverns, lava sea, glowstone, soul sand, quartz ore; warm haze, no sky / rain / mobs; arrival on a railed obsidian balcony; walking back returns to the first portal; Undo removes a lit sheet; breaking the frame removes it | `test/nether.test.mjs` (frames, link, worldgen shares and determinism, support rule); `lead-nether-portal`: a **real flint tap** lights 6 cells, one Undo clears them, relit, the **real up arrow** walks in → Nether (fog 56, light floor 0.3, rain 0, obsidian floor, no lava within 2), walks back → within 4 blocks of the first portal, overworld sky back; breaking a frame block removes the sheet. Pictures `.tmp/smoke-neth-lead-nether-lit.png`, `-arrived.png`, `.tmp/nether-02-arrived.png`, `nether-03-look-*.png` (looked at) |
+
+**Texture layers (SPEC D5):** the full set is now 272 layers. WebGL2 only guarantees 256, so the renderer keeps the full set when `MAX_ARRAY_TEXTURE_LAYERS` allows (2048 here), else half-length water and lava (exactly 256, nothing shared), else `LAYER_FALLBACK` keys share a layer; it also remembers the full count, so a later texture rebuild (leaves setting) no longer drops the fit. Unit-tested.
+
+### Commands and results (final `main`, build `0.1.0-5578b0f5`, RTX 3080 Ti headless Chrome unless noted)
+
+| Command | Result |
+|---|---|
+| `npm run build` | `0.1.0-5578b0f5`, root `index.html` **1398 KB** minified (was 1275 KB before round 1: ten mob kinds, 46 blocks, the Nether) |
+| `npm run test:unit` | **271 / 271 pass** |
+| `npm test -- --strict` | **178 PASS, 6 SKIP** (touch-only), 0 FAIL, 0 PENDING, page-errors PASS; `textureLayers` 272 |
+| `npm test -- --strict --http` | first run 177 PASS, **1 FAIL** `fx-sleep-view` ("no_bed": the scenario set the two bed halves in two calls and MECH's bed rule removed the lonely foot when a tick fell between them). Fixed in the scenario (both halves in one evaluation); rerun **178 PASS, 6 SKIP**, 0 FAIL; the fixed scenario also passes alone under file, SwiftShader and touch |
+| `npm test -- --swiftshader` | **178 PASS, 6 SKIP** (335.7 s); SwiftShader also reports > 256 layers (272 bound); `perf` 41.4 fps at R 4, `cored-perf` R 6 199 draws, `mech-tnt-chain` worst tick 5.6 ms |
+| `npm test -- --touch` | **184 PASS** (every touch-only scenario included) |
+| `node tools/playtest.mjs --file index.html` | **40 / 40**, median 144.9 fps, p99 7.1 ms, max 27.8 ms, at most 315 draws, no errors |
+| `node tools/lead-play.mjs` (rebuilt `.tmp/lead-dev` from `main`) | **48 / 48 PASS**, 143.9 fps, 251 draws. A first run used the stale pre-merge `.tmp/lead-dev` copy (42 PASS, 1 FAIL "no dry spot for the TNT", and creative counts on the hotbar): rebuilding that copy is required before every run |
+
+Logs: `.tmp/final17/*.log`; per-merge logs `.tmp/merge-m1…m11b*.log`; reports `.tmp/smoke-report-*.json`.
+
+Scenario-only fix on `main`: `tools/scenarios/fx.mjs` `fx-sleep-view` (see the http row).
+
+### Not done / still open (honest)
+
+- **`lane/coreb` not merged:** no commit on the branch; its uncommitted round-1 work (structures, loot) sits in `../bc-coreb`. Its `worldgen.js` edits will meet LEAD's 3-line Nether route in `generateColumn` (`isNetherColumn` → `generateNetherColumn`) when it lands.
+- **Redstone, the End, enchanting, potions:** still non-goals (D16). Redstone basics (lever, lamp, dust) is the next candidate if the parent wants it.
+- **Nether:** no Nether mobs; the portal sheet is a static texture (no animation); the arrival railing must be broken (or flown over) to explore; survival players can fall into the lava sea away from the balcony (Java-like; the kid creative world takes no fire or fall damage).
+- **Double chests** show two latches (two half-chest fronts side by side).
+- Older known issues from the FEATURE integration list below still apply unless a round-1 lane fixed them (POL-12 fixed the hearts row under the D-pad at 1024 × 600; FID-13 added the lie-down sleep view).
 
 ## FEATURE integration (LEAD, 2026-10-04, SPEC v1.6)
 
