@@ -319,3 +319,29 @@ test('slots: drag distribute, quick move, gather', () => {
   r = gatherToCursor(g.map((_, i) => arraySlot(g, i)), S('dirt', 1));
   assert.deepEqual(r.cursor, S('dirt', 64)); assert.equal(g[1], null); assert.equal(g[2], null); assert.deepEqual(g[0], S('dirt', 16), 'partials first, then the full stack tops up');
 });
+
+/* ---------------------------------------------------------------- judge round 1: layout + counts (KID-10, ROB-7) */
+import { slotSizeFor } from '../src/ui/inv_screens.js';
+import { showsCount } from '../src/ui/inv_slotview.js';
+
+test('container slot size keeps the GUI size on laptops and shrinks to fit a landscape phone', () => {
+  for (const kind of ['inventory', 'crafting', 'furnace', 'chest']) {
+    const book = kind === 'inventory' || kind === 'crafting';
+    assert.equal(slotSizeFor(kind, 54, 3, 1366, 657, book, 37), 54, `${kind} 1366x657`);
+    assert.equal(slotSizeFor(kind, 72, 4, 1920, 969, book, 32), 72, `${kind} 1920x969`);
+    const s = slotSizeFor(kind, 48, 2, 667, 375, book, 42);
+    assert.ok(s >= 30 && s < 48, `${kind} 667x375 -> ${s}`);
+    // the stacked panel (top + 3 rows + hotbar) fits the 375 px height with the close overhang margin
+    if (kind !== 'furnace') assert.ok(7 * s + 34 + 40 <= 375, `${kind} height fits (${s})`); // furnace top is shorter than 3 slots
+  }
+});
+
+test('stack counts: hidden for full stacks in creative, shown in survival and for partial stacks', () => {
+  const creative = { isCreative: () => true }, survival = { isCreative: () => false };
+  assert.equal(showsCount(creative, { item: 'stone', count: 64 }), false);
+  assert.equal(showsCount(creative, { item: 'snowball', count: 16 }), false);
+  assert.equal(showsCount(creative, { item: 'stone', count: 12 }), true);
+  assert.equal(showsCount(survival, { item: 'stone', count: 64 }), true);
+  assert.equal(showsCount(survival, { item: 'stone', count: 1 }), false);
+  assert.equal(showsCount(survival, null), false);
+});

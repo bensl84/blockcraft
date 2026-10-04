@@ -19,6 +19,39 @@ export function cssPx(name, fallback) {
   return Number.isFinite(v) && v > 0 ? v : fallback;
 }
 
+/** How far the close button sticks out above / right of its panel (px; inv.css .inv-close top/right). */
+export const CLOSE_OVERHANG = 18;
+/** Screen margins around the layout (inv.css .inv-screen padding): top leaves room for the close overhang. */
+const MARGIN = { top: CLOSE_OVERHANG + 6, bottom: 16, side: CLOSE_OVERHANG + 4 };
+const MIN_SLOT = 30;
+
+const craftKind = (kind) => kind === 'inventory' || kind === 'crafting';
+/** Recipe book picture size for slot size S. */
+const bookTile = (S) => Math.max(64, Math.round(S * 1.2));
+
+/**
+ * Container slot size (px) that fits the window: the GUI-scale size from --slot when it fits, else the largest
+ * size (down to MIN_SLOT) for which the panel, the recipe book beside it and the close button stay on screen
+ * (landscape phones such as 667x375: every slot, the hotbar row and the close button must be reachable).
+ */
+export function slotSizeFor(kind, base, gui, vw, vh, book, headPx = 0) {
+  const fits = (S) => {
+    const u = Math.max(2, Math.round(S / 18));
+    let topH, topW;
+    if (kind === 'inventory') { topH = 4 * S; topW = Math.round(2.2 * S) + 4 * S + 31 * u + 9 * gui + 56; }
+    else if (kind === 'crafting') { topH = 3 * S; topW = 3 * S + 22 * u + Math.round(S * 26 / 18) + 15 * gui + 56; }
+    else if (kind === 'furnace') { topH = Math.max(Math.round(S * 26 / 18), 2 * S + 18 * u); topW = 0; }
+    else { topH = 3 * S + 2 * gui + 4 + headPx; topW = 0; }
+    const panelH = topH + 4 * S + 17 * gui;              // + player rows, section margin, hotbar gap, padding, border
+    const panelW = Math.max(9 * S, topW) + 10 * gui + 4;
+    const bookW = book ? 3 * bookTile(S) + 16 + 10 * gui + 16 : 0;
+    return panelH <= vh - MARGIN.top - MARGIN.bottom && panelW + bookW <= vw - 2 * MARGIN.side;
+  };
+  let S = Math.max(MIN_SLOT, Math.round(base));
+  while (S > MIN_SLOT && !fits(S)) S--;
+  return S;
+}
+
 /** Fly an item icon from one screen rect to another ("fwoop"). */
 export function flyIcon(game, item, from, to, px = 48, parent = null) {
   if (!from || !to || !game.icons || !document.body) return;
@@ -60,10 +93,13 @@ export function buildContainerScreen(ctx) {
   const { game, kind, be } = ctx;
   const inv = game.inventory;
   const kid = game.settings.controls !== 'classic';
-  const S = Math.round(cssPx('--slot', 54));
+  const closePx = kid ? 64 : 48;
+  const gui = cssPx('--gui', 3);
+  // the chest has no free top-right corner (its grid is 9 wide): a header row keeps the close button off slot k8
+  const headPx = kind === 'chest' ? Math.max(0, closePx - CLOSE_OVERHANG - 5 * gui) + 6 : 0;
+  const S = slotSizeFor(kind, Math.round(cssPx('--slot', 54)), gui, window.innerWidth, window.innerHeight, !!(ctx.book && craftKind(kind)), headPx);
   const px = iconPx(S, 0.9);
   const u = Math.max(2, Math.round(S / 18));      // px per GUI unit inside the panel
-  const closePx = kid ? 64 : 48;
 
   const root = el('div', { class: 'bc-screen bc-dim inv-screen', 'data-screen': kind });
   const screen = {
@@ -267,7 +303,11 @@ export function buildContainerScreen(ctx) {
   } else if (kind === 'chest') {
     const g = el('div', { class: 'inv-grid', style: { gridTemplateColumns: `repeat(9, ${S}px)` } });
     for (let k = 0; k < 27; k++) g.appendChild(add('k' + k, arraySlot(be.items, k)));
-    top = el('div', { class: 'inv-chest-box' }, [g]); // wooden frame: "this is the chest", no reading needed
+    // header: a small chest picture ("this is the chest") in a strip the close button can overhang without
+    // covering a slot; below it the wooden frame around the chest's own slots
+    const head = el('div', { class: 'inv-chest-head', style: { height: headPx + 'px' } });
+    if (game.icons && getItem('chest') && headPx >= 20) head.appendChild(game.icons.element('chest', headPx >= 32 ? 32 : 16));
+    top = el('div', { class: 'inv-chest-top' }, [head, el('div', { class: 'inv-chest-box' }, [g])]);
   }
   const panel = el('div', { class: 'bc-panel inv-panel', 'data-panel': kind }, [top, playerSection(), closeBtn]);
 
@@ -289,7 +329,7 @@ export function buildContainerScreen(ctx) {
   root.appendChild(layout);
 
   function recipeBook() {
-    const T = Math.max(64, Math.round(S * 1.2));
+    const T = bookTile(S);
     const cols = 3;
     const panelH = (kind === 'inventory' ? 4 : 3) * S + 4 * S + 4 * u + 6 * u;
     const rows = Math.max(2, Math.floor((panelH - 70) / (T + 8)));

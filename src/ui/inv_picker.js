@@ -28,13 +28,19 @@ function layoutFor(vw, vh) {
   const tile = Math.max(72, Math.min(96, Math.floor(Math.min(vw / 12, vh / 8.2))));
   const gap = 8;
   const arrow = Math.max(64, Math.round(tile * 0.85));
-  const hb = Math.max(64, Math.min(80, Math.round(tile * 0.85)));
-  const tab = Math.max(64, Math.round(tile * 0.9));
-  const usableW = Math.min(vw - 48, 1400) - 40 - 2 * (arrow + 12);
+  // inner width of the panel: window minus the screen padding (44, inv.css .inv-screen) and the panel's own
+  // padding + border (48). Narrow windows (landscape phone 667x375) shrink the hotbar and tabs so the whole
+  // bottom row (9 slots + trash + grown-up backpack) and the close button stay on screen.
+  const inner = Math.min(vw - 44, 1400) - 48;
+  const bottomGap = 16;
+  const hb = Math.max(40, Math.min(Math.max(64, Math.min(80, Math.round(tile * 0.85))), Math.floor((inner - 56 - 2 * bottomGap - 10) / 10)));
+  // the centred tab row keeps clear of the close button's corner (64 px button, 18 px overhang, 20 px padding)
+  const tab = Math.max(40, Math.min(Math.max(64, Math.round(tile * 0.9)), Math.floor((inner - 7 * 10 - 2 * 28) / 8)));
+  const usableW = inner - 2 * (arrow + 12);
   const cols = Math.max(2, Math.floor((usableW + gap) / (tile + gap)));
   const usableH = vh - 48 - 36 - (tab + 18) - (hb + 22) - 30;
   const rows = Math.max(1, Math.floor((usableH + gap) / (tile + gap)));
-  return { tile, gap, arrow, hb, tab, cols, rows };
+  return { tile, gap, arrow, hb, tab, cols, rows, bottomGap };
 }
 
 /**
