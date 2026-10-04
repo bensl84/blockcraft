@@ -151,6 +151,8 @@ const SCENARIOS = [
       const p = await t.call('pos');
       const cx = Math.floor(p.x) >> 4;
       const tx = cx * 16 + 15, ty = 6, tz = Math.floor(p.z);   // last cell of the player's column, next to the border
+      // a floor torch needs a block under it: with real MECH an unsupported torch pops off (LEAD integration)
+      t.assert(await t.call('setBlock', tx, ty - 1, tz, 'stone'), 'torch support placed');
       t.assert(await t.call('setBlock', tx, ty, tz, 'torch'), 'torch placed');
       const read = () => t.eval(({ tx, ty, tz }) => { const w = window.__game.game.world; const out = []; for (let d = 0; d <= 14; d++) out.push([w.getBlockLight(tx - d, ty, tz), w.getBlockLight(tx + d, ty, tz)]); return out; }, { tx, ty, tz });
       const lit = await read();

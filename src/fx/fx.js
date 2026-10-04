@@ -7,8 +7,7 @@
 //   weather.js    rain and snow (P2)
 //   ../render/celestial.js  sun, 8 moon phases, stars, drifting blocky clouds
 //
-// Everything tolerates stub lanes: FX samples the renderer's array texture when it exists and its own fallback
-// otherwise, reads frozen fields (player.*, interaction.mining/target, input.aim*) and listens to SPEC §6 events.
+// FX samples the renderer's array texture (renderer.uniforms.uTex), reads frozen fields (player.*, interaction.mining/target, input.aim*) and listens to SPEC §6 events.
 // New events: 'fx:weather' {rain, snow} when the target rain strength changes.
 
 

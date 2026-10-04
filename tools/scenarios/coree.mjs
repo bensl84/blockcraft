@@ -282,6 +282,7 @@ export default [
       await t.call('setSetting', 'controls', 'classic');
       try {
         await flat(t);
+        await t.call('selectSlot', 0);   // independent of earlier scenarios (FX cross-lane defect)
         // pointer lock request from a click: must never throw or log, whatever headless Chrome decides
         await t.page.mouse.click(640, 360);
         await t.call('sleep', 300);
@@ -340,7 +341,10 @@ export default [
           await t.page.mouse.up({ button: 'right' });
           t.assert(await t.call('getBlock', tg2.x + tg2.nx, tg2.y + tg2.ny, tg2.z + tg2.nz) === 'cobblestone', 'right click places the held block');
           await t.call('selectSlot', 4);
-          await t.call('waitFrames', 2);
+          // the crosshair must be on the new cobblestone before the pick (targeting updates per frame)
+          const onCobble = await t.call('waitFor', "api.target() && api.target().name === 'cobblestone'", 1500);
+          t.note('pickTarget', await t.call('target'));
+          t.assert(onCobble, 'crosshair on the placed cobblestone');
           await t.page.mouse.down({ button: 'middle' });
           await t.call('waitTicks', 2);
           await t.page.mouse.up({ button: 'middle' });
@@ -653,6 +657,10 @@ export default [
     name: 'coree-touch', requires: E, touchOnly: true,
     async run(t) {
       await flat(t);
+      // independent of earlier scenarios (kid cross-lane defect): the grass block in slot 1, and a pointer type
+      // that is not 'touch' yet, so the tap must switch it
+      await t.call('selectSlot', 0);
+      await t.eval(() => { window.__game.game.input.lastPointerType = 'mouse'; });
       await t.call('setLook', 0, -35);
       await t.call('waitFrames', 3);
       const p = await t.call('pos');

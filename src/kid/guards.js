@@ -70,10 +70,10 @@ export function createGuards(game) {
       } catch { return false; }
     },
 
-    /** Save through the save lane when it is live (never throws). */
+    /** Save through the save lane (never throws). */
     autosave(reason) {
       try {
-        if (game.save && !game.save.stub && game.meta && game.save.saveNow) {
+        if (game.save && game.meta && game.save.saveNow) {
           const p = game.save.saveNow(reason);
           if (p && p.catch) p.catch((err) => game.reportError(err, `kid autosave ${reason}`));
         }

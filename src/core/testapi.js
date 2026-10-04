@@ -319,6 +319,8 @@ export function installTestApi(game) {
 
     // ---------------- events ----------------
     events: (name, limit = 20) => game.events.recent(name, limit).map((e) => ({ tick: e.tick, payload: jsonSafe(e.payload) })),
+    /** How many times an event was emitted in this PAGE session (never reset by startWorld): compare against a
+     *  baseline taken at the start of a scenario, never against an absolute number. */
     eventCount: (name) => game.events.counts.get(name) || 0,
 
     // ---------------- persistence / misc ----------------

@@ -265,4 +265,64 @@ export default [
       t.assert(!(await t.eval(() => window.__game.game.fx.stats().inBlock)), 'the overlay goes away when the head is out');
     },
   },
+  {
+    // Integration (MENUS suggestion): behind the pause screen the frozen world is drawn twice and then not again
+    // until something visible changes (resize, settings); the picture behind the menu stays.
+    name: 'lead-pause-no-redraw', requires: ['renderer', 'menus'],
+    async run(t) {
+      await t.call('startWorld', FLAT);
+      await t.call('waitFrames', 5);
+      const skips = () => t.eval(() => window.__game.game.renderer.getStats().frozenSkips);
+      const s0 = await skips();
+      await t.call('waitFrames', 10);
+      t.assert(await skips() === s0, 'playing: every frame is drawn');
+      await t.call('openScreen', 'pause');
+      // the world keeps streaming in behind the menu (each new mesh is drawn); once it is complete frames skip
+      const quiet = await t.call('waitFor', 'game.world.unmeshedWithin(game.world.renderDistance) === 0', 15000);
+      t.assert(quiet, 'world streamed in');
+      let s1 = await skips();
+      for (let i = 0; i < 20 && (await t.eval(() => { const a = window.__game.game.renderer.getStats().frozenSkips; return window.__game.waitFrames(20).then(() => window.__game.game.renderer.getStats().frozenSkips - a); })) < 15; i++) s1 = await skips();
+      const before = await skips();
+      await t.call('waitFrames', 20);
+      s1 = await skips();
+      t.assert(s1 - before >= 15, `paused: frames skip the world (${s1 - before} of 20)`);
+      await t.shot('lead-pause-frozen');
+      // (the drawing buffer is not preserved, so the page cannot read the frozen picture back; the screenshot above
+      // shows the last frame staying behind the menu)
+      // a resize while paused draws again
+      const fr = () => t.eval(() => ({ f: window.__game.game.frameCount, s: window.__game.game.renderer.getStats().frozenSkips }));
+      const a = await fr();
+      await t.page.setViewportSize({ width: 1200, height: 700 });
+      await t.call('waitFrames', 6);
+      const b = await fr();
+      t.note('resize', { frames: b.f - a.f, skipped: b.s - a.s });
+      t.assert(b.s - a.s <= b.f - a.f - 2, `a resize redraws (${b.s - a.s} skipped of ${b.f - a.f} frames)`);
+      await t.page.setViewportSize({ width: 1280, height: 720 });
+      await t.call('closeUI');
+      const s3 = await skips();
+      await t.call('waitFrames', 10);
+      t.assert(await skips() === s3, 'resumed: every frame is drawn again');
+    },
+  },
+  {
+    // Integration (cross-lane defects KID 2, INV 4, MECH 3): a NEW world never inherits the previous world's
+    // hotbar selection, kid cursor, health, food, air or XP.
+    name: 'lead-new-world-reset', requires: ['survival', 'input', 'hud'],
+    async run(t) {
+      await t.call('startWorld', { ...FLAT, mode: 'survival', difficulty: 'easy' });
+      await t.eval(() => {
+        const g = window.__game.game, p = g.player;
+        p.health = 3; p.food = 5; p.air = 90; p.xpLevel = 7; p.xpProgress = 0.5;
+        g.inventory.selectSlot(6);
+        g.input.aim.x = 0.7; g.input.aim.y = -0.4;
+      });
+      await t.call('startWorld', { ...FLAT, seed: 4, mode: 'survival', difficulty: 'easy' });
+      const r = await t.eval(() => { const g = window.__game.game, p = g.player; return { health: p.health, food: p.food, air: p.air, xp: p.xpLevel, prog: p.xpProgress, sel: g.inventory.selected, aim: [g.input.aim.x, g.input.aim.y, g.input.aimActive] }; });
+      t.note('fresh', r);
+      t.assert(r.health === 20 && r.food === 20 && r.air === 300, `fresh health, food and air (${JSON.stringify(r)})`);
+      t.assert(r.xp === 0 && r.prog === 0, 'no XP carried over');
+      t.assert(r.sel === 0, 'hotbar back on slot 1');
+      t.assert(r.aim[0] === 0 && r.aim[1] === 0 && r.aim[2] === true, 'kid cursor back in the middle');
+    },
+  },
 ];

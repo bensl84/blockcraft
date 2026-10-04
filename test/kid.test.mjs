@@ -292,6 +292,23 @@ test('touch layout: sizes, 24 px margins, 8 px gaps, spec positions, mirroring',
   assert.deepEqual(LH.pause, M.pause, 'pause stays top right');
 });
 
+test('touch layout: the jump / down / fly column is lifted clear of the HUD block (LEAD integration)', () => {
+  const overlap = (r, h) => r.x < h.right + GAP && r.x + r.w > h.left - GAP && r.y + r.h > h.top - GAP;
+  // 1024 x 600 survival HUD measured in the browser: hotbar 219..805, backpack to 885, hearts row from y 455
+  for (const [W, H, hud] of [[1024, 600, { left: 219, right: 885, top: 455 }], [1280, 720, { left: 311, right: 1057, top: 575 }], [1366, 768, { left: 354, right: 1100, top: 623 }]]) {
+    for (const lh of [false, true]) {
+      const L = touchLayout(W, H, 'M', lh, lh ? { left: W - hud.right, right: W - hud.left, top: hud.top } : hud);
+      const h = lh ? { left: W - hud.right, right: W - hud.left, top: hud.top } : hud;
+      for (const n of ['jump', 'down', 'fly']) assert.ok(!overlap(L[n], h), `${n} clear of the HUD (${W}x${H} lh=${lh}): ${JSON.stringify(L[n])}`);
+      for (const n of ['jump', 'down', 'fly']) assert.ok(!rectsTooClose(L[n], L.pause, GAP), `${n} clear of pause (${W}x${H})`);
+      assert.ok(!rectsTooClose(L.jump, L.down, GAP) && !rectsTooClose(L.jump, L.fly, GAP) && !rectsTooClose(L.fly, L.down, GAP), 'column buttons apart');
+    }
+  }
+  // a wide screen with the HUD far away keeps the spec position
+  const wide = touchLayout(1920, 1080, 'M', false, { left: 650, right: 1330, top: 900 });
+  assert.equal(1080 - (wide.jump.y + wide.jump.h / 2), 140);
+});
+
 test('touch D-pad sectors, joystick, palm and visibility rules', () => {
   const a = (dx, dy) => { const o = dpadActions(dx, dy, 20); return ['forward', 'back', 'turnLeft', 'turnRight'].filter((k) => o[k]).join('+'); };
   assert.equal(a(0, -60), 'forward');

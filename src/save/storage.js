@@ -292,11 +292,8 @@ export function createSaveSystem(game, opts = {}) {
     const wantThumb = reason === 'exit' || reason === 'pause' || (!meta.thumbnail && (meta.playTicks || 0) > 100);
     if (wantThumb && (t0 - lastThumbAt >= THUMB_EVERY_MS || !meta.thumbnail) && game.renderer && game.renderer.captureThumbnail) {
       try {
-        // no block selection outline in the world picture (restored right after the synchronous capture)
-        const r = game.renderer, hl = r.highlight;
-        if (hl && r.setHighlight) r.setHighlight(null);
-        let url;
-        try { url = r.captureThumbnail(THUMB_W, THUMB_H); } finally { if (hl && r.setHighlight) r.setHighlight(hl); }
+        // the renderer leaves the block selection outline out of the world picture itself
+        const url = game.renderer.captureThumbnail(THUMB_W, THUMB_H);
         if (typeof url === 'string' && url.startsWith('data:image') && url.length > 200) { meta.thumbnail = url; lastThumbAt = t0; }
       } catch (err) { console.warn('[blockcraft] thumbnail failed:', err && err.message); }
     }

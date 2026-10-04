@@ -344,7 +344,7 @@ async function openWorld(opts) {
   return meta;
 }
 
-/** Save (when the save lane is live), close the world and return to the title screen. */
+/** Save, close the world and return to the title screen. */
 async function exitToTitle() {
   if (!game.meta) return;
   await closeWorld(true);
@@ -352,7 +352,7 @@ async function exitToTitle() {
 }
 
 async function closeWorld(save) {
-  if (save && game.save && !game.save.stub) {
+  if (save && game.save) {
     try { await game.save.saveNow('exit'); } catch (err) { reportError(err, 'save on exit'); }
   }
   const meta = game.meta;

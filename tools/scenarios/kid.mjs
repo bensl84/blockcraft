@@ -312,12 +312,22 @@ export default [
       t.assert(p.y >= 6 - 1e-6, `holding jump 1 s pops out onto the rim (y ${p.y})`);
       t.assert(!(await t.eval(() => window.__game.game.kid.stuck.stuck)), 'no longer stuck');
       t.assert((await t.call('events', 'kid:rescue', 1))[0].payload.reason === 'stuck', 'kid:rescue {reason: stuck}');
-      // head inside a block pops on its own after 2 s
+      // head inside a block pops on its own after 2 s (dirt: sand would fall now that MECH is real)
       await t.call('teleport', p0.x, 4, p0.z);
-      await t.call('setBlock', Math.floor(p0.x), 5, Math.floor(p0.z), 'sand');
+      await t.call('setBlock', Math.floor(p0.x), 5, Math.floor(p0.z), 'dirt');
       await t.call('runTicks', 45);
       const q = await t.call('pos');
       t.assert(q.y >= 6 - 1e-6, `head-in-block auto pop (y ${q.y})`);
+      // LEAD integration: sand that falls on the child lands in the feet cell; they pop out on top of it
+      const sx = Math.floor(p0.x) + 3, sz = Math.floor(p0.z) - 3;
+      await t.call('teleport', sx + 0.5, 4, sz + 0.5);
+      await t.call('runTicks', 2);
+      await t.call('setBlock', sx, 7, sz, 'sand');
+      await t.call('runTicks', 80);
+      const r = await t.call('pos');
+      t.note('sandPop', { y: r.y, block4: await t.call('getBlock', sx, 4, sz) });
+      t.assert(await t.call('getBlock', sx, 4, sz) === 'sand', 'the sand fell to the ground');
+      t.assert(r.y >= 5 - 1e-6, `buried by falling sand: popped out on top (y ${r.y})`);
     },
   },
   {

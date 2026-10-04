@@ -32,7 +32,6 @@
 @keyframes kid-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
 
 /* ---------------------------------------------------------------- fade + sparkles */
-.kid-fade { position: absolute; inset: 0; background: #f2f7ff; opacity: 0; transition: opacity 140ms linear; pointer-events: none; }
 .kid-sparks { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 .kid-spark { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; animation: kid-spark 900ms ease-out forwards; opacity: 0; }
 .kid-spark .kid-px { width: 100%; height: 100%; }

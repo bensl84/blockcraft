@@ -5,10 +5,10 @@
 //
 // Why FX owns its shaders instead of renderer.createEntityMaterial(): FX needs instancing (particles),
 // multiply blending (crack), per-object light updated in onBeforeRender with a SHARED material (dropped
-// items share one material + one geometry per item key), and must look right while CORE-D is still a stub.
+// items share one material + one geometry per item key).
 //
-// Array texture: FX samples CORE-D's DataArrayTexture (renderer.uniforms.uTex). While that is null (stub
-// renderer) FX builds its own fallback DataArrayTexture from game.textures so everything stays visible.
+// Array texture: FX samples CORE-D's DataArrayTexture (renderer.uniforms.uTex) through ArrayTextureRef (the
+// stub-era fallback texture was removed when the lanes were merged).
 
 import * as THREE from 'three';
 

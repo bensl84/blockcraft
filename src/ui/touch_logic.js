@@ -13,8 +13,11 @@ export const PALM_PX = 40;       // contacts larger than this are palms (ignored
  * @returns {{btn:number, dpad:{cx:number, cy:number, btn:number, offset:number, extent:number, hit:number},
  *   jump:Rect, fly:Rect, down:Rect, pause:Rect, joystick:{cx:number, cy:number, base:number, knob:number, travel:number}}}
  * Rect = {x, y, w, h} (top-left). Mirrored horizontally when leftHanded (pause stays top right).
+ * hud = {left, right, top}: the HUD's bottom block (hotbar, backpack, hearts/food rows) in CSS px. When the
+ * jump / down / fly column would overlap it (narrow or touch laptops), the column is lifted above it (LEAD
+ * integration, KID request 2: at 1024 x 600 the backpack sat under the Jump button).
  */
-export function touchLayout(W, H, buttonSize = 'M', leftHanded = false) {
+export function touchLayout(W, H, buttonSize = 'M', leftHanded = false, hud = null) {
   const B = BUTTON_SIZES[buttonSize] || BUTTON_SIZES.M;
   // D-pad: 4 buttons of dbtn around a centre, 8 px apart. At M: 88 px buttons, centre (24+140, H-24-140).
   // (short screens shrink the D-pad toward 80 px so it keeps its 24 px margins)
@@ -33,8 +36,6 @@ export function touchLayout(W, H, buttonSize = 'M', leftHanded = false) {
   const down = { x: jump.x - 12 - D, y: jump.y + J - D, w: D, h: D };
   // Pause: top right.
   const pause = { x: W - EDGE - 80, y: EDGE, w: 80, h: 80 };
-  // Short screens (landscape phones): no room above jump, so fly goes left of the Down button.
-  if (fly.y < pause.y + pause.h + GAP) { fly.x = down.x - 12 - F; fly.y = jump.y + J - F; }
   const joystick = { cx: dpad.cx, cy: dpad.cy, base: 160, knob: 64, travel: 48 };
   const out = { btn: B, dpad, jump, fly, down, pause, joystick };
   if (leftHanded) {
@@ -42,6 +43,18 @@ export function touchLayout(W, H, buttonSize = 'M', leftHanded = false) {
     mx(jump); mx(fly); mx(down);
     dpad.cx = W - dpad.cx; joystick.cx = dpad.cx;
   }
+  // keep the column clear of the HUD block: lift it so its bottom sits GAP above the HUD's top
+  if (hud && Number.isFinite(hud.top)) {
+    const l = Math.min(jump.x, down.x), r = Math.max(jump.x + J, down.x + D);
+    const lift = jump.y + J - (hud.top - GAP);
+    if (l < hud.right + GAP && r > hud.left - GAP && lift > 0) {
+      const y = Math.max(pause.y + pause.h + GAP, jump.y - lift);   // never under the pause button
+      const dy = jump.y - y;
+      jump.y -= dy; down.y -= dy; fly.y -= dy;
+    }
+  }
+  // Short screens (landscape phones): no room above jump, so fly goes beside the Down button.
+  if (fly.y < pause.y + pause.h + GAP) { fly.x = leftHanded ? down.x + D + 12 : down.x - 12 - F; fly.y = jump.y + J - F; }
   return out;
 }
 

@@ -133,12 +133,25 @@ export function createTouchSystem(game) {
 
   function place(e, r) { Object.assign(e.style, { left: r.x + 'px', top: r.y + 'px', width: r.w + 'px', height: r.h + 'px' }); }
 
+  /** The HUD's bottom block (hotbar + backpack + survival rows) in CSS px, or null before it is built. */
+  function hudBox() {
+    const b = document.querySelector('#hud .inv-hud-bottom');
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    if (!(r.width > 0)) return null;
+    let left = r.left, right = r.right, top = r.top;
+    const bp = document.querySelector('#hud .inv-backpack');
+    if (bp) { const q = bp.getBoundingClientRect(); if (q.width > 0) { left = Math.min(left, q.left); right = Math.max(right, q.right); top = Math.min(top, q.top); } }
+    return { left, right, top };
+  }
+
   function relayout() {
     const W = window.innerWidth, H = window.innerHeight;
-    const key = `${W}x${H}:${game.settings.buttonSize}:${game.settings.leftHanded}:${style}`;
+    // the HUD block depends on the window, GUI scale and mode (survival rows): measure it again when they change
+    const key = `${W}x${H}:${game.settings.buttonSize}:${game.settings.leftHanded}:${style}:${game.settings.guiScale}:${game.meta ? game.meta.mode : ''}`;
     if (key === layoutKey) return;
     layoutKey = key;
-    const L = touchLayout(W, H, game.settings.buttonSize, !!game.settings.leftHanded);
+    const L = touchLayout(W, H, game.settings.buttonSize, !!game.settings.leftHanded, hudBox());
     touch.layout = L;
     const d = L.dpad, hit = d.hit;
     place(els.dpad, { x: d.cx - hit, y: d.cy - hit, w: hit * 2, h: hit * 2 });

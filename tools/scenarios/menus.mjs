@@ -430,6 +430,8 @@ export default [
       const tap = async (sel) => { const c = await centre(t, sel); await t.page.touchscreen.tap(c.x, c.y); };
       await tap('[data-screen=title] [data-action=worlds]');
       t.assert(await t.call('waitFor', "api.uiOpen() === 'worlds'", 3000), 'tap opens worlds');
+      // the world cards load from storage after the screen opens and move the + (many saved worlds after a full run)
+      t.assert(await t.waitFor(() => document.querySelector('[data-screen=worlds]')?.dataset.loaded === '1', null, 3000), 'worlds loads');
       await tap('[data-screen=worlds] [data-action=new-world]');
       t.assert(await t.call('waitFor', "api.uiOpen() === 'newWorld'", 3000), 'tap on + opens new world');
       await tap('[data-choice=preset][data-value=snowy]');

@@ -65,6 +65,11 @@ export function createRendererSystem(game) {
   let forcedFastLeaves = false;
   let scaler = null;
   let lastFrameAt = 0;
+  // Frozen scene (paused, or the title with no world): after FROZEN_FRAMES frames the world is not redrawn - the
+  // canvas keeps showing the last frame - until something visible changes (LEAD integration, MENUS suggestion:
+  // 33 full-cost frames a second behind the pause screen on the weak-laptop proxy).
+  const FROZEN_FRAMES = 2;
+  let frozenDrawn = 0;
   let lostTimer = 0;
   let lostOverlay = null;
   let debugEl = null, debugNext = 0;
@@ -73,7 +78,7 @@ export function createRendererSystem(game) {
   const tmpV = new THREE.Vector3();
   const tmpColor = new THREE.Color();
   const invViewProj = new THREE.Matrix4();
-  const counters = { sectionSets: 0, merges: 0, hotUploads: 0, compactions: 0, textureUploads: 0, contextLosses: 0, contextRestores: 0, qualityChanges: 0, quadSorts: 0 };
+  const counters = { frozenSkips: 0, sectionSets: 0, merges: 0, hotUploads: 0, compactions: 0, textureUploads: 0, contextLosses: 0, contextRestores: 0, qualityChanges: 0, quadSorts: 0 };
   /** columns hidden by the fog cull in the last rendered frame (getStats().fogCulled) */
   let fogCulled = 0;
   /** columns past the fog that still draw their upper part (a silhouette rising above the horizon; fogTrimmed) */
@@ -113,6 +118,8 @@ export function createRendererSystem(game) {
     renderFar: 88,
     contextLost: false,
     debugVisible: false,
+    /** LEAD addition: set true to draw the next frame even while the scene is frozen (paused / title). */
+    redraw: false,
     /** CORE-D addition: skip drawing fully fogged geometry that cannot show against the sky (reviews CORE-R10, CORE-R11). Tests switch it off to prove the picture is unchanged. */
     fogCull: true,
     counters,
@@ -179,6 +186,8 @@ export function createRendererSystem(game) {
 
       // ---- events
       game.events.on('settings:changed', onSetting);
+      // while frozen, redraw once for anything that can change the picture behind a menu
+      for (const ev of ['settings:changed', 'ui:open', 'ui:close', 'game:state', 'world:exit']) game.events.on(ev, () => { r.redraw = true; });
       game.events.on('world:ready', () => { if (scaler) scaler.reset(performance.now()); });
       game.events.on('input:action', (e) => { if (e && e.action === 'debug' && e.down) r.toggleDebug(); });
       game.events.on('world:exit', () => r.setHighlight(null));
@@ -193,6 +202,7 @@ export function createRendererSystem(game) {
 
     resize() {
       if (!r.three) return;
+      r.redraw = true;   // a resized canvas is cleared: draw it again even while frozen
       const w = Math.max(1, window.innerWidth), h = Math.max(1, window.innerHeight);
       r.three.setPixelRatio(r.quality.dpr);
       r.three.setSize(w, h, false);
@@ -321,10 +331,17 @@ export function createRendererSystem(game) {
       lastFrameAt = now;
       r.uniforms.uTime.value += dt;
       updateSkyAndFog();
+      const changes0 = counters.sectionSets + counters.merges + counters.hotUploads + counters.compactions + counters.textureUploads;
       flushPending(now);
-      sortTranslucent();
-      if (!r.contextLost && !r.three.getContext().isContextLost()) {
-        render();
+      const frozen = game.state === 'paused' || (game.state === 'title' && !game.meta);
+      if (!frozen || r.redraw || changes0 !== counters.sectionSets + counters.merges + counters.hotUploads + counters.compactions + counters.textureUploads) frozenDrawn = 0;
+      r.redraw = false;
+      if (frozen && frozenDrawn >= FROZEN_FRAMES) {
+        counters.frozenSkips++;
+      } else {
+        sortTranslucent();
+        if (!r.contextLost && !r.three.getContext().isContextLost()) render();
+        if (frozen) frozenDrawn++;
       }
       if (game.state === 'playing' && game.settings.dynamicQuality !== false && scaler) {
         const act = scaler.sample(now, interval, game.perf ? game.perf.workMs : 0);
@@ -333,12 +350,15 @@ export function createRendererSystem(game) {
       if (r.debugVisible && now >= debugNext) { debugNext = now + 250; updateDebug(); }
     },
 
-    /** Small JPEG of the current view for world thumbnails (renders a frame first). */
+    /** Small JPEG of the current view for world thumbnails (renders a frame first, without the block outline). */
     captureThumbnail(w = 160, h = 100) {
       if (!r.three || r.contextLost || r.three.getContext().isContextLost()) return null;
       updateSkyAndFog();
       flushPending(performance.now());
-      render();
+      const outlineVis = outline ? outline.group.visible : false;
+      if (outline) outline.group.visible = false;
+      try { render(); } finally { if (outline) outline.group.visible = outlineVis; }
+      r.redraw = true;   // the next frame puts the outline back even while frozen
       const c = document.createElement('canvas'); c.width = w; c.height = h;
       const ctx = c.getContext('2d');
       ctx.imageSmoothingEnabled = true;
@@ -923,6 +943,7 @@ export function createRendererSystem(game) {
 
   function onContextRestored() {
     r.contextLost = false;
+    r.redraw = true;
     counters.contextRestores++;
     clearTimeout(lostTimer);
     if (lostOverlay) { lostOverlay.remove(); lostOverlay = null; }

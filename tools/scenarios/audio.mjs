@@ -38,6 +38,12 @@ export default [
     // SPEC §8.3 acceptance: no console errors when audio is locked (headless) - every event is safe before unlock.
     name: 'audio-locked', requires: ['audio'],
     async run(t) {
+      // a gesture from an earlier scenario (the --touch run taps in touch-controls) already unlocked audio for this
+      // page: reload for a fresh, gesture-free page (LEAD integration)
+      if (await t.eval(() => window.__game.game.audio.unlocked)) {
+        await t.page.reload({ waitUntil: 'load' });
+        await t.page.waitForFunction(() => window.__game && window.__game.ready === true, null, { timeout: 30000 });
+      }
       const r = await t.eval(() => {
         const g = window.__game.game;
         const a = g.audio;
@@ -67,12 +73,11 @@ export default [
       const s = await t.call('audioStats');
       t.note('ctx', { state: s.state, sampleRate: s.sampleRate });
       t.assert(s.state === 'running', `context running (${s.state})`);
-      const voice = await t.eval(() => !!window.__game.game.audio.play('ui.click'));
-      t.assert(voice, 'a UI click plays once unlocked');
-      const st = await t.call('audioStats');
-      t.assert(st.byName['ui.click'] === 1, `click voice counted (${JSON.stringify(st.byName)})`);
-      await t.call('sleep', 300);
-      t.assert((await t.call('audioStats')).voices === 0, 'voices end and are pruned');
+      // count against the clicks still sounding from the gesture itself (or an earlier scenario)
+      const r = await t.eval(() => { const a = window.__game.game.audio; const n0 = a.stats().byName['ui.click'] || 0; const v = !!a.play('ui.click'); return { v, n0, n1: a.stats().byName['ui.click'] || 0 }; });
+      t.assert(r.v, 'a UI click plays once unlocked');
+      t.assert(r.n1 === r.n0 + 1, `click voice counted (${JSON.stringify(r)})`);
+      t.assert(await t.waitFor(() => window.__game.audioStats().voices === 0, null, 1500), 'voices end and are pruned');
     },
   },
   {

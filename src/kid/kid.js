@@ -45,7 +45,7 @@ export function createKidSystem(game) {
   const bs = {};
   const fogTmp = {};
   const cellsTmp = [];
-  let layer = null, homeBtn = null, undoBtn = null, arrowEl = null, arrowRot = null, hintEl = null, fadeEl = null, sparkLayer = null;
+  let layer = null, homeBtn = null, undoBtn = null, arrowEl = null, arrowRot = null, hintEl = null, sparkLayer = null;
   let homeSeq = -1;             // ticks since the Home press, -1 = idle
   let lastFogT = 0;
   let buttonsShown = null;
@@ -179,7 +179,7 @@ export function createKidSystem(game) {
         if (homeSeq === HOME_TELEPORT_TICK) {
           kid.goHome();
           fade(0, 320);
-          if (game.fx && !game.fx.stub && game.fx.spawnParticles) game.fx.spawnParticles('sparkle', p.x, p.y + 1, p.z, { count: 24, spread: 1.2 });
+          if (game.fx && game.fx.spawnParticles) game.fx.spawnParticles('sparkle', p.x, p.y + 1, p.z, { count: 24, spread: 1.2 });
           sparkle(null, null, 16);
         }
         if (homeSeq >= HOME_SEQ_TICKS) { homeSeq = -1; kid.homeSeqActive = false; }
@@ -238,7 +238,6 @@ export function createKidSystem(game) {
       el('div', { class: 'kid-arrow-house', html: ICONS.home() }), arrowRot,
     ]);
     hintEl = el('div', { class: 'kid-hint kid-hidden', 'data-kid': 'hint', 'aria-hidden': 'true' });
-    fadeEl = el('div', { class: 'kid-fade', 'data-kid': 'fade' });
     sparkLayer = el('div', { class: 'kid-sparks' });
     for (const b of [homeBtn, undoBtn]) {
       b.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -246,7 +245,7 @@ export function createKidSystem(game) {
       b.addEventListener('pointercancel', () => b.classList.remove('bc-pressed'));
       b.addEventListener('pointerdown', () => b.classList.add('bc-pressed'));
     }
-    layer.append(fadeEl, homeBtn, undoBtn, arrowEl, hintEl, sparkLayer);
+    layer.append(homeBtn, undoBtn, arrowEl, hintEl, sparkLayer);
   }
 
   function press(b) { if (!b) return; b.classList.add('bc-pressed'); setTimeout(() => b.classList.remove('bc-pressed'), 160); }
@@ -259,12 +258,9 @@ export function createKidSystem(game) {
   function spin(b) { oneShot(b, 'kid-spin'); }
   function shake(b) { oneShot(b, 'kid-shake'); }
 
-  /** Full-screen fade (FX owns fades when it is live; this is the stub fallback). */
+  /** Full-screen fade: FX owns fades (the kid lane's own stub-era fade layer was removed on merge). */
   function fade(to, ms) {
-    if (game.fx && !game.fx.stub && game.fx.fade) { try { game.fx.fade(to, ms); } catch (err) { game.reportError(err, 'kid fade'); } return; }
-    if (!fadeEl) return;
-    fadeEl.style.transitionDuration = ms + 'ms';
-    fadeEl.style.opacity = String(to * 0.85);
+    if (game.fx && game.fx.fade) { try { game.fx.fade(to, ms); } catch (err) { game.reportError(err, 'kid fade'); } }
   }
 
   /** Screen-space sparkle burst (DOM), centre by default. */
@@ -323,6 +319,11 @@ export function createKidSystem(game) {
   }
 
   /* ------------------------------------------------------------------ world helpers */
+  /** The player's box (shrunk by 0.02 so resting on or touching a block never counts) overlaps a solid block. */
+  function bodyInBlock(p) {
+    const hw = (p.width || 0.6) / 2 - 0.02, hh = (p.height || 1.8) - 0.04;
+    return physicsBoxCollides(game.world, p.x - hw, p.y + 0.02, p.z - hw, p.x + hw, p.y + 0.02 + hh, p.z + hw);
+  }
   function playerCollides(x, y, z) {
     const p = game.player, hw = (p.width || 0.6) / 2, hh = p.height || 1.8;
     return physicsBoxCollides(game.world, x - hw, y, z - hw, x + hw, y + hh, z + hw);
@@ -401,7 +402,9 @@ export function createKidSystem(game) {
     if (!w.isColumnLoaded(Math.floor(p.x) >> 4, Math.floor(p.z) >> 4)) return;
     const hx = Math.floor(p.x), hz = Math.floor(p.z);
     const headId = w.getBlock(hx, Math.floor(p.y + (p.eyeHeight || 1.62)), hz);
-    const headInBlock = !!(B_OPAQUE[headId] && B_SOLID[headId]);
+    // head inside an opaque block, or the body inside any solid block (sand or gravel that fell on the child lands
+    // in the feet cell; LEAD integration once falling blocks were real)
+    const headInBlock = !!(B_OPAQUE[headId] && B_SOLID[headId]) || bodyInBlock(p);
     // enclosure is judged from the floor the player last stood on, so a hopeless jump inside a pit does not
     // count as "free" (the head clears the rim for a moment at the top of the jump)
     if (p.onGround || p.flying || p.inWater || p.onLadder || teleported || groundY === null) groundY = p.y;
@@ -514,7 +517,7 @@ export function createKidSystem(game) {
     lowestCache = { x: NaN, z: NaN, y: -1, tick: -100 };
     groundY = null;
     settleAt = null;
-    if (fadeEl) { fadeEl.style.transitionDuration = '0ms'; fadeEl.style.opacity = '0'; }
+    fade(0, 0);
     hideHint();
     if (game.player) lastYaw = game.player.yaw;
   }
