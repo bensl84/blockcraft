@@ -35,6 +35,9 @@ const ERO_Y = [1.0, 0.85, 0.55, 0.25, 0.1, 0.05];
 const ISL_X = [-1.0, 0.0, 0.18, 0.26, 0.34, 0.5, 0.75, 1.0];
 const ISL_Y = [30, 34, 40, 46, 50, 55, 62, 70];
 
+/** Climate noise scale (blocks per noise unit). */
+const CLIMATE_SCALE = 800;
+
 const cache = new Map(); // `${seed}|${preset}` -> terrain (small LRU)
 
 /**
@@ -110,8 +113,9 @@ function createTerrain(seed, preset) {
         rv = fbm(nRiv, X / 560, Z / 560, 3);
       }
       cv[o] = base; cv[o + 1] = land; cv[o + 2] = hilly; cv[o + 3] = mountain; cv[o + 4] = rv;
-      cv[o + 5] = fbm(nTemp, X / 520, Z / 520, 3) * 1.45;
-      cv[o + 6] = fbm(nHum, X / 520 + 41, Z / 520 - 37, 3) * 1.45;
+      // climate at about 1/800 (SPEC: ~1/700): biomes a few hundred blocks across, so they read as regions
+      cv[o + 5] = fbm(nTemp, X / CLIMATE_SCALE, Z / CLIMATE_SCALE, 3) * 1.45;
+      cv[o + 6] = fbm(nHum, X / CLIMATE_SCALE + 41, Z / CLIMATE_SCALE - 37, 3) * 1.45;
       cv[o + 7] = nOpen(X / 70, Z / 70);
       ckI[slot] = i; ckJ[slot] = j; ckOk[slot] = 1;
     }
@@ -169,7 +173,9 @@ function createTerrain(seed, preset) {
     // climate (biomes never change the height); a little jitter keeps borders from looking ruled
     const jit = nVar(X / 23 + 99, Z / 23);
     temp += jit * 0.04; hum -= jit * 0.04;
-    if (hi > 72) temp -= (hi - 72) * 0.012; // colder up high: taiga and snow on the hilltops
+    // colder up high (taiga and snow on the hilltops), but not in a hot climate: a hot region's hills stay warm,
+    // so snow never sits right next to a desert (review CORE-R8)
+    if (hi > 72) temp -= (hi - 72) * 0.012 * (1 - sstep(0.0, 0.35, temp));
 
     let biome;
     if (isSnowy) biome = B.SNOWY;

@@ -22,7 +22,9 @@ export const TRANSLUCENT_ALPHA = { ice: 190 };
 for (const c of ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black']) TRANSLUCENT_ALPHA['stained_glass_' + c] = 150;
 export const WATER_ALPHA = 175;
 
-const WATER = P('#2a4fc4', '#3160d2', '#3a6cdc', '#4a7ce6', '#5f90ee', '#86b0f6');
+// A narrow, low-contrast ramp: every water block shows the same frame, so strong per-texel contrast reads as
+// a repeating block grid across lakes and oceans (review CORE-R6). Crests are soft and few.
+const WATER = P('#3361d3', '#3867d7', '#3d6ddb', '#4374df', '#4a7be3', '#5687e8');
 const LAVA = P('#7a1e06', '#a42c08', '#c8400a', '#e2580e', '#f27614', '#fc9a22', '#ffc444', '#ffe68a');
 const FIRE = P('#b8300c', '#e2581a', '#f8862a', '#ffbc40', '#ffe680', '#fff8d0');
 
@@ -32,11 +34,12 @@ export const ANIMATED = {
       const a = tnoise(x + f, y, 4, 4, c.seed);
       const b = tnoise(x, y - f, 4, 8, c.seed + 1);
       const w = tnoise(x - f, y + f, 8, 8, c.seed + 2);
-      let v = 0.42 * a + 0.38 * b + 0.2 * w;
-      // soft ripple crests: a narrow bright band where the two waves meet
-      const crest = Math.abs(a - b) < 0.05 && v > 0.5;
-      let t = (v - 0.25) / 0.5;
-      if (crest) t = 0.95;
+      const v = 0.42 * a + 0.38 * b + 0.2 * w;
+      // soft ripple crests: a narrow, slightly lighter band where the two waves meet near a wave top; the waves
+      // move every frame, so the crests wander instead of sitting on the same texels of every block
+      const crest = Math.abs(a - b) < 0.035 && v > 0.56;
+      let t = (v - 0.22) / 0.56;
+      if (crest) t = Math.max(t, 0.9);
       pc.setRGB(x, y, pick(WATER, t), WATER_ALPHA);
     }
   },

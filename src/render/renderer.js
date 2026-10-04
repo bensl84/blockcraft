@@ -78,7 +78,7 @@ export function createRendererSystem(game) {
     /** Shared uniforms of every chunk material (and the shared part of entity materials). SPEC §5.5.3 */
     uniforms: {
       uTex: { value: null }, uDaylight: { value: 1 }, uSkyColor: { value: new THREE.Color(0.47, 0.65, 1) },
-      uFogColor: { value: new THREE.Color(0.75, 0.85, 1) }, uFogNear: { value: 48 }, uFogFar: { value: 88 },
+      uFogColor: { value: new THREE.Color(0.75, 0.85, 1) }, uFogNear: { value: 70.4 }, uFogFar: { value: 88 },
       uTime: { value: 0 }, uMinLight: { value: 0.155 }, uWave: { value: 1 },
       // CORE-D additions (not part of the frozen list, safe to read):
       uFogSphere: { value: 0 },
@@ -233,11 +233,11 @@ export function createRendererSystem(game) {
       if (outline) outline.set(r.highlight, isKid());
     },
 
-    /** Fog/far plane for a render distance in chunks: fogFar = (n - 0.5) * 16, fogNear = 0.6 * fogFar. */
+    /** Fog/far plane for a render distance in chunks: fogFar = (n - 0.5) * 16, fogNear = RENDER.FOG_START (0.8) * fogFar. */
     setRenderDistance(n) {
       const far = (n - 0.5) * 16;
       r.renderFar = far;
-      if (!r.fogOverride) { r.uniforms.uFogFar.value = far; r.uniforms.uFogNear.value = far * 0.6; }
+      if (!r.fogOverride) { r.uniforms.uFogFar.value = far; r.uniforms.uFogNear.value = far * RENDER.FOG_START; }
       if (r.camera) { r.camera.far = far + RENDER.FAR_PAD; r.camera.updateProjectionMatrix(); }
     },
     /**
@@ -247,7 +247,7 @@ export function createRendererSystem(game) {
     setFogOverride(near, far = null) {
       if (near === null || near === undefined || far === null || far === undefined) {
         r.fogOverride = null;
-        r.uniforms.uFogFar.value = r.renderFar; r.uniforms.uFogNear.value = r.renderFar * 0.6;
+        r.uniforms.uFogFar.value = r.renderFar; r.uniforms.uFogNear.value = r.renderFar * RENDER.FOG_START;
         return;
       }
       r.fogOverride = { near, far };
@@ -706,7 +706,7 @@ export function createRendererSystem(game) {
       if (sm) sm.uSkyFlat.value = 1;
     } else {
       const fo = r.fogOverride;
-      u.uFogNear.value = fo ? fo.near : r.renderFar * 0.6;
+      u.uFogNear.value = fo ? fo.near : r.renderFar * RENDER.FOG_START;
       u.uFogFar.value = fo ? fo.far : r.renderFar;
       u.uFogSphere.value = 0;
       if (sm) sm.uSkyFlat.value = 0;

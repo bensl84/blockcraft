@@ -1,7 +1,8 @@
 // OWNER LANE: CORE-D. Block selection outline (SPEC §5.5.2 setHighlight).
 //   classic: thin black lines, alpha 0.4 (box grown by 0.002 so it never z-fights the faces)
-//   kid:     each box edge is a camera-facing ribbon ~0.03 blocks wide, white over a wider black border,
-//            widened with distance so it stays >= ~2 px (WebGL lines cannot be thick).
+//   kid:     each box edge is a screen-space capsule (round end caps) ~0.03 blocks wide, white over a wider black
+//            border, widened with distance so it stays >= ~2 px (WebGL lines cannot be thick). Round caps make
+//            the corners join cleanly at any angle, also where an edge is seen end-on.
 // Geometry is rebuilt only when the target cell, its boxes or the scheme change.
 
 import * as THREE from 'three';
@@ -75,7 +76,7 @@ export class Outline {
       glslVersion: THREE.GLSL3,
       vertexShader: OUTLINE_RIBBON_VERT,
       fragmentShader: OUTLINE_RIBBON_FRAG,
-      uniforms: { uColor: { value: new THREE.Color(color) }, uOpacity: { value: 1 }, uWidth: { value: width }, uMinPx: { value: minPx } },
+      uniforms: { uColor: { value: new THREE.Color(color) }, uOpacity: { value: 1 }, uWidth: { value: width }, uMinPx: { value: minPx }, uViewport: { value: new THREE.Vector4(0, 0, 1, 1) } },
       depthWrite: false,
       side: THREE.DoubleSide,
       toneMapped: false,
@@ -117,6 +118,8 @@ export class Outline {
       this.core = new THREE.Mesh(g, this.coreMat);
       for (const [m, o] of [[this.border, 50], [this.core, 51]]) {
         m.renderOrder = o; m.frustumCulled = false; m.matrixAutoUpdate = false;
+        // the capsule shader works in framebuffer pixels: hand it the viewport of THIS draw (canvas or capture target)
+        m.onBeforeRender = (renderer, scene, camera, geometry, material) => { renderer.getCurrentViewport(material.uniforms.uViewport.value); material.uniformsNeedUpdate = true; };
         this.group.add(m);
       }
     } else {

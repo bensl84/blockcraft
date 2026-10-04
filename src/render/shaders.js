@@ -16,23 +16,34 @@ uniform float uFogSphere;
 // Block light is warm and gets warmer as it fades (white-yellow next to a torch, orange at the edge of its
 // reach). Then the classic brightness curve lifts the mid tones: l = mix(l, 1 - (1 - l)^4, uGamma), with
 // uGamma = settings.brightness (0 = moody, 1 = bright; default 0.7), and uMinLight keeps caves from going black.
+// As the daylight falls, sky light turns a cool moonlit blue: the lifted sky term is multiplied by a tint that
+// keeps about the same brightness but moves red/green into blue (block light stays warm). The lift is monotonic,
+// so lift(max(sky, block)) == max(lift(sky), lift(block)) and the tint can sit between the two.
+vec3 bcLift(vec3 l) {
+  vec3 inv = 1.0 - l;
+  return mix(l, 1.0 - inv * inv * inv * inv, uGamma);
+}
 vec3 bcLight(float sky, float block) {
   float effSky = max(0.0, sky - (1.0 - uDaylight) * 11.0);
   float skyB = pow(0.8, 15.0 - effSky);
   float b = pow(0.8, 15.0 - block);
   vec3 blk = vec3(b, b * ((b * 0.6 + 0.4) * 0.6 + 0.4), b * (b * b * 0.6 + 0.4));
-  vec3 l = max(vec3(skyB), blk);
-  vec3 inv = 1.0 - l;
-  l = mix(l, 1.0 - inv * inv * inv * inv, uGamma);
+  vec3 blkL = bcLift(blk);
+  // full moonlight tint away from torches; it fades out where block light is strong, so a torch's warm pool
+  // blends into the blue night instead of turning mauve at its edge
+  float moon = (1.0 - uDaylight) * (1.0 - smoothstep(0.1, 0.45, blkL.r));
+  vec3 skyC = min(bcLift(vec3(skyB)) * mix(vec3(1.0), vec3(0.82, 0.95, 1.55), moon), vec3(1.0));
+  vec3 l = max(skyC, blkL);
   return max(l, vec3(uMinLight));
 }
 // Fog by view distance from uFogNear to uFogFar. Cylindrical (horizontal) on land so high flight does not wash
-// the ground out; spherical underwater (uFogSphere = 1). The linear ramp is eased out (1 - (1 - f)^2) so the
-// diagonal gaps of the circular mesh radius - which start before fogFar - are already ~80% fogged (pop-in hidden).
+// the ground out: a LINEAR ramp from 0.8 * fogFar, so the view stays crisp to about 80% of the radius (the world
+// meshes one ring beyond the fog radius, so every gap of the circular mesh radius lies past fogFar). Underwater and
+// in lava (uFogSphere = 1) the fog is spherical and eased out (1 - (1 - f)^2): thick close up.
 float bcFog(vec3 rel) {
   float d = mix(length(rel.xz), length(rel), uFogSphere);
   float f = clamp((d - uFogNear) / max(0.001, uFogFar - uFogNear), 0.0, 1.0);
-  return 1.0 - (1.0 - f) * (1.0 - f);
+  return mix(f, 1.0 - (1.0 - f) * (1.0 - f), uFogSphere);
 }
 `;
 
@@ -269,40 +280,69 @@ void main() {
 `;
 
 /**
- * Kid outline: box edges as camera-facing ribbons. Attributes: position = edge start, aEnd = edge end,
- * aSide (-1/+1), aAlong (0/1). uWidth in blocks (scaled up with distance for small screens).
+ * Kid outline: each box edge is a screen-space CAPSULE (a strip with round end caps), so the strips of edges that
+ * meet at a corner overlap in a clean round joint at any angle - also for an edge seen end-on - with no spikes
+ * (review CORE-R7). Attributes: position = edge start, aEnd = edge end, aSide (-1/+1), aAlong (0/1).
+ * uWidth is the width in blocks, at least uMinPx * depth (so it stays a few pixels wide far away); uViewport is
+ * the current viewport in framebuffer pixels (x, y, w, h), set per draw by the outline mesh.
  */
 export const OUTLINE_RIBBON_VERT = /* glsl */ `
 in vec3 aEnd;
 in float aSide;
 in float aAlong;
 uniform float uWidth;
-uniform float uMinPx;   // minimum width in "blocks per block of distance" (keeps lines visible far away)
+uniform float uMinPx;   // minimum width in "blocks per block of depth" (keeps lines visible far away)
+uniform vec4 uViewport;
+flat out vec2 vA;       // segment ends, framebuffer pixels
+flat out vec2 vB;
+flat out vec2 vR;       // capsule radius (px) at A and at B
 void main() {
   vec3 a = (modelMatrix * vec4(position, 1.0)).xyz;
   vec3 b = (modelMatrix * vec4(aEnd, 1.0)).xyz;
-  vec3 dir = b - a;
-  float len = length(dir);
-  dir = len > 0.0 ? dir / len : vec3(1.0, 0.0, 0.0);
-  // extend the ribbon past its corners by half a width so corners join without notches
-  vec3 p = mix(a, b, aAlong);
-  vec3 toCam = cameraPosition - p;
-  float dist = length(toCam);
-  float w = max(uWidth, dist * uMinPx);
-  p += dir * (aAlong * 2.0 - 1.0) * w * 0.5;
-  vec3 side = cross(dir, toCam);
-  float sl = length(side);
-  side = sl > 1e-5 ? side / sl : vec3(0.0, 1.0, 0.0);
-  p += side * aSide * w * 0.5;
-  // pull toward the camera so the ribbon is never buried in the block faces it outlines
-  p += (toCam / max(dist, 1e-4)) * min(0.06, dist * 0.2);
-  gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
+  // pull toward the camera so the outline is never buried in the block faces it outlines
+  vec3 ta = cameraPosition - a, tb = cameraPosition - b;
+  float da = length(ta), db = length(tb);
+  a += ta / max(da, 1e-4) * min(0.06, da * 0.2);
+  b += tb / max(db, 1e-4) * min(0.06, db * 0.2);
+  vec4 va = viewMatrix * vec4(a, 1.0);
+  vec4 vb = viewMatrix * vec4(b, 1.0);
+  // clip the segment to just in front of the near plane (view space looks down -z)
+  const float ZC = -0.1;
+  if (va.z > ZC && vb.z > ZC) { vA = vec2(0.0); vB = vec2(0.0); vR = vec2(0.0); gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+  if (va.z > ZC) va = mix(va, vb, (ZC - va.z) / (vb.z - va.z));
+  if (vb.z > ZC) vb = mix(vb, va, (ZC - vb.z) / (va.z - vb.z));
+  vec4 ca = projectionMatrix * va;
+  vec4 cb = projectionMatrix * vb;
+  vec2 hv = 0.5 * uViewport.zw;
+  vec2 pa = (ca.xy / ca.w) * hv + hv + uViewport.xy;
+  vec2 pb = (cb.xy / cb.w) * hv + hv + uViewport.xy;
+  float wa = max(uWidth, -va.z * uMinPx) * 0.5 * projectionMatrix[1][1] * hv.y / -va.z;
+  float wb = max(uWidth, -vb.z * uMinPx) * 0.5 * projectionMatrix[1][1] * hv.y / -vb.z;
+  vec2 d = pb - pa;
+  float len = length(d);
+  vec2 dir = len > 1e-3 ? d / len : vec2(1.0, 0.0);
+  vec2 nrm = vec2(-dir.y, dir.x);
+  float r = max(wa, wb) + 1.0;   // the quad covers the capsule; the fragment shader cuts it to shape
+  vec2 p = (aAlong > 0.5 ? pb : pa) + dir * (aAlong * 2.0 - 1.0) * r + nrm * aSide * r;
+  vA = pa; vB = pb; vR = vec2(wa, wb);
+  vec4 c = aAlong > 0.5 ? cb : ca;
+  gl_Position = vec4(((p - uViewport.xy - hv) / hv) * c.w, c.z, c.w);
 }
 `;
 
 export const OUTLINE_RIBBON_FRAG = /* glsl */ `
 uniform vec3 uColor;
 uniform float uOpacity;
+flat in vec2 vA;
+flat in vec2 vB;
+flat in vec2 vR;
 layout(location = 0) out highp vec4 outColor;
-void main() { outColor = vec4(uColor, uOpacity); }
+void main() {
+  vec2 p = gl_FragCoord.xy;
+  vec2 ab = vB - vA;
+  float l2 = dot(ab, ab);
+  float t = l2 > 1e-6 ? clamp(dot(p - vA, ab) / l2, 0.0, 1.0) : 0.0;
+  if (length(p - (vA + ab * t)) > mix(vR.x, vR.y, t)) discard;
+  outColor = vec4(uColor, uOpacity);
+}
 `;

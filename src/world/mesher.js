@@ -112,12 +112,16 @@ let OX = 0, OY = 0, OZ = 0, JITTER = true;
 
 function emitQuad(buf, layer, flags, shade) {
   if (buf.quads === buf.cap) buf.grow(buf.cap * 2);
-  // quad flip: rotate the start corner when a00 + a11 > a01 + a10 (combined AO x light)
+  // Quad flip (combined AO x light brightness per corner). The diagonal runs through the corner pair that differs
+  // most, so a single odd corner - dark (AO) or bright (a torch-lit corner) - is shared by both triangles and its
+  // value spreads over the whole face instead of making a sharp one-triangle wedge. Ties (flat faces, linear
+  // gradients) keep the classic rule: rotate the start corner when a00 + a11 > a01 + a10.
   const b0 = (QA[0] + 1) * (16 + Math.max(QS[0], QB[0]));
   const b1 = (QA[1] + 1) * (16 + Math.max(QS[1], QB[1]));
   const b2 = (QA[2] + 1) * (16 + Math.max(QS[2], QB[2]));
   const b3 = (QA[3] + 1) * (16 + Math.max(QS[3], QB[3]));
-  const start = b0 + b2 > b1 + b3 ? 1 : 0;
+  const d02 = Math.abs(b0 - b2), d13 = Math.abs(b1 - b3);
+  const start = d02 > d13 ? 0 : d13 > d02 ? 1 : b0 + b2 > b1 + b3 ? 1 : 0;
   const q = buf.quads++;
   const P = buf.pos, T = buf.tex, L = buf.light;
   let pi = q * 12, ti = q * 16;

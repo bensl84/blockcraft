@@ -155,6 +155,58 @@ export default [
     },
   },
   {
+    // LEAD (review CORE-R4): a quick tap must stay a tap when the main thread stalls between pointerdown and
+    // pointerup. The pointerup is created 60 ms after pointerdown (its timeStamp says "quick"), then a 500 ms
+    // stall makes the 350 ms hold timer overdue. Order A: pointerup right after the overdue timer. Order B: two
+    // frames (ticks) run between the timer and the pointerup. Both must place, never break.
+    name: 'coree-tap-stall', requires: E,
+    async run(t) {
+      await flat(t);
+      await t.call('setLook', 0, -35);
+      await t.call('selectSlot', 0);
+      await t.call('waitFrames', 3);
+      const p = await t.call('pos');
+      const res = {};
+      for (const order of ['timerThenUp', 'timerFramesUp']) {
+        let placed = 0, broken = 0;
+        for (let i = 0; i < 3; i++) {
+          const bx = Math.floor(p.x) + i - 1, bz = Math.floor(p.z) - 3;
+          await t.call('setBlock', bx, 4, bz, 'air');
+          const n = px(await t.call('worldToNdc', bx + 0.5, 4, bz + 0.5));
+          const p0 = await t.call('eventCount', 'block:placed'), b0 = await t.call('eventCount', 'block:broken');
+          await t.eval(([cx, cy, order]) => new Promise((done) => {
+            const c = window.__game.game.canvas;
+            const opts = { pointerId: 41, pointerType: 'mouse', clientX: cx, clientY: cy, bubbles: true, cancelable: true, button: 0, buttons: 1, isPrimary: true };
+            c.dispatchEvent(new PointerEvent('pointerdown', opts));
+            setTimeout(() => {
+              const up = new PointerEvent('pointerup', { ...opts, buttons: 0 });
+              const t0 = performance.now(); while (performance.now() - t0 < 500) { /* main-thread stall */ }
+              const fire = () => { c.dispatchEvent(up); done(); };
+              setTimeout(() => (order === 'timerThenUp' ? fire() : requestAnimationFrame(() => requestAnimationFrame(fire))), 0);
+            }, 60);
+          }), [n.x, n.y, order]);
+          await t.call('waitTicks', 3);
+          if (await t.call('eventCount', 'block:placed') > p0) placed++;
+          if (await t.call('eventCount', 'block:broken') > b0) broken++;
+        }
+        res[order] = { placed, broken };
+      }
+      t.note('tapStall', res);
+      for (const [order, r] of Object.entries(res)) t.assert(r.placed === 3 && r.broken === 0, `${order}: a quick tap during a stall places and never breaks (${JSON.stringify(r)})`);
+      // a real hold still breaks (control)
+      const bx = Math.floor(p.x), bz = Math.floor(p.z) - 3;
+      await t.call('setBlock', bx, 4, bz, 'stone');
+      const m = px(await t.call('worldToNdc', bx + 0.5, 4.6, bz + 0.98));
+      await t.page.mouse.move(m.x, m.y);
+      await t.call('waitFrames', 2);
+      await t.page.mouse.down();
+      await t.call('sleep', 520);
+      await t.page.mouse.up();
+      await t.call('waitTicks', 2);
+      t.assert(await t.call('getBlock', bx, 4, bz) === 'air', 'a real hold still breaks');
+    },
+  },
+  {
     name: 'coree-keys-blur', requires: E,
     async run(t) {
       await flat(t);

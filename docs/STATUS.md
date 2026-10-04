@@ -5,7 +5,7 @@ This is the compact progress record. **Only the integrator (LEAD) edits this fil
 - **Evidence must be reproducible:** a command plus its result, a screenshot path under `.tmp/`, or a report JSON.
 - **Never tick a box from a handoff claim alone.** Re-run the command.
 
-**Build under test:** `0.1.0-346d90c8` (root `index.html`, 804 KB minified, three.js + inlined worker) · **Updated:** 2026-10-03 (CORE integration: lanes A–E merged on `main`, SPEC v1.2)
+**Build under test:** `0.1.0-b7eb8e11` (root `index.html`, 807 KB minified, three.js + inlined worker) · **Updated:** 2026-10-03 (CORE review findings CORE-R1…R9 fixed on `main`, SPEC v1.3; CORE integration: lanes A–E merged, SPEC v1.2)
 
 ## Before dispatching lanes
 
@@ -29,6 +29,36 @@ This is the compact progress record. **Only the integrator (LEAD) edits this fil
 | KID | `src/ui/touch*`, `src/kid/*` | `touch`, `kid` | `bc-kid` · `kid.md` | stub (Home works) | |
 | MECH | `src/mechanics/*` | `mechanics` | `bc-mech` · `mech.md` | stub | |
 | FX | `src/fx/*`, `src/render/celestial*` | `fx` | `bc-fx` · `fx.md` | stub | |
+
+## CORE review fixes (LEAD, 2026-10-03, SPEC v1.3)
+
+The core reviewer of record filed one major and eight minor findings (CORE-R1…R9). Each was reproduced on the previous build (`0.1.0-346d90c8`, kept as `.tmp/fix/old.html`) before the fix and checked again after it. Side-by-side pictures are old on top, new below. Reproduction scripts are in `.tmp/fix/`.
+
+| Finding | Fix | Proof (before → after) |
+|---|---|---|
+| **R1 (major)** Fog washed out the middle distance | The world meshes one ring beyond the render distance (`RENDER.MESH_MARGIN` 1; unload moves to R + 5). Every gap of the circular mesh radius now lies beyond `fogFar` for R 3–12. Land fog is linear from 0.8 · `fogFar` (it was 0.6, eased). Underwater and lava fog keep the eased curve. | At R 6 the fog runs 52.8–88, eased, versus 70.4–88 linear. `cored-fog`: every gap is 100 % fogged and the ring past R is meshed (36/36). Pictures: `.tmp/fix/cmp-R6-air.png` (mountain tops crisp), `.tmp/fix/cmp-R8-alt125.png`. Draw calls at R 6: 156 → **189** (`cored-perf`, budget 300). R 8: 254 → 259 (`perf`), up to 341 in the playtest. SwiftShader R 4: 85 → 100 draws, 45 → 41 fps. |
+| R2 Torch-lit walls showed sharp triangle creases | Quad flip (`src/world/mesher.js`): the diagonal runs through the corner pair that differs most, so one bright or dark corner spreads over both triangles. Ties keep the classic rule. True per-pixel corner blending stays a P2 option, because it changes the mesh contract. | New unit test: one torch-lit corner sits on the shared diagonal (fails on the old rule). The old AO flip test still passes. Pictures: `.tmp/fix/cmp-creasew-1.png` and `-2.png` (white-wool torch room). The bright wedge beside the floor block is gone. |
+| R3 Leaves too opaque | Fancy leaves are 40 % see-through (spruce 36 %), up from 17–20 %. Holes cluster around the leaf clumps; alpha stays 0/255 with the colour fill. | `texstats`: oak 44 → 102, birch 51 → 102, spruce 51 → 92 transparent texels of 256. Pictures: `.tmp/fix/tex-preview-after.png`, `.tmp/fix/cmp-leaves-2.png` (trunk visible through the canopy), `cmp-leaves-3.png` (far trees keep their shape). |
+| R4 A quick tap could break a block after a stall | `src/player/input.js` measures the gesture with the events' own timestamps. The hold timer now only marks a pending hold, and the next tick presses attack. A late timer (a stall) waits 120 ms, so a queued quick release stays a tap. | Old build (`node .tmp/fix/r45.mjs`): 4/4 taps broke a block when frames ran between the timer and the release, and taps were lost otherwise. New build: 0 broken, taps recognised. New smoke `coree-tap-stall`: 3/3 placed, 0 broken in both orders. A real 520 ms hold still breaks. Passes on GPU, SwiftShader and touch. |
+| R5 `unmeshedWithin` stale after a teleport | It now counts around the player's current column instead of the cached streaming centre. | Old: 0 right after a 3000-block teleport, with 149 columns missing. New: 149, then 0 after 413 ms. `corec-stream-leak` asserts it (81 unmeshed right after a 320-block jump). |
+| R6 Water tiled as a high-contrast grid | Narrow, low-contrast water palette with fewer and softer crests that move each frame. | Frame-0 brightness spread 24.9 → **8.4**. Picture: `.tmp/fix/cmp-shore.png`. The water still animates (playtest: 5181 changed pixels). |
+| R7 Ragged spikes at the kid outline's corners | Kid outline edges are screen-space capsules with round caps, white over black, clipped at the near plane. | Picture: `.tmp/fix/z-outline-corner-new.png` against `.tmp/review/z-outline-corner.png`: the joints are clean, and an edge seen end-on becomes a round dot. `cored-outline` passes: thick white over black, 2322 white pixels. |
+| R8 Small biomes; desert next to snow | Climate scale 1/520 → **1/800** (the SPEC said about 1/700). Hills cool only outside hot climates. The mountain snow line rises in warm climates (`102 + 40 · max(0, temp)`). | `.tmp/fix/biomeadj.mjs` over 3072² blocks × 5 seeds: desert cells within 16 blocks of snow 116–417 → **0–4**. New unit test `coreb climate` fails on the old worldgen (a snow-capped peak beside a desert) and passes now. Still 8–9 biomes within 256 blocks. **Side effect:** spawns move (seed 12345 is now at 90.5, 53, −64.5, in a taiga by the sea), so `tools/playtest.mjs` now takes off from open sky and looks for a cave near the spawn when the flight lands at sea. `coreb surface` checks two regions for decoration. |
+| R9 Night looked olive-green | The lifted sky light is tinted toward moonlit blue as daylight falls, about `(0.82, 0.95, 1.55)` at the same brightness. The tint fades inside a torch pool, so block light stays warm. | Flat-world grass at 18000: (23, 38, 14) → **(19, 36, 22)**, about the same brightness. Pictures: `.tmp/fix/cmp-flat-night.png` and `.tmp/fix/cmp-torch-night.png` (a warm pool inside a cool night). Night luma in `cored-daynight` is 13, and the playtest's night is still much darker than day (23 against 140). |
+
+**Commands and results** (`main` working tree at build `0.1.0-b7eb8e11`, RTX 3080 Ti headless Chrome unless noted):
+
+| Command | Result |
+|---|---|
+| `npm run build` | `0.1.0-b7eb8e11`, root `index.html` 807 KB |
+| `npm run test:unit` | **87 / 87 pass** (adds `mesher: a single bright corner…` and `coreb climate…`) |
+| `npm test` | **57 PASS**, 3 PENDING (`mobs`, `survival-fall`, `save-load`), 2 SKIP (touch only); adds `coree-tap-stall` |
+| `node tools/smoke.mjs --swiftshader --tag ss` | 57 PASS, 3 PENDING, 2 SKIP (R 4: 100 draws, 41 fps; R 6: 189 draws, 29 fps) |
+| `node tools/smoke.mjs --file index.html --tag prod` | 57 PASS, 3 PENDING, 2 SKIP |
+| `node tools/smoke.mjs --http --tag http` | 57 PASS, 3 PENDING, 2 SKIP |
+| `node tools/smoke.mjs --touch --tag touch` | 58 PASS, 4 PENDING |
+| `node tools/playtest.mjs --file index.html` | **39 / 39**, median 144.9 fps, p99 7.1 ms, max 27.9 ms, play to ready 0.31 s, spawn area 0.59 s |
+| `node tools/playtest.mjs --file index.html --swiftshader` | **39 / 39**, median 71 fps, p90 20.9 ms, at most 159 draws |
 
 ## CORE integration evidence (LEAD, 2026-10-03)
 
@@ -88,9 +118,10 @@ Merged one lane at a time with `git merge --no-ff lane/<lane>` in the order core
 **Remaining defects and gaps**
 
 - FEATURE lanes are not merged: no HUD or hotbar on screen, no crosshair in the classic scheme, hotbar keys 1–9 do nothing (the HUD owns them), placeholder title and pause screens, no sounds, no mobs, no save or load, no sun, moon or clouds, no upper door half (MECH placer), no touch overlay. The playtest picks hotbar slots through the test API for that reason.
-- Smooth lighting shows the usual diagonal crease across a face when its corners differ (the triangle split; the original has it too). Fixing it needs per-corner light in the vertex format, a mesher and renderer contract change.
-- Fog is hazier than the original at a given render distance: it eases in from 60 % of the radius so the diagonal gaps of the circular mesh radius stay hidden. A crisper view needs meshing slightly beyond R, which costs draw calls.
-- On a very slow frame (a main-thread stall over about 300 ms) a quick kid tap can be read as a 350 ms hold and break a block. Seen once in 80 SwiftShader taps, never on the GPU.
+- Smooth lighting still interpolates per triangle. The CORE-R2 flip rule removes the sharp torch-light wedges, but a soft diagonal can remain on faces with mixed corners (the original has it too). Blending all four corners per pixel needs per-corner light in the vertex format: a mesher and renderer contract change (P2).
+- *(fixed, CORE-R1)* Fog haze: the world meshes one ring beyond R and the fog is linear from 80 % of the radius. This costs about 20–35 % more draw calls (189 at R 6, budget 300).
+- *(fixed, CORE-R4)* A quick kid tap during a main-thread stall stays a tap (event timestamps, hold committed on the next tick). Pinned by `coree-tap-stall`.
+- Biome tint (D4) is still a single grass and leaf colour; taiga and snowy ground use the plains green (CORE-R8 note, P2).
 - Main-thread fallback streaming (workers unavailable) measured 4.2–5.6 ms per frame against the 4 ms budget (`corec-fallback`). Workers are used on file://, http and the minified build.
 - Not yet measured on the real laptop (Intel Iris Xe class); SwiftShader is only a relative proxy. The 100 px wheel notch rule needs a check on the real touchpad.
 - Decisions for the parent: D1 TNT on, **D14 lava pools in deep caves** (on), D15 kid flight hop (on).
@@ -139,7 +170,7 @@ CORE scope (2026-10-03, see the CORE integration evidence): the CORE parts of it
 | save-load | save, world | PENDING (MENUS stub) | |
 | touch-controls | touch, input (`--touch`) | PENDING (KID stub) | |
 | context-loss | renderer | **PASS** | |
-| perf | — | PASS (254 draws at R 8, 144 fps; SwiftShader 85 draws at R 4, 45 fps) | `.tmp/smoke-report.json` |
+| perf | — | PASS (259 draws at R 8, 144 fps; SwiftShader 100 draws at R 4, 41 fps; meshes one ring beyond R since CORE-R1) | `.tmp/smoke-report.json` |
 | lead-events-roundtrip | — | PASS | |
 | lead-unload-persist | — | PASS (real world) | |
 | lead-break-contract | — | PASS (real interaction) | |
@@ -162,6 +193,7 @@ CORE scope (2026-10-03, see the CORE integration evidence): the CORE parts of it
 ## Handoff log
 
 <!-- newest first: date · lane · what changed · commands run + results · remaining · blockers -->
+- 2026-10-03 · LEAD · Core review fixes CORE-R1…R9: mesh one ring beyond R with a crisp linear fog, a quad flip that spreads a single bright corner, more open leaves, calmer water, kid taps classified by event time, `unmeshedWithin` after a teleport, capsule kid outline, 1/800 climate with no desert beside snow, moonlit night tint; SPEC v1.3; playtest robust to the moved spawn · unit 87/87; smoke 57 PASS / 3 PENDING / 2 SKIP on file://, http, SwiftShader and the minified file; touch 58 PASS / 4 PENDING; playtest 39/39 on GPU and SwiftShader · next: reviewer recheck of R1–R9, then merge the FEATURE lanes · blockers: none
 - 2026-10-03 · LEAD · CORE integration: merged lane/corea, coreb, corec, cored, coree into `main` one at a time (build, unit and smoke after each); fixed the LEAD light checks, the CORE-C debug view, the light curve, SwiftShader determinism and settle, the new-world hotbar slot, the outline capture and the entity test cleanup; SPEC v1.2; added `tools/playtest.mjs` · unit 85/85; smoke 56 PASS / 3 PENDING / 2 SKIP on file://, http, SwiftShader and the minified file; touch 57 PASS / 4 PENDING; playtest 39/39 on GPU and SwiftShader · next: merge the FEATURE lanes (INV, KID, MECH, FX first: HUD, touch, doors, sky objects), then `--strict` · blockers: none for CORE; the MOBS, MENUS and AUDIO branches had no commits yet when CORE was merged
 - 2026-10-03 · LEAD · v1.1: applied the independent review (lane worktrees + handoff files, persistence invariant, block entity in `block:broken`, single drop owner, undo from `block:changed` with action ids, `voidRescue`, entity streaming, batch edits, test API additions, 8 picker tabs, survival item sources, mob movement rules, one draw per mob, workers P0 + kid flight cap, no Shift, kid outline, fences/gates/panes, boats owner, bedrock rule, minor data and spec fixes) · build 567 KB, unit 13/13, smoke 14 PASS / 7 PENDING / 1 SKIP, http, swiftshader+touch and production-file runs clean · next: integrator commits the foundation, then dispatches CORE lanes A–E in worktrees · blockers: foundation commit (not done in this pass by instruction)
 - 2026-10-03 · LEAD · foundation, SPEC v1, stubs, harness · build, unit (10/10) and smoke (green with pending) · next: dispatch the CORE lanes A–E in parallel · blockers: none

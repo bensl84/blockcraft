@@ -216,7 +216,10 @@ const SCENARIOS = [
       t.assert(await meshed(), 'home area meshed');
       await t.call('waitFrames', 30);
       const a = await counts();
-      await t.call('teleport', home.x + 320, home.y + 20, home.z);
+      // LEAD (review CORE-R5): right after a teleport, unmeshedWithin counts the NEW area (not the old centre)
+      const jump = await t.eval(([x, y, z]) => { const api = window.__game; api.teleport(x, y, z); return api.game.world.unmeshedWithin(5); }, [home.x + 320, home.y + 20, home.z]);
+      t.note('unmeshedRightAfterTeleport', jump);
+      t.assert(jump > 60, `unmeshedWithin right after a teleport sees the new, empty area (${jump})`);
       t.assert(await meshed(), 'far area meshed');
       await t.call('waitFrames', 30);
       const b = await counts();
@@ -225,11 +228,13 @@ const SCENARIOS = [
       await t.call('waitFrames', 30);
       const c = await counts();
       t.note('counts', { home: a, away: b, back: c });
-      const maxSections = Math.ceil(Math.PI * 7 * 7 + 30) * 8;
+      // meshes within R + MESH_MARGIN (dropped beyond one more ring), data unloaded beyond R + UNLOAD_MARGIN
+      const MR = 6 + 1 + 1, UR = 6 + 5;
+      const maxSections = Math.ceil(Math.PI * MR * MR + 30) * 8;
       for (const s of [a, b, c]) {
         t.assert(s.sections === s.rendererSections, `world and renderer agree on live sections (${JSON.stringify(s)})`);
         t.assert(s.sections <= maxSections, `section meshes bounded (${s.sections} <= ${maxSections})`);
-        t.assert(s.columns <= Math.ceil(Math.PI * 10.5 * 10.5) + 40, `columns bounded by R+4 (${s.columns})`);
+        t.assert(s.columns <= Math.ceil(Math.PI * (UR + 0.5) * (UR + 0.5)) + 40, `columns bounded by R + UNLOAD_MARGIN (${s.columns})`);
       }
       t.assert(Math.abs(c.sections - a.sections) <= 16, `no leak: ${a.sections} -> ${c.sections}`);
       t.assert(c.geometries <= a.geometries + 16, `renderer geometries do not grow (${a.geometries} -> ${c.geometries})`);

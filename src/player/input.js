@@ -70,6 +70,9 @@ export const INPUT_TUNING = Object.freeze({
   PALM_PX: 40,               // touch contacts larger than this are palms
   PRESS_MS: 60,              // one-shot press() duration
 });
+/** A hold timer this late means the main thread stalled: give a queued pointerup this long to arrive first. */
+const HOLD_STALL_MS = 50;
+const HOLD_GRACE_MS = 120;
 
 /** True when a wheel event looks like a notched mouse wheel (not a trackpad swipe or pinch). Exported for tests. */
 export function isNotchedWheel(e) {
@@ -96,7 +99,8 @@ export function createInputSystem(game) {
   const pressTimers = new Map();      // action -> timeout id of a pending press() release
 
   // kid gesture on the canvas (first pointer only)
-  let gesture = null;                 // {id, type, x0, y0, lastX, lastY, t0, mode: 'pending'|'hold'|'drag', timer}
+  // {id, type, x0, y0, lastX, lastY, t0 (handler time), tDown (event time), mode: 'pending'|'holdPending'|'hold'|'drag', timer, commitAt}
+  let gesture = null;
   // classic pointer lock bookkeeping
   let lockChangeAt = -1e9, lastUnlockAt = -1e9;
   let lastWheelAt = -1e9;
@@ -194,23 +198,45 @@ export function createInputSystem(game) {
     if (e.cancelable) e.preventDefault();
     try { game.canvas.focus({ preventScroll: true }); } catch { /* ignore */ }
     setAimFromClient(e.clientX, e.clientY);
-    gesture = { id: e.pointerId, type, x0: e.clientX, y0: e.clientY, lastX: e.clientX, lastY: e.clientY, t0: now(), mode: 'pending', timer: 0 };
+    const t0 = now();
+    gesture = { id: e.pointerId, type, x0: e.clientX, y0: e.clientY, lastX: e.clientX, lastY: e.clientY, t0, tDown: eventTime(e, t0), mode: 'pending', timer: 0, commitAt: 0 };
     try { game.canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
     gesture.timer = setTimeout(() => {
       if (!gesture || gesture.mode !== 'pending') return;
-      gesture.mode = 'hold';
+      // Not a hold yet: the attack is pressed by the next tick (commitHold). When this timer ran late, the main
+      // thread stalled, and a quick release may still be queued behind it: wait a short grace period so that
+      // pointerup (classified by its own timestamp) can turn the gesture back into a tap.
+      const t = now();
+      const late = t - (gesture.t0 + KID_GESTURE.HOLD_MS);
+      gesture.mode = 'holdPending';
       gesture.timer = 0;
-      holdPointerAction('attack', gesture.type);
-      gestureEvent('hold', input.aim.x, input.aim.y, gesture.type);
+      gesture.commitAt = late > HOLD_STALL_MS ? t + HOLD_GRACE_MS : t;
     }, KID_GESTURE.HOLD_MS);
     gestureEvent('down', input.aim.x, input.aim.y, type);
+  }
+
+  /** Event time in the performance.now() timebase (falls back to the handler time). */
+  function eventTime(e, fallback) {
+    const ts = e && e.timeStamp;
+    return Number.isFinite(ts) && ts > 0 && ts <= fallback + 1000 ? ts : fallback;
+  }
+
+  /** Turn a pending hold into a real hold (attack pressed): run first in every tick, never from a timer. */
+  function commitHold(force = false) {
+    const g = gesture;
+    if (!g || g.mode !== 'holdPending' || (!force && now() < g.commitAt)) return;
+    g.mode = 'hold';
+    holdPointerAction('attack', g.type);
+    gestureEvent('hold', input.aim.x, input.aim.y, g.type);
   }
 
   function onPointerMove(e) {
     if (gesture && e.pointerId === gesture.id) {
       const dx = e.clientX - gesture.lastX, dy = e.clientY - gesture.lastY;
       gesture.lastX = e.clientX; gesture.lastY = e.clientY;
-      if (gesture.mode === 'pending') {
+      // a pending hold whose move happened (by event time) within the first HOLD_MS can still become a drag
+      const early = gesture.mode === 'pending' || (gesture.mode === 'holdPending' && eventTime(e, now()) - gesture.tDown < KID_GESTURE.HOLD_MS);
+      if (early) {
         const moved = Math.hypot(e.clientX - gesture.x0, e.clientY - gesture.y0);
         if (moved > KID_GESTURE.DRAG_PX) {
           if (gesture.timer) clearTimeout(gesture.timer);
@@ -221,7 +247,7 @@ export function createInputSystem(game) {
         }
       } else if (gesture.mode === 'drag') {
         dragLook(dx, dy);
-      } else if (gesture.mode === 'hold') {
+      } else if (gesture.mode === 'hold' || gesture.mode === 'holdPending') {
         setAimFromClient(e.clientX, e.clientY);                            // the aim follows small moves
       }
       return;
@@ -243,10 +269,18 @@ export function createInputSystem(game) {
     const g = gesture;
     gesture = null;
     if (g.timer) clearTimeout(g.timer);
-    if (g.mode === 'pending' && now() - g.t0 < KID_GESTURE.TAP_MAX_MS + 50) {
+    // Classify by the events' own timestamps, not by when the handlers ran: after a main-thread stall a quick
+    // tap must stay a tap (never a break), even when the hold timer already fired.
+    const dur = eventTime(e, now()) - g.tDown;
+    const tap = (g.mode === 'pending' && dur < KID_GESTURE.TAP_MAX_MS + 50) || (g.mode === 'holdPending' && dur < KID_GESTURE.HOLD_MS);
+    if (tap) {
       setAimFromClient(e.clientX, e.clientY);
       tapAction('use', g.type);
       gestureEvent('tap', input.aim.x, input.aim.y, g.type);
+    } else if (g.mode === 'pending' || g.mode === 'holdPending') {
+      // a real hold released before the next tick: still one attack press (the tick sees wasPressed)
+      gesture = g; commitHold(true); gesture = null;
+      releasePointerAction('attack', g.type);
     } else if (g.mode === 'hold') {
       releasePointerAction('attack', g.type);
     }
@@ -377,6 +411,7 @@ export function createInputSystem(game) {
 
     /** Snapshot edge-triggered presses for this tick; compute move vector. Runs FIRST in the tick order. */
     tick() {
+      commitHold();
       const t = pressedThisTick;
       t.clear();
       pressedThisTick = pressedQueue;

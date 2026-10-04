@@ -204,9 +204,26 @@ function paintLogTop(pc, seed, ringPal, barkPal, birch = false) {
   pc.set(7, 7, ringPal[0]); pc.set(8, 8, ringPal[0]);
 }
 
+/** Share of see-through texels in fancy leaves (the original's fancy leaves are roughly 40% open). */
+const LEAF_HOLES = { round: 0.4, needle: 0.36 };
+
 function paintLeaves(pc, seed, pal, fast, style = 'round') {
   const r = mulberry32(seed);
   const clumps = poissonSeeds(r, 14, 3.2);
+  // Hole score per texel: high between clumps (small d2 - d1), at clump rims (large d1) and in low-noise
+  // patches, plus a little per-texel jitter. The top LEAF_HOLES share of texels become holes, so every seed
+  // gets the same openness and the holes come in clusters around the clump edges, not as pinholes.
+  const score = new Float32Array(S * S);
+  each((x, y) => {
+    const { d1, d2 } = voronoiWrap(x, y, clumps);
+    const edge = 1 - Math.min(1, (d2 - d1) / 1.6);
+    const rim = Math.min(1, d1 / 2.6);
+    const n = tnoise(x, y, 8, 8, seed + 6);
+    const n4 = tnoise(x, y, 4, 4, seed + 7);
+    score[x + y * S] = 0.2 * edge + 0.15 * rim + 0.3 * (1 - n) + 0.45 * (1 - n4) + 0.3 * hash2(x, y, seed + 5);
+  });
+  const sorted = Array.from(score).sort((a, b) => b - a);
+  const cut = sorted[Math.round((LEAF_HOLES[style] ?? 0.4) * S * S) - 1];
   each((x, y) => {
     const { id, d1, d2 } = voronoiWrap(x, y, clumps);
     let dx = x + 0.5 - clumps[id][0], dy = y + 0.5 - clumps[id][1];
@@ -215,8 +232,7 @@ function paintLeaves(pc, seed, pal, fast, style = 'round') {
     let t = 0.5 + light * 0.4 + (hash2(x, y, seed + 1) - 0.5) * 0.5;
     if (style === 'needle') t = 0.45 + ((x + y * 2) % 5 === 0 ? 0.35 : 0) + (hash2(x, y, seed + 1) - 0.5) * 0.5 + light * 0.2;
     if (d2 - d1 < 0.8) t -= 0.35;
-    const n = tnoise(x, y, 8, 8, seed + 6);
-    const hole = (n < 0.42 && hash2(x, y, seed + 5) < 0.42) || hash2(x, y, seed + 4) < 0.05;
+    const hole = score[x + y * S] >= cut;
     if (hole) {
       if (fast) pc.setRGB(x, y, shade(pal[0], 0.7));
       else pc.setRGB(x, y, pal[0], 0);

@@ -84,7 +84,7 @@ const _air = ID.air,
 
 /* ------------------------------------------------------------------------------------------ tables */
 
-const SNOW_LINE = 102;          // mountain tops at or above this get snow
+const SNOW_LINE = 102;          // mountain tops at or above this get snow (higher in a warm climate, see snowLine)
 const STONE_LINE = 96;          // bare stone above this in the mountains
 const LAVA_LEVEL = 6;           // carved cave cells at or below this fill with lava
 const CAVE_MIN_Y = 4;
@@ -128,6 +128,9 @@ const S_PUMPKIN = 0x18, S_CANE = 0x19, S_MUSH = 0x1a, S_BOULDER = 0x1b;
 const PAD = 2, PW = 16 + PAD * 2;                  // padded sample grid 20x20
 const padH = new Int16Array(PW * PW);
 const colBiome = new Uint8Array(256), colRiver = new Float32Array(256), colOpen = new Float32Array(256);
+const colSnow = new Uint8Array(256); // per-column snow line (y)
+/** Snow line for a climate temperature: warm mountains (next to deserts) keep bare stone tops (review CORE-R8). */
+const snowLine = (temp) => Math.min(255, Math.round(SNOW_LINE + Math.max(0, temp) * 40));
 const colMountain = new Float32Array(256);
 const surfTop = new Int16Array(256);               // y of the surface block after layering (-1 none)
 const caveCeil = new Int16Array(256);
@@ -272,7 +275,7 @@ export function generateColumn(seed, cx, cz, preset, out) {
       const lx = px - PAD, lz = pz - PAD;
       if (lx >= 0 && lx < 16 && lz >= 0 && lz < 16) {
         const c = lx + lz * 16;
-        colBiome[c] = s.biome; colRiver[c] = s.river; colOpen[c] = s.open; colMountain[c] = s.mountain;
+        colBiome[c] = s.biome; colRiver[c] = s.river; colOpen[c] = s.open; colMountain[c] = s.mountain; colSnow[c] = snowLine(s.temp);
         biomes[c] = s.biome;
         if (s.h > maxH) maxH = s.h;
       }
@@ -548,7 +551,7 @@ export function generateColumn(seed, cx, cz, preset, out) {
       if (blocks[ai] !== _air) continue;
       const r = hash01(seed, x, z, S_PLANT);
       if (ground === _grass_block) {
-        if (biome === B.SNOWY || (biome === B.MOUNTAINS && y >= SNOW_LINE)) continue; // snow goes there
+        if (biome === B.SNOWY || (biome === B.MOUNTAINS && y >= colSnow[c])) continue; // snow goes there
         // sugar cane on the shore (next to open, unfrozen water at sea level)
         // pumpkin / melon patches: one hashed spot per column (about 1 in 40 / 1 in 90 columns)
         const pk = pumpkinAt(seed, x, z, cx, cz, biome);
@@ -612,7 +615,7 @@ export function generateColumn(seed, cx, cz, preset, out) {
       const i = colIndex(lx, y, lz);
       const id = blocks[i] & 0xff;
       if (snowyBiome && id === _water && y === SEA_LEVEL - 1) { blocks[i] = _ice; continue; }
-      if (!(snowyBiome || y >= SNOW_LINE)) continue;
+      if (!(snowyBiome || y >= colSnow[c])) continue;
       if (B_OPAQUE[id] || id === _oak_leaves || id === _birch_leaves || id === _spruce_leaves) {
         blocks[i + 256] = _snow;
         if (id === _grass_block) blocks[i] = _grass_block | (1 << 8); // snowy bit

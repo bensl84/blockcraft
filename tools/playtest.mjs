@@ -183,6 +183,7 @@ async function main() {
       await waitTicks(3);
       const p = await api('pos');
       check(p.onGround && !p.inWater, 'spawned standing on dry ground', { x: p.x, y: p.y, z: p.z, onGround: p.onGround, inWater: p.inWater });
+      report.spawnPos = { x: p.x, y: p.y, z: p.z };
       await page.mouse.move(W / 2, H / 2);
       await waitFrames(5);
       await shot('spawn', `seed ${report.seed}`);
@@ -227,6 +228,21 @@ async function main() {
     });
 
     await step('fly-high', async () => {
+      // take off from open sky: if the walk ended under a tree, step to the nearest column with nothing above
+      // the ground (the test API only places the player; flying itself is real keys)
+      const open = await ev(() => {
+        const g = window.__game.game, w = g.world, pl = g.player;
+        const px = Math.floor(pl.x), pz = Math.floor(pl.z);
+        const clear = (x, z) => { const s = w.getSurfaceY(x, z); if (s < 0) return -1; for (let y = s; y < 128; y++) if (w.getBlock(x, y, z) !== 0) return -1; const below = window.__game.getBlock(x, s - 1, z); return /leaves|log/.test(below) ? -1 : s; };
+        for (let r = 0; r <= 16; r++) for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+          const s = clear(px + dx, pz + dz);
+          if (s >= 0) return { x: px + dx + 0.5, y: s, z: pz + dz + 0.5, moved: r > 0 };
+        }
+        return null;
+      });
+      if (open && open.moved) { await api('teleport', open.x, open.y, open.z); await waitTicks(5); }
+      report.flyStart = open;
       await key('KeyF');
       await waitTicks(2);
       let p = await api('pos');
@@ -276,8 +292,9 @@ async function main() {
 
     let cave = null;
     await step('dig-to-cave', async () => {
-      cave = await ev(() => {
-        const g = window.__game.game, w = g.world, pl = g.player, ID = window.__game.blockId;
+      // look for a cave near where the flight landed; a landing at sea has none, so then look near the spawn
+      const findCave = (c) => ev((c) => {
+        const g = window.__game.game, w = g.world, pl = c || g.player, ID = window.__game.blockId;
         const water = ID('water'), lava = ID('lava');
         const solid = (x, y, z) => { const id = w.getBlock(x, y, z); return id !== 0 && id !== water && id !== lava; };
         const px = Math.floor(pl.x), pz = Math.floor(pl.z);
@@ -289,6 +306,7 @@ async function main() {
             if (!w.isColumnLoaded(x >> 4, z >> 4)) continue;
             const top = w.getSurfaceY(x, z);
             if (top < 50) continue;
+            if (/leaves|log/.test(window.__game.getBlock(x, top - 1, z))) continue; // dig from the ground, not a tree top
             for (let y = 14; y < top - 10; y++) {
               if (w.getBlock(x, y, z) !== 0 || w.getBlock(x, y + 1, z) !== 0 || !solid(x, y - 1, z)) continue;
               if (w.getSkyLight(x, y, z) !== 0) continue;
@@ -305,7 +323,13 @@ async function main() {
           }
         }
         return best;
-      });
+      }, c);
+      cave = await findCave(null);
+      if (!cave && report.spawnPos) {
+        await api('teleport', report.spawnPos.x, report.spawnPos.y, report.spawnPos.z);
+        await page.waitForFunction(() => window.__game.game.world.unmeshedWithin(3) === 0, null, { timeout: 15000 }).catch(() => {});
+        cave = await findCave(report.spawnPos);
+      }
       check(!!cave, 'found a cave under the surface near the player', cave);
       if (!cave) return;
       // stand on the surface above it and dig straight down with a kid HOLD (real mouse down at the centre)

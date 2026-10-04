@@ -241,6 +241,20 @@ test('mesher: quad flip rotates the start corner when a00 + a11 > a01 + a10', ()
   assert.ok(open[0].x === 10 && open[0].z === 11, 'unflipped quad starts at BL');
 });
 
+test('mesher: a single bright (torch-lit) corner is shared by both triangles (review CORE-R2)', () => {
+  const { blocks, light } = padded();
+  // a dark stone floor (no sky light) with block light only at the north-west corner of the top face of (5,0,5)
+  for (let i = 0; i < light.length; i++) light[i] = 0;
+  for (let x = -1; x <= 16; x++) for (let z = -1; z <= 16; z++) blocks[padIndex(x, 0, z)] = ID.stone;
+  light[padIndex(4, 1, 4)] = 14;
+  const m = meshSection(blocks, light, {}).opaque;
+  const top = findQuad(m, (c) => c.every((p) => p.y === 1) && Math.min(...c.map((p) => p.x)) === 5 && Math.min(...c.map((p) => p.z)) === 5);
+  const bright = top.findIndex((p) => p.block > 0);
+  assert.ok(bright >= 0 && top.filter((p) => p.block > 0).length === 1, `exactly one lit corner (${JSON.stringify(top)})`);
+  // indices [0,1,2, 0,2,3]: vertices 0 and 2 are in both triangles
+  assert.ok(bright === 0 || bright === 2, `the lit corner is on the shared diagonal (vertex ${bright})`);
+});
+
 test('mesher: culling rules (glass, leaves fancy/fast, water) and passes', () => {
   const { blocks, light } = padded();
   blocks[padIndex(2, 2, 2)] = ID.glass; blocks[padIndex(3, 2, 2)] = ID.glass;

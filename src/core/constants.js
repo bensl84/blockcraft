@@ -122,8 +122,10 @@ export const NIGHT_SKY_DROP = 11;       // effective sky = sky - (1 - daylight) 
 /* ---------------- rendering & streaming ---------------- */
 export const RENDER = Object.freeze({
   DEFAULT_DISTANCE: 6, MIN_DISTANCE: 3, MAX_DISTANCE: 12, TOUCH_DISTANCE: 5, LOW_DISTANCE: 4,
-  DATA_MARGIN: 2,       // generate/light columns out to renderDistance + 2 (mesher needs neighbours)
-  UNLOAD_MARGIN: 4,     // unload beyond renderDistance + 4 (hysteresis)
+  MESH_MARGIN: 1,       // mesh one ring beyond the fog radius: the circular radius's diagonal gaps then sit past fogFar
+  DATA_MARGIN: 2,       // generate/light columns out to the mesh radius + 3 / + 2.5 (mesher needs neighbours)
+  UNLOAD_MARGIN: 5,     // unload beyond renderDistance + 5 (data reaches R + MESH_MARGIN + DATA_MARGIN + 1 = R + 4)
+  FOG_START: 0.8,       // linear land fog from FOG_START * fogFar to fogFar = (R - 0.5) * 16
   SPAWN_RADIUS: 3,      // columns meshed before the world is shown
   CHUNK_BUDGET_MS: 4,   // per-frame gen/light/mesh budget while playing (scaled down when frames are late)
   LIGHT_COLUMN_BUDGET_MS: 2, // initial lighting of ONE column on the weak proxy (SPEC §5.3.4, §12)

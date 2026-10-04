@@ -239,7 +239,11 @@ test('coreb biome variety: >= 4 biomes within 512 blocks for seed 12345 (and in 
 });
 
 test('coreb surface: snow on snowy tops, sand beaches, decoration present, heights in range', () => {
-  const r = region(12345, -8, -8, 16);
+  // the origin region plus one more 256x256 region: biomes are a few hundred blocks across (climate ~1/800,
+  // LEAD review CORE-R8), so one region alone may hold only the cold biomes
+  const cols = new Map();
+  for (const [cx0, cz0] of [[-8, -8], [-24, -24]]) for (const [k, c] of region(12345, cx0, cz0, 16).cols) cols.set(k, c);
+  const r = { cols };
   const tops = new Map(), deco = new Map();
   const heights = [];
   for (const [key, col] of r.cols) {
@@ -256,7 +260,7 @@ test('coreb surface: snow on snowy tops, sand beaches, decoration present, heigh
     for (let i = 0; i < COLUMN_VOLUME; i++) { const id = col.blocks[i] & 0xff; deco.set(id, (deco.get(id) || 0) + 1); }
   }
   for (const n of ['short_grass', 'dandelion', 'poppy', 'oak_log', 'birch_log', 'spruce_log', 'sugar_cane', 'snow', 'ice', 'fern'])
-    assert.ok((deco.get(ID[n]) || 0) + (tops.get(ID[n]) || 0) > 0, `${n} appears in a 256x256 area`);
+    assert.ok((deco.get(ID[n]) || 0) + (tops.get(ID[n]) || 0) > 0, `${n} appears in two 256x256 areas`);
   heights.sort((a, b) => a - b);
   const q = (p) => heights[Math.floor(p * (heights.length - 1))];
   assert.ok(q(0.5) >= 48 && q(0.5) <= 72, `median height ${q(0.5)}`);
@@ -326,4 +330,36 @@ test('coreb performance: generateColumn <= 1 ms per column (desktop budget)', ()
   }
   console.log(`# coreb gen ${best.toFixed(3)} ms/column`);
   assert.ok(best <= 1, `generateColumn ${best.toFixed(3)} ms per column`);
+});
+
+test('coreb climate: a desert never borders snow - no snowy biome or snow-capped peak within 16 blocks (LEAD review CORE-R8)', () => {
+  const STEP = 8, HALF = 1024, N = (2 * HALF) / STEP, R = 16 / STEP;
+  let deserts = 0, checkedPeaks = 0;
+  for (const seed of [12345, 4242, 777]) {
+    const bio = new Uint8Array(N * N);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) bio[i + j * N] = getBiomeAt(seed, -HALF + i * STEP, -HALF + j * STEP, 'default');
+    const peaks = new Set();
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      if (bio[i + j * N] !== BIOME_BY_NAME.desert) continue;
+      deserts++;
+      for (let dj = -R; dj <= R; dj++) for (let di = -R; di <= R; di++) {
+        const ii = i + di, jj = j + dj;
+        if (ii < 0 || jj < 0 || ii >= N || jj >= N) continue;
+        const b = bio[ii + jj * N];
+        assert.notEqual(b, BIOME_BY_NAME.snowy, `seed ${seed}: snowy biome next to the desert at ${-HALF + i * STEP},${-HALF + j * STEP}`);
+        const x = -HALF + ii * STEP, z = -HALF + jj * STEP;
+        if (b === BIOME_BY_NAME.mountains && getTerrainHeight(seed, x, z, 'default') >= 102) peaks.add(x + ',' + z);
+      }
+    }
+    // a high mountain right next to a desert keeps a bare (warm) top: no snow layer on it
+    for (const k of [...peaks].slice(0, 24)) {
+      const [x, z] = k.split(',').map(Number);
+      const col = gen(seed, x >> 4, z >> 4);
+      let y = 127;
+      while (y > 0 && (col.blocks[colIndex(x & 15, y, z & 15)] & 0xff) === ID.air) y--;
+      assert.notEqual(col.blocks[colIndex(x & 15, y, z & 15)] & 0xff, ID.snow, `seed ${seed}: snow-capped peak at ${x},${y},${z} next to a desert`);
+      checkedPeaks++;
+    }
+  }
+  assert.ok(deserts > 100, `deserts exist (${deserts} samples); ${checkedPeaks} desert-side peaks checked`);
 });

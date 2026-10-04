@@ -1,6 +1,6 @@
 # Blockcraft — Engineering Specification
 
-Version 1.2 · 2026-10-03 · owner: LEAD (architect / integrator) · v1.1 applies the independent review (lane isolation, persistence, undo data, test API, kid controls, content gaps) · v1.2 records the CORE integration (lanes A–E merged): light curve with the brightness lift, accepted lane spec conflicts, streaming radii, new lane events and decisions D14–D15
+Version 1.3 · 2026-10-03 · owner: LEAD (architect / integrator) · v1.1 applies the independent review (lane isolation, persistence, undo data, test API, kid controls, content gaps) · v1.2 records the CORE integration (lanes A–E merged): light curve with the brightness lift, accepted lane spec conflicts, streaming radii, new lane events and decisions D14–D15 · v1.3 applies the CORE review (CORE-R1…R9): meshing one ring beyond the fog with a crisp linear fog, quad flip, leaves and water textures, tap classification by event time, `unmeshedWithin` after a teleport, capsule kid outline, larger climate regions, moonlit night tint
 
 This file is the single source of truth for Blockcraft. Two kinds of files back it up:
 
@@ -1009,8 +1009,8 @@ export function buildItemIcons(textureSet): ItemIconSet                    // br
 
    The total is about 238 layers and must stay ≤ 256 (the WebGL2 minimum `MAX_ARRAY_TEXTURE_LAYERS`); `test/foundation.test.mjs` asserts it. New blocks should reuse existing textures where they can (the gate and pane do). If `renderer.gpu.maxLayers < count` on some device, CORE-A rebuilds with `buildTextures({halfAnim: true})` (water and lava at 8 frames) and CORE-D uses that.
 2. **Pixel layout.** Row 0 is the TOP row of the image. RGBA8 is straight (not premultiplied) alpha.
-3. **Cutout textures** (leaves, glass, plants, crops, torch, ladder, door, fire): alpha is 0 or 255 only. Fill the RGB of transparent texels with the average of nearby opaque texels so mipmaps don't get dark fringes.
-4. **Translucent textures** (water α≈175, ice α≈190, stained glass α≈150): constant alpha per texture is fine.
+3. **Cutout textures** (leaves, glass, plants, crops, torch, ladder, door, fire): alpha is 0 or 255 only. Fill the RGB of transparent texels with the average of nearby opaque texels so mipmaps don't get dark fringes. *(v1.3)* Fancy leaves are about 40 % see-through (spruce 36 %), with the holes clustered around the leaf clumps, so canopies read as leaves rather than solid green cubes.
+4. **Translucent textures** (water α≈175, ice α≈190, stained glass α≈150): constant alpha per texture is fine. *(v1.3)* Water keeps a low contrast (luma standard deviation about 8–10 per frame) with soft, moving crests: every water block shows the same frame, so contrast reads as a block grid across lakes and oceans.
 5. **Determinism.** Each texture is seeded from `hashString(key)`, so the same bytes come out every run. This is unit-tested.
 6. **Crack stages** `crack_0..9`: black pixels at α150 with α70 neighbours. Stage s shows the first `ceil(60·(s+1)/10)` pixels of 3 random-walk crack paths.
 7. **Tint-free.** Biome tints are baked in: a single grass colour (`#78b84a` family) and per-species leaf colours. There is no per-vertex tint attribute.
@@ -1054,7 +1054,8 @@ export function fbm2(n2, x, y, octaves=4, lacunarity=2, gain=0.5)
   - Continentalness, erosion and peaks/valleys 2D noise with piecewise-linear splines.
   - Most land between y 50 and 72, occasional hills to about 95, oceans down to about y 30, sea level 48. Water fills air below y 48.
   - Beaches of sand within ±2 of sea level near the coast.
-  - Biomes come from temperature/humidity noise at about 1/700 scale. They **only** change the surface and decoration, never the height, to avoid cliffs at biome borders.
+  - Biomes come from temperature/humidity noise at about 1/700 scale (*v1.3: 1/800*). They **only** change the surface and decoration, never the height, to avoid cliffs at biome borders.
+  - *(v1.3)* Hills cool toward taiga and snow only outside hot climates, and the mountain snow line rises in a warm climate (`102 + 40 · max(0, temp)`), so a desert never borders snow (unit test `coreb climate`).
   - Layers: bedrock at y = 0 plus a random 1–3 above it; stone; 3–4 filler blocks; surface block.
   - Caves: "spaghetti" style — `|n1| < 0.08 && |n2| < 0.08` on a 4×4×4 lattice, trilinearly interpolated. Mostly below y 44, rare surface openings. Never carve within 2 blocks of water or the ocean floor.
   - Ores (blobs replacing stone):
@@ -1099,7 +1100,7 @@ export function fbm2(n2, x, y, octaves=4, lacunarity=2, gain=0.5)
   - `modified`, `saveDirty`, `fresh`
   - `blockEntities: Map<colIndex, object>`
   - `lastTouched`
-- **Memory:** about **98 KB per loaded column** (64 KB blocks + 32 KB light + small arrays). Columns unload at R + 4, so R = 6 keeps up to about 314 columns (≈ 31 MB) and R = 12 about 800 (≈ 80 MB).
+- **Memory:** about **98 KB per loaded column** (64 KB blocks + 32 KB light + small arrays). Columns unload at R + 5 (*v1.3*), so R = 6 keeps up to about 380 columns (≈ 37 MB) and R = 12 about 910 (≈ 89 MB).
 - **Unloaded modified columns** stay in `world.savedColumns` as **encoded bytes** (`save/codec.js`, typically 1–4 KB) and are decoded lazily in `ensureColumn`. `loadWorld` hands columns over encoded (`{data, blockEntities}`); it never decodes them all up front.
 
 #### 5.3.2 World API (`game.world`; frozen; the stub implements every member)
@@ -1121,7 +1122,7 @@ getSurfaceY(x, z) -> feet y standing on the highest collision box top; -1 if non
 setBlock(x, y, z, id, state = 0, opts = {cause, silent, keepBlockEntity, action}) -> bool
 beginBatch() ; endBatch() ; inBatch() -> bool ; setBlocks([[x, y, z, id, state?], ...], opts) -> changed count
 markSectionDirtyAt(x, y, z) ; markSectionDirty(cx, sy, cz) ; remeshAll()
-unmeshedWithin(r) -> number of columns within r of the player's column that are not MESHED
+unmeshedWithin(r) -> number of columns within r of the player's column that are not MESHED   // v1.3: the player's CURRENT column (right after a teleport too)
 getBlockEntity(x, y, z) ; setBlockEntity(x, y, z, data|null) ; forEachBlockEntity(fn(data, x, y, z))
 setRenderDistance(n)                    // clamps 3..12, emits 'world:renderDistance'
 ensureColumn(cx, cz) -> Column          // synchronous generate/restore + light
@@ -1162,6 +1163,7 @@ It returns false for an unloaded column, out-of-range y, or no change.
 
 - **States:** EMPTY → GENERATED (terrain plus decoration from `generateColumn`, or restored from save) → LIT (needs the 3×3 neighbourhood GENERATED) → MESHED (needs the 3×3 neighbourhood LIT).
 - **Radii:** data out to R + 3 (`DATA_MARGIN` + 1, so the diagonal neighbours of every lit column exist; light reaches about R + 1.5), meshes within R (circular), meshes dropped beyond R + 1 (the column goes back to LIT, bounding draw calls and geometries), unload beyond R + 4 (`UNLOAD_MARGIN`). *(v1.2: as built by CORE-C.)*
+- *(v1.3, review CORE-R1)* The mesh radius is **M = R + `MESH_MARGIN` (1)**: one ring beyond the fog radius, so every gap of the circular mesh radius (and the newest, still-streaming ring) lies past `fogFar` = (R − 0.5)·16 and the fog can be a crisp linear ramp from 0.8 · `fogFar`. Data to M + 3 = R + 4, light to M + 1.5, meshes dropped beyond M + 1, unload beyond R + 5 (`UNLOAD_MARGIN`). Draw calls at R 6 stay about 150–200 (budget 300).
 - **Order:**
   - Precomputed offsets sorted by distance², with a look-direction bias of `dist² − 2·dot(lookDir, offset)`.
   - Rebuild the queue when the player crosses a column border.
@@ -1225,7 +1227,7 @@ export function meshBlockModel(id, state) -> MeshBuffers          // isolated bl
 | `tex` (`aTex`) | u16 `layer`, u16 `u`, u16 `v`, u16 `flags` | `u`, `v` in 1/256 of a tile (0..256): `u` grows left to right, `v` grows top to bottom (v = 0 is the image's top row). `flags`: bits 0–2 face (0–5, 6 = non-axis plant); bits 3–4 `ANIM` mode; bits 5–6 `WAVE` mode; bits 7–15 reserved (0). |
 | `light` (`aLight`) | u8 `sky16`, u8 `block16`, u8 `ao`, u8 `shade` | `sky16`/`block16` = smooth light × 16 (0..240); `ao` 0..3 (3 = unoccluded); `shade` = face shade × 255 |
 
-**Vertex order.** Each quad's corners are bottom-left, bottom-right, top-right, top-left **as seen from outside** (CCW = front face). See `FACE_CORNERS`: the up face has its texture top toward north, the down face toward south. The quad flip rotates the start corner by one when `a00 + a11 > a01 + a10`, using combined AO × light brightness.
+**Vertex order.** Each quad's corners are bottom-left, bottom-right, top-right, top-left **as seen from outside** (CCW = front face). See `FACE_CORNERS`: the up face has its texture top toward north, the down face toward south. The quad flip rotates the start corner by one when `a00 + a11 > a01 + a10`, using combined AO × light brightness. *(v1.3, review CORE-R2)* The diagonal runs through the corner pair that differs most (`|a00 − a11|` against `|a01 − a10|`), so a single odd corner, dark or torch-bright, is shared by both triangles and spreads instead of making a sharp wedge; ties keep the rule above. True bilinear corner light (a mesh contract change) stays a P2 option.
 
 **Rules**
 
@@ -1283,8 +1285,9 @@ setSectionMesh(cx, sy, cz, SectionMesh|null)   // replaces + disposes previous g
 removeColumnMeshes(cx, cz) ; clearWorld()
 setHighlight({x, y, z, boxes} | null)          // outline (boxes from getSelectionBoxes): classic = thin black lines, alpha 0.4, polygon-offset;
                                                // kid = box edges as camera-facing quad strips ~0.03 blocks wide, white over a black border
+                                               // (v1.3: screen-space capsules with round caps, so corners join cleanly)
 setFogOverride(near, far | null)               // kid soft border (thickening fog); null restores render-distance fog
-setRenderDistance(n)                           // fogFar = (n - 0.5) * 16, fogNear = fogFar * 0.6, camera.far = fogFar + 32
+setRenderDistance(n)                           // fogFar = (n - 0.5) * 16, fogNear = fogFar * 0.8 (v1.3; was 0.6), camera.far = fogFar + 32
 addObject(obj3d) ; removeObject(obj3d)         // dynamic objects (entities, particles, fx)
 createEntityMaterial({map?, atlas?, transparent?, alphaTest?, color?, parts?}) -> material with uniforms uLightSky, uLightBlock (0..15), uTint (vec4)
                                                // parts: N <= 8 -> + uniform mat4 uParts[N]; geometry attribute aPart (Uint8) picks the matrix
@@ -1318,16 +1321,17 @@ translucent: keep alpha (water ~0.7)
 effSky = max(0, sky - (1 - uDaylight) * 11)
 skyB = pow(0.8, 15 - effSky) ; b = pow(0.8, 15 - block)          // close to the classic f / (4 - 3f) ramp
 blk = (b, b * ((b * 0.6 + 0.4) * 0.6 + 0.4), b * (b * b * 0.6 + 0.4))   // warm; whiter near a torch, orange at the edge
-light = max(vec3(skyB), blk)
-light = mix(light, 1 - (1 - light)^4, uGamma)                        // classic brightness lift, uGamma = settings.brightness
+lift(l) = mix(l, 1 - (1 - l)^4, uGamma)                               // classic brightness lift, uGamma = settings.brightness
+moon = (1 - uDaylight) * (1 - smoothstep(0.1, 0.45, lift(blk).r))      // v1.3: moonlit sky tint, fading out inside a torch pool
+light = max(min(lift(skyB) * mix(1, (0.82, 0.95, 1.55), moon), 1), lift(blk))   // block light stays warm
 light = max(light, vec3(uMinLight))                                  // uMinLight = 0.05 + 0.15 * brightness
 aoF = [0.5, 0.7, 0.85, 1.0][ao]
 color = tex.rgb * shade * aoF * light
-fog: f = clamp((d - uFogNear) / (uFogFar - uFogNear)), eased 1 - (1 - f)^2, toward uFogColor
+fog: f = clamp((d - uFogNear) / (uFogFar - uFogNear)), linear on land (v1.3), eased 1 - (1 - f)^2 underwater / in lava, toward uFogColor
      d = horizontal distance on land (flying high must not wash out the ground), spherical underwater and in lava
 ```
 
-*(v1.2)* Without the brightness lift a torch visibly lit only about 3 blocks and every cell at light 8 or less sat on one flat floor; with it (default 0.7) a torch warmly lights a 13 × 13 room, as in the original. The fog ramp is eased because the circular mesh radius leaves diagonal gaps that begin before `uFogFar` (worst case about 52 % into a linear ramp at R 4); eased, every gap is at least 75 % fogged for R 3–12 (`cored-fog`). Entity materials use the same light and fog code (they share `uGamma`).
+*(v1.2)* Without the brightness lift a torch visibly lit only about 3 blocks and every cell at light 8 or less sat on one flat floor; with it (default 0.7) a torch warmly lights a 13 × 13 room, as in the original. The fog ramp is eased because the circular mesh radius leaves diagonal gaps that begin before `uFogFar` (worst case about 52 % into a linear ramp at R 4); eased, every gap is at least 75 % fogged for R 3–12 (`cored-fog`). *(v1.3, review CORE-R1)* That washed out the middle distance (terrain 70 blocks away was about 74 % fogged at R 6). The world now meshes one ring beyond R (§5.3.3), every gap lies past `uFogFar` for R 3–12, and the land fog is linear from 0.8 · `uFogFar` (`cored-fog` asserts every gap is fully fogged). Entity materials use the same light and fog code (they share `uGamma`).
 
 **Passes**
 
@@ -1494,6 +1498,8 @@ lastManualLookMs ; noteManualLook()          // any manual look (and test setLoo
   |---|---|---|
   | Tap | released in under 350 ms and moved under 12 px | aim at the point, press `use` |
   | Hold | 350 ms or more without moving | aim at the point, hold `attack` until release; the aim follows small moves |
+
+  *(v1.3, review CORE-R4)* Durations are measured with the events' own `timeStamp`s, not handler times, and the hold timer only marks the gesture as a pending hold; the next tick presses `attack`. When the timer ran late (a main-thread stall), the press waits a 120 ms grace period, so a quick release queued behind the stall stays a tap and never breaks a block (`coree-tap-stall`).
   | Drag | more than 12 px within the first 350 ms | look: `dyaw = −dx·k`, `dpitch = −dy·k`, with `k = 0.0035·(0.5 + lookSensitivity)` rad/px, inverted y if `invertY` |
 
   - React on `pointerdown`: FX shows a ring or crack start immediately.

@@ -107,30 +107,47 @@ export default [
         const g = window.__game.game, r = g.renderer, w = g.world;
         const R = w.renderDistance, near = r.uniforms.uFogNear.value, far = r.uniforms.uFogFar.value;
         // For every render distance 3..12: the nearest point of any column that is NOT meshed (outside the circular
-        // radius R) seen from the WORST player position inside its column, and how fogged it is (shader curve).
-        const ease = (d, n, fa) => { const l = Math.min(1, Math.max(0, (d - n) / (fa - n))); return 1 - (1 - l) * (1 - l); };
+        // mesh radius R + MESH_MARGIN) seen from the WORST player position inside its column, and how fogged it is
+        // (the shader's linear land ramp from FOG_START * fogFar to fogFar).
+        const lin = (d, n, fa) => Math.min(1, Math.max(0, (d - n) / (fa - n)));
         const worst = {};
         let minFog = 1;
         for (let RR = 3; RR <= 12; RR++) {
-          const fa = (RR - 0.5) * 16, n = fa * 0.6;
+          const fa = (RR - 0.5) * 16, n = fa * 0.8, M = RR + 1;
           let dMin = Infinity;
           for (const [px, pz] of [[0, 0], [16, 0], [0, 16], [16, 16], [8, 8]]) {
-            for (let dx = -RR - 2; dx <= RR + 2; dx++) for (let dz = -RR - 2; dz <= RR + 2; dz++) {
-              if (dx * dx + dz * dz <= RR * RR) continue;
+            for (let dx = -M - 2; dx <= M + 2; dx++) for (let dz = -M - 2; dz <= M + 2; dz++) {
+              if (dx * dx + dz * dz <= M * M) continue;
               const x0 = dx * 16, z0 = dz * 16;
               const nx = Math.max(x0, Math.min(px, x0 + 16)), nz = Math.max(z0, Math.min(pz, z0 + 16));
               dMin = Math.min(dMin, Math.hypot(nx - px, nz - pz));
             }
           }
-          worst[RR] = Math.round(ease(dMin, n, fa) * 100) / 100;
+          worst[RR] = Math.round(lin(dMin, n, fa) * 100) / 100;
           minFog = Math.min(minFog, worst[RR]);
         }
         return { R, near, far, camFar: r.camera.far, worst, fogAtGap: minFog };
       });
       t.note('fog', f);
-      t.assert(Math.abs(f.far - (f.R - 0.5) * 16) < 1e-6 && Math.abs(f.near - f.far * 0.6) < 1e-6, 'fog distances follow the render distance');
+      t.assert(Math.abs(f.far - (f.R - 0.5) * 16) < 1e-6 && Math.abs(f.near - f.far * 0.8) < 1e-6, 'fog distances follow the render distance (linear from 0.8 * fogFar)');
       t.assert(Math.abs(f.camFar - (f.far + 32)) < 1e-6, 'camera far = fogFar + 32');
-      t.assert(f.fogAtGap >= 0.75, `for every R the nearest missing column is at least 75% fogged (${JSON.stringify(f.worst)})`);
+      t.assert(f.fogAtGap >= 0.999, `for every R the nearest missing column lies past fogFar, fully fogged (${JSON.stringify(f.worst)})`);
+      // the live world really meshes one ring beyond R: the columns between R and R + 1 are meshed once settled
+      const ring = await t.eval(() => {
+        const g = window.__game.game, w = g.world, R = w.renderDistance;
+        const pcx = Math.floor(g.player.x) >> 4, pcz = Math.floor(g.player.z) >> 4;
+        let n = 0, meshed = 0;
+        for (let dx = -R - 1; dx <= R + 1; dx++) for (let dz = -R - 1; dz <= R + 1; dz++) {
+          const d2 = dx * dx + dz * dz;
+          if (d2 <= R * R || d2 > (R + 1) * (R + 1)) continue;
+          n++;
+          const c = w.getColumn(pcx + dx, pcz + dz);
+          if (c && c.state === 3) meshed++;
+        }
+        return { n, meshed };
+      });
+      t.note('ringBeyondR', ring);
+      t.assert(ring.n > 0 && ring.meshed >= ring.n * 0.9, `the ring just beyond R is meshed (${ring.meshed}/${ring.n})`);
       // no seam at the horizon: from high up, the band around the horizon is the fog colour (terrain and sky)
       const p = await t.call('pos');
       await t.call('teleport', p.x, 120, p.z);
