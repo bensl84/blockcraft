@@ -24,18 +24,54 @@ export function installTestApi(game) {
     const check = () => (game.frameCount >= target || performance.now() - start > 5000 ? resolve(game.frameCount) : setTimeout(check, 5));
     check();
   });
-  const jsonSafe = (v) => {
-    try {
-      const seen = new WeakSet();
-      return JSON.parse(JSON.stringify(v, (k, x) => {
-        if (x && typeof x === 'object') {
-          if (seen.has(x)) return undefined;
-          seen.add(x);
-          if (x.isObject3D || x.isMaterial || x.isBufferGeometry || ArrayBuffer.isView(x)) return undefined;
-        }
-        return x;
-      }));
-    } catch { return null; }
+  /**
+   * Plain JSON copy of an event payload (judge KID-12). Payloads can carry live objects (player:hurt's `source`
+   * is a mob, which reaches the whole game), so the walk is bounded: nesting depth maxDepth (events() uses
+   * EVENT_DEPTH), JSON_KEYS keys per object, JSON_ITEMS array items; an entity becomes a small
+   * {id, type, x, y, z} stub and the game, the world, the player and the other systems become {system: name}.
+   * Three.js objects and typed arrays are left out; Maps and Sets become {} (as JSON.stringify does).
+   */
+  const EVENT_DEPTH = 4, JSON_KEYS = 256, JSON_ITEMS = 20000;
+  const isEntityLike = (x) => typeof x.id === 'number' && typeof x.type === 'string' && typeof x.x === 'number' && typeof x.z === 'number' && ('vx' in x || 'object3d' in x || 'removed' in x);
+  const systemName = (x) => {
+    if (x === game) return 'game';
+    if (x === game.events) return 'events';
+    for (const s of game.systems) if (s === x) return s.name;
+    return null;
+  };
+  const num = (n) => (Number.isFinite(n) ? n : null);
+  const jsonSafe = (v, maxDepth = 16) => {
+    const seen = new WeakSet();
+    const walk = (x, depth) => {
+      if (x === null || x === undefined) return null;
+      const t = typeof x;
+      if (t === 'number') return num(x);
+      if (t === 'string' || t === 'boolean') return x;
+      if (t === 'bigint') return Number(x);
+      if (t !== 'object') return undefined;                       // functions, symbols
+      if (x.isObject3D || x.isMaterial || x.isBufferGeometry || x.isTexture || ArrayBuffer.isView(x) || x instanceof ArrayBuffer) return undefined;
+      const sys = systemName(x);
+      if (sys) return { system: sys };
+      if (isEntityLike(x)) return { id: x.id, type: x.type, x: num(x.x), y: num(x.y), z: num(x.z) };
+      if (seen.has(x) || depth >= maxDepth) return undefined;
+      seen.add(x);
+      if (typeof x.toJSON === 'function') { try { return walk(x.toJSON(), depth); } catch { return undefined; } }
+      if (Array.isArray(x)) {
+        const out = [];
+        for (let i = 0; i < x.length && i < JSON_ITEMS; i++) { const w = walk(x[i], depth + 1); out.push(w === undefined ? null : w); }
+        return out;
+      }
+      if (x instanceof Map || x instanceof Set) return {};          // like JSON.stringify
+      const out = {};
+      let n = 0;
+      for (const k of Object.keys(x)) {
+        if (n++ >= JSON_KEYS) break;
+        const w = walk(x[k], depth + 1);
+        if (w !== undefined) out[k] = w;
+      }
+      return out;
+    };
+    try { const r = walk(v, 0); return r === undefined ? null : r; } catch { return null; }
   };
   const target = () => {
     const t = game.interaction && game.interaction.target;
@@ -318,7 +354,7 @@ export function installTestApi(game) {
     audioStats: () => (game.audio && game.audio.stats ? game.audio.stats() : { voices: 0, byName: {} }),
 
     // ---------------- events ----------------
-    events: (name, limit = 20) => game.events.recent(name, limit).map((e) => ({ tick: e.tick, payload: jsonSafe(e.payload) })),
+    events: (name, limit = 20) => game.events.recent(name, limit).map((e) => ({ tick: e.tick, payload: jsonSafe(e.payload, EVENT_DEPTH) })),
     /** How many times an event was emitted in this PAGE session (never reset by startWorld): compare against a
      *  baseline taken at the start of a scenario, never against an absolute number. */
     eventCount: (name) => game.events.counts.get(name) || 0,

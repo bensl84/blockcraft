@@ -6,8 +6,9 @@ import './styles.css';
 import { EventBus } from './core/events.js';
 import { loadSettings, setSetting } from './core/settings.js';
 import {
-  BUILD_VERSION, DEFAULT_RULES, DEV, MAX_FRAME_DT, MAX_TICKS_PER_FRAME, RENDER, SURVIVAL_RULES, TICK_DT,
+  BUILD_VERSION, DEFAULT_RULES, DEV, MAX_FRAME_DT, MAX_TICKS_PER_FRAME, RENDER, TICK_DT,
 } from './core/constants.js';
+import { newWorldRules } from './core/worldrules.js';
 import { bindTextures } from './core/registry.js';
 import { mulberry32, randomSeed } from './core/math.js';
 import { applyGuiScale } from './core/dom.js';
@@ -90,8 +91,8 @@ const game = {
   },
   setDifficulty(d) {
     if (!game.meta || !['peaceful', 'easy', 'normal'].includes(d)) return;
+    // never rewrites a rule switch: Peaceful blocks monsters and hunger at run time (core/worldrules.js, judge FID-3)
     game.meta.difficulty = d;
-    if (d === 'peaceful') game.meta.rules.hostileMobs = false;
     game.events.emit('difficulty:changed', { difficulty: d });
   },
   setRule(key, value) {
@@ -268,8 +269,7 @@ function stepTicks(n) {
 function createWorldMeta(opts) {
   const mode = opts.mode === 'survival' ? 'survival' : 'creative';
   const difficulty = ['peaceful', 'easy', 'normal'].includes(opts.difficulty) ? opts.difficulty : 'peaceful';
-  const rules = { ...DEFAULT_RULES, ...(mode === 'survival' ? SURVIVAL_RULES : {}), ...(opts.rules || {}) };
-  if (difficulty === 'peaceful') { rules.hostileMobs = false; if (!(opts.rules && 'hunger' in opts.rules)) rules.hunger = false; }
+  const rules = newWorldRules(mode, difficulty, opts.rules);
   const now = Date.now();
   return {
     id: opts.id || 'w' + now.toString(36) + Math.floor(Math.random() * 46656).toString(36),

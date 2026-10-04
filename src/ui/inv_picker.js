@@ -6,6 +6,7 @@
 
 import { el } from '../core/dom.js';
 import { HOTBAR_SIZE } from '../core/constants.js';
+import { ruleInEffect } from '../core/worldrules.js';
 import { PICKER_TABS, creativePickerItems, getItem, maxStack } from '../data/items.js';
 import { flyIcon } from './inv_screens.js';
 import { iconPx, paintSlot } from './inv_slotview.js';
@@ -18,7 +19,7 @@ const memo = { tab: 0, pages: {} };
 export function pickerItems(game, tabId) {
   const types = game.entities && game.entities.types;
   return creativePickerItems(tabId, {
-    hostileMobs: !!(game.meta && game.meta.rules && game.meta.rules.hostileMobs),
+    hostileMobs: ruleInEffect(game.meta, 'hostileMobs'),   // monster eggs are refused on Peaceful anyway
     hasMob: (t) => !!(types && types.has && types.has(t)),
   });
 }

@@ -379,4 +379,89 @@ export default [
       t.assert(!(await t.eval(() => window.__game.game.interaction.targetEntity)), 'a stone wall still hides the pig');
     },
   },
+  {
+    // Judge KID-12: an event payload that carries a live mob (player:hurt's source) used to make events() walk the
+    // whole game: the Playwright process ran out of memory. Now the copy is bounded and the mob is a small stub.
+    name: 'lead-events-live-payload', requires: ['mobs', 'survival'],
+    async run(t) {
+      await t.call('startWorld', { ...FLAT, mode: 'survival', difficulty: 'easy', rules: { passiveMobs: false, hostileMobs: true, daylightCycle: false } });
+      await t.call('setFlying', false);
+      await t.call('setTime', 18000);
+      const base = await t.call('eventCount', 'player:hurt');
+      await t.eval(() => { const g = window.__game.game, p = g.player; g.mobs.spawnMob('zombie', p.x + 1.3, p.y, p.z); });
+      let hurt = false;
+      for (let i = 0; i < 20 && !hurt; i++) { await t.call('runTicks', 20); hurt = (await t.call('eventCount', 'player:hurt')) > base; }
+      t.assert(hurt, 'the zombie hit the player');
+      const t0 = Date.now();
+      const evs = await t.call('events', 'player:hurt', 20);
+      const ms = Date.now() - t0, size = JSON.stringify(evs).length;
+      // survival.damage's source is {entity} for a mob hit
+      const src = evs.map((e) => e.payload && e.payload.source && (e.payload.source.entity || e.payload.source)).find((x) => x && x.type === 'zombie');
+      t.note('events', { ms, size, source: src });
+      t.assert(ms < 3000 && size < 20000, `events('player:hurt') is quick and small (${ms} ms, ${size} chars)`);
+      t.assert(src && typeof src.id === 'number' && Number.isFinite(src.x), `the zombie source is a small stub ${JSON.stringify(src)}`);
+      // the other test API copies keep their full depth
+      const m = await t.call('meta');
+      t.assert(m && m.rules && m.rules.hostileMobs === true && typeof m.seed === 'number', 'meta() is still complete');
+    },
+  },
+  {
+    // Judge FID-3: Peaceful and back used to switch monsters off for good (setDifficulty wrote hostileMobs = false).
+    name: 'lead-difficulty-roundtrip', requires: ['mobs', 'survival'],
+    async run(t) {
+      await t.call('startWorld', { ...FLAT, seed: 5, mode: 'survival', difficulty: 'easy', rules: { passiveMobs: false } });
+      await t.call('setFlying', false);
+      t.assert((await t.call('meta')).rules.hostileMobs === true, 'a Survival Easy world starts with monsters on');
+      await t.call('setTime', 14000);
+      await t.call('setDifficulty', 'peaceful');
+      await t.call('runTicks', 600);
+      const monsters = () => t.eval(() => window.__game.game.entities.all().filter((e) => e.category === 'monster' && !e.removed).length);
+      const onPeaceful = await monsters();
+      await t.call('setDifficulty', 'easy');
+      const m = await t.call('meta');
+      t.assert(m.difficulty === 'easy' && m.rules.hostileMobs === true, `back on Easy the Monsters switch is still on (${JSON.stringify({ d: m.difficulty, h: m.rules.hostileMobs })})`);
+      let n = 0;
+      for (let i = 0; i < 12 && n === 0; i++) { await t.call('setTime', 18000); await t.call('runTicks', 100); n = await monsters(); }
+      t.note('monsters', { onPeaceful, afterEasy: n });
+      t.assert(onPeaceful === 0, `no monsters while Peaceful (${onPeaceful})`);
+      t.assert(n > 0, `monsters spawn again at night after Peaceful -> Easy (${n})`);
+    },
+  },
+  {
+    // Judge FID-11: survival worlds have weather; Survival Normal shows the big Respawn button after dying.
+    name: 'lead-survival-rules', requires: ['survival', 'menus', 'fx'],
+    async run(t) {
+      await t.call('startWorld', { ...FLAT, seed: 6, mode: 'survival', difficulty: 'normal', rules: { passiveMobs: false, hostileMobs: false } });
+      await t.call('setFlying', false);
+      const r = (await t.call('meta')).rules;
+      t.assert(r.weatherCycle === true && r.immediateRespawn === false && r.keepInventory === true, `Survival Normal rules ${JSON.stringify({ w: r.weatherCycle, i: r.immediateRespawn, k: r.keepInventory })}`);
+      // a real fall: 30 blocks up, flying off
+      const p = await t.call('pos');
+      await t.call('teleport', p.x, p.y + 30, p.z);
+      let dead = false;
+      for (let i = 0; i < 20 && !dead; i++) { await t.call('runTicks', 10); dead = await t.eval(() => !!window.__game.game.player.dead); }
+      t.assert(dead, 'the fall killed the player');
+      await t.call('waitFrames', 5);
+      t.assert(await t.call('uiOpen') === 'death', 'the death screen is open');
+      await t.call('runTicks', 60);
+      t.assert(await t.eval(() => !!window.__game.game.player.dead), 'no automatic respawn on Survival Normal');
+      await t.shot('lead-survival-death');
+      const btn = await t.page.$('.bc-death-respawn');
+      t.assert(!!btn, 'the big Respawn button is there');
+      const box = await btn.boundingBox();
+      t.assert(box && box.width >= 64 && box.height >= 64, `the Respawn button is big (${box && Math.round(box.width)} px)`);
+      await t.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      const back = await t.waitFor(() => { const g = window.__game.game; return !g.player.dead && g.player.health === 20 && !g.ui.current && g.state === 'playing'; }, null, 5000);
+      t.assert(back, 'a real click on Respawn brings the child back with full health');
+      // weather: the cycle runs in survival (the first rain comes within 18000 ticks)
+      let rain = false;
+      for (let i = 0; i < 19 && !rain; i++) { await t.call('runTicks', 1000); rain = await t.eval(() => window.__game.game.fx.weather.target > 0); }
+      t.assert(rain, 'it starts raining in a survival world');
+      // Survival Easy keeps the instant respawn; the kid world never rains by itself
+      await t.call('startWorld', { ...FLAT, seed: 7, mode: 'survival', difficulty: 'easy' });
+      t.assert((await t.call('meta')).rules.immediateRespawn === true, 'Survival Easy respawns at once');
+      await t.call('startWorld', FLAT);
+      t.assert((await t.call('meta')).rules.weatherCycle === false, 'the kid creative world has no weather cycle');
+    },
+  },
 ];

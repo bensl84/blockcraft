@@ -4,6 +4,7 @@
 
 import { el } from '../core/dom.js';
 import { DEFAULT_RULES, RENDER } from '../core/constants.js';
+import { PEACEFUL_OFF } from '../core/worldrules.js';
 import { iconImg } from './menu_art.js';
 import { actionButton, choice, iconButton, onPress, row, slider, toggle } from './menu_widgets.js';
 import { confirmBox } from './menu_worlds.js';
@@ -21,7 +22,7 @@ const RULE_ROWS = [
   ['fallDamage', 'Fall damage', ''],
   ['drowningDamage', 'Drowning', ''],
   ['fireDamage', 'Fire and lava hurt', ''],
-  ['hunger', 'Hunger', ''],
+  ['hunger', 'Hunger', 'Always off on Peaceful.'],
   ['keepInventory', 'Keep items after dying', ''],
   ['immediateRespawn', 'Respawn right away', 'Off shows a big Respawn button.'],
   ['dropItemsOnBreak', 'Broken blocks drop items', ''],
@@ -145,8 +146,10 @@ export function registerSettingsScreen(ctx) {
     section(c, 'World rules');
     for (const [key, label, hint] of RULE_ROWS) {
       if (!(key in DEFAULT_RULES)) continue;
-      c.append(row(label, keep(toggle(game, 'rule:' + key, () => !!(game.meta && game.meta.rules[key]), (v) => game.setRule(key, v),
-        { disabled: () => key === 'hostileMobs' && game.meta && game.meta.difficulty === 'peaceful' })), hint));
+      // Peaceful shows Monsters and Hunger off and greyed out; the switch keeps its value for Easy / Normal (FID-3)
+      const peacefulOff = () => PEACEFUL_OFF.includes(key) && !!game.meta && game.meta.difficulty === 'peaceful';
+      c.append(row(label, keep(toggle(game, 'rule:' + key, () => !!(game.meta && game.meta.rules[key]) && !peacefulOff(), (v) => game.setRule(key, v),
+        { disabled: peacefulOff })), hint));
     }
     c.append(row('Soft world border', keep(choice(game, 'rule:worldBorder', [256, 512, 1024, 2048].map((v) => ({ value: v, label: String(v) })),
       () => game.meta && game.meta.rules.worldBorder, (v) => game.setRule('worldBorder', v))), 'Blocks from spawn before thick fog gently turns your child around.'));

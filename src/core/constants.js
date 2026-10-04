@@ -169,17 +169,17 @@ export const DEFAULT_RULES = Object.freeze({
   mobGriefing: false,        // creepers do not break blocks
   keepInventory: true,
   immediateRespawn: true,
-  hostileMobs: false,        // forced false while difficulty === 'peaceful'
+  hostileMobs: false,        // no effect while difficulty === 'peaceful' (core/worldrules.js); kept as set
   passiveMobs: true,
   animalsCanDie: false,      // kid default: hit animals hop away with a squeak
-  hunger: false,             // forced on by survival presets (easy/normal)
+  hunger: false,             // on in survival worlds; no effect while difficulty === 'peaceful'
   worldBorder: 512,          // soft border radius from spawn (blocks)
   dropItemsOnBreak: false,   // creative never drops; survival presets turn this on
   voidRescue: true,          // falling out of the world = silent teleport to the surface (kid lane), never 'void' damage
 });
 /** Rules applied on top of DEFAULT_RULES when a survival world is created. */
 export const SURVIVAL_RULES = Object.freeze({
-  daylightCycle: true, fallDamage: true, drowningDamage: true, fireDamage: true, animalsCanDie: true,
+  daylightCycle: true, weatherCycle: true, fallDamage: true, drowningDamage: true, fireDamage: true, animalsCanDie: true,
   hunger: true, dropItemsOnBreak: true, hostileMobs: true, mobGriefing: false,
 });
 

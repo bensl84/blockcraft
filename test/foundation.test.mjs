@@ -322,3 +322,35 @@ test('save codec: RLE round trip + corruption detection', () => {
   assert.throws(() => decodeColumn(Uint8Array.from([1, 2, 3])));
   assert.throws(() => decodeColumn(encodeColumn(new Uint16Array(COLUMN_VOLUME)).slice(0, 4)));
 });
+
+test('world rules (judge FID-3, FID-11): difficulty never rewrites a switch; survival weather, Normal death screen', async () => {
+  const { newWorldRules, ruleInEffect, PEACEFUL_OFF } = await import('../src/core/worldrules.js');
+  const kid = newWorldRules('creative', 'peaceful');
+  assert.equal(kid.hostileMobs, false, 'the kid world has no monsters');
+  assert.equal(kid.weatherCycle, false, 'the kid world never rains by itself');
+  assert.equal(kid.immediateRespawn, true);
+  const easy = newWorldRules('survival', 'easy');
+  assert.equal(easy.weatherCycle, true, 'survival worlds have weather');
+  assert.equal(easy.immediateRespawn, true, 'Survival Easy respawns at once');
+  assert.equal(easy.keepInventory, true, 'items are kept (5-year-old)');
+  const normal = newWorldRules('survival', 'normal');
+  assert.equal(normal.immediateRespawn, false, 'Survival Normal shows the death screen');
+  assert.equal(normal.weatherCycle, true);
+  assert.equal(newWorldRules('survival', 'normal', { immediateRespawn: true }).immediateRespawn, true, 'explicit rules win');
+  // Survival Peaceful keeps the switches; Peaceful only blocks them while it lasts
+  const peace = newWorldRules('survival', 'peaceful');
+  assert.equal(peace.hostileMobs, true);
+  const meta = { difficulty: 'peaceful', rules: peace };
+  for (const k of PEACEFUL_OFF) assert.equal(ruleInEffect(meta, k), false, `${k} is off on Peaceful`);
+  // what game.setDifficulty does: only the difficulty changes (main.js); Peaceful -> Easy brings monsters back
+  meta.difficulty = 'easy';
+  assert.equal(ruleInEffect(meta, 'hostileMobs'), true, 'monsters come back on Easy');
+  assert.equal(ruleInEffect(meta, 'hunger'), true, 'hunger comes back on Easy');
+  meta.rules.hostileMobs = false;
+  assert.equal(ruleInEffect(meta, 'hostileMobs'), false, 'the Monsters switch still turns them off');
+  // main.js setDifficulty must not write any rule (it used to set hostileMobs = false on Peaceful for good)
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('setDifficulty(d) {'), src.indexOf('setRule(key, value) {'));
+  assert.ok(body.length > 0 && !/rules\.\w+\s*=/.test(body), 'setDifficulty does not rewrite rules');
+});
