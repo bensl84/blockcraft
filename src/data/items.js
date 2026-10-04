@@ -180,6 +180,7 @@ const EGG_PRIORITY = { cat: 'P1', horse: 'P1', zombie: 'P1', skeleton: 'P1', cre
 for (const [mob, colors] of Object.entries(EGGS)) {
   item(mob + '_spawn_egg', { tab: 'animals', icon: 'sprite:spawn_egg', colors, use: 'spawn_egg', mob, priority: EGG_PRIORITY[mob] || 'P0' });
 }
+for (const [mob, colors] of Object.entries({ cod: ['#c6a07a', '#e5d6b0'], tropical_fish: ['#f08a24', '#fff2e0'], squid: ['#2a4a6a', '#6a8aa8'], rabbit: ['#9a6a40', '#e8d0b0'], fox: ['#d8722c', '#f0e6d8'], bee: ['#f2c43a', '#3a2a1a'], enderman: ['#161616', '#0a0a0a'], slime: ['#5aba4a', '#3a8a30'], villager: ['#5a3a28', '#bd8b72'], iron_golem: ['#d8d0c4', '#74a332'] })) item(mob + '_spawn_egg', { tab: 'animals', icon: 'sprite:spawn_egg', colors, use: 'spawn_egg', mob, priority: 'P2' }); // MOBS lane, judge FID-6
 
 /* ------------------------------ kid creative picker (SPEC §8.2.4) ------------------------------ */
 /**

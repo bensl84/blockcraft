@@ -607,3 +607,147 @@ test('leads (P2): leash an animal, it follows the player, a long pull snaps the 
   assert.equal(cow.data.leashed, undefined, 'snapped');
   assert.ok(g.entities.ofType('item').some((e) => e.data.stack.item === 'lead'), 'lead dropped');
 });
+
+/* ------------------------------------------------------------------ judge round 1 */
+
+test('judge KID-3/6/7, FID-10, ROB-8: saddle ride, petting, kid horse, sheared dye, egg cap', () => {
+  const g = makeGame({ seed: 41 });
+  const pig = g.mobs.spawnMob('pig', 2.5, 4, 0.5);
+  g.mobs.useOn(pig.id, 'saddle');
+  assert.equal(g.player.riding, null, 'first saddle tap only saddles');
+  g.mobs.useOn(pig.id, 'saddle');
+  assert.equal(g.player.riding, pig.id, 'second tap with the saddle in hand rides');
+  g.input.held.add('descend'); g.step(2); g.input.held.clear();
+  const cow = g.mobs.spawnMob('cow', -3.5, 4, 0.5);
+  const r = g.mobs.useOn(cow.id, null);
+  assert.ok(r.ok && !(cow.data.love > 0) && cow.petTicks > 0, 'empty hand pets: no love, it stops to look');
+  assert.equal(g.events.counts.get('mob:petted'), 1);
+  g.step(20);
+  assert.ok(g.mobs.useOn(cow.id, 'dirt').ok, 'a block in hand pets too');
+  const horse = g.mobs.spawnMob('horse', 6.5, 4, 6.5);
+  g.mobs.useOn(horse.id, null);
+  assert.ok(horse.data.tamed && g.player.riding === horse.id, 'kid world: tamed on the first mount');
+  assert.ok(horse.wishTicks > 0, 'asks for a saddle');
+  g.input.held.add('jump'); g.step(2); g.input.held.clear();
+  assert.equal(g.player.riding, null, 'Space gets off an unsaddled horse');
+  const sheep = g.mobs.spawnMob('sheep', -6.5, 4, 6.5, { color: 'white' });
+  g.mobs.useOn(sheep.id, 'shears');
+  g.mobs.useOn(sheep.id, 'blue_dye');
+  assert.equal(sheep.data.color, 'blue', 'sheared sheep takes dye');
+  sheep.eatGrass();
+  assert.ok(!sheep.data.sheared && sheep.data.color === 'blue', 'regrows blue');
+  // egg cap: 300 eggs -> at most 64 living mobs
+  for (let i = 0; i < 300; i++) {
+    g.inventory.set(0, { item: 'pig_spawn_egg', count: 1 }); g.inventory.selected = 0;
+    g.mobs.useEgg('pig', { stack: g.inventory.getSelected(), hit: { x: (i % 20) - 10, y: 3, z: -20 - Math.floor(i / 20), nx: 0, ny: 1, nz: 0, face: 2 } });
+  }
+  const living = g.entities.all().filter((e) => e.def && !e.removed).length;
+  assert.ok(living <= 64 && living >= 60, `egg mobs capped (${living})`);
+  assert.ok(g.events.counts.get('mobs:eggRefused') > 200);
+  assert.deepEqual(g.errors, []);
+});
+
+test('judge FID-1: skeleton arrows hit a standing player (>= 1 per 3 arrows at 6/10/14 blocks)', () => {
+  for (const dist of [6, 10, 14]) {
+    const g = makeGame({ mode: 'survival', difficulty: 'normal', seed: 50 + dist, rules: { hostileMobs: true } });
+    g.time = { dayTime: 18000 };
+    g.mobs.spawnMob('skeleton', 0.5, 4, 0.5 - dist);
+    let arrows = 0, hits = 0;
+    g.events.on('entity:spawn', (e) => { if (e.type === 'arrow') arrows++; });
+    g.events.on('player:hurt', (e) => { if (e.cause === 'arrow') hits++; });
+    for (let i = 0; i < 200; i++) { g.player.health = 20; g.player.x = 0.5; g.player.z = 0.5; g.player.y = 4; g.step(); }
+    assert.ok(arrows >= 3 && hits * 3 >= arrows, `${dist} blocks: ${hits} hits / ${arrows} arrows`);
+  }
+});
+
+test('judge FID-12: XP from ores with drops, none by hand', () => {
+  const g = makeGame({ mode: 'survival', difficulty: 'easy', seed: 3 });
+  g.events.emit('block:broken', { x: 2, y: 4, z: 2, id: ID.diamond_ore, state: 0, by: 'player', drops: [{ item: 'diamond', count: 1 }] });
+  g.events.emit('block:broken', { x: 2, y: 4, z: 2, id: ID.coal_ore, state: 0, by: 'player', drops: [] });
+  const orbs = g.entities.ofType('xp_orb').reduce((n, e) => n + e.data.value, 0);
+  assert.ok(orbs >= 3 && orbs <= 7, `diamond ore XP 3-7 (${orbs})`);
+});
+
+test('judge FID-6: fish and squid swim in water, flop on land, schools spawn in water under their own cap', () => {
+  const g = makeGame({ seed: 7 });
+  g.world.fill(-6, 0, -6, 6, 3, 6, 'water');
+  const cod = g.mobs.spawnMob('cod', 0.5, 1.5, 0.5);
+  const squid = g.mobs.spawnMob('squid', 2.5, 1, 2.5);
+  const c0 = { x: cod.x, y: cod.y, z: cod.z };
+  let maxY = 0;
+  for (let i = 0; i < 400; i++) { g.step(); maxY = Math.max(maxY, cod.y + cod.height, squid.y); assert.ok(cod.inWater && squid.inWater, 'stays in the water'); }
+  assert.ok(Math.hypot(cod.x - c0.x, cod.y - c0.y, cod.z - c0.z) > 0.5, 'the cod swims about');
+  assert.ok(maxY < 4.05, `never leaves the water upward (${maxY.toFixed(2)})`);
+  const flop = g.mobs.spawnMob('tropical_fish', 10.5, 4, 10.5);
+  let jumped = 0;
+  for (let i = 0; i < 60; i++) { g.step(); jumped = Math.max(jumped, flop.y - 4); }
+  assert.ok(jumped > 0.3 && flop.health === 3, 'a fish on land flops and (kid world) is never hurt');
+  // spawning: water mobs in a lake, own cap, not counted as land creatures
+  const g2 = makeGame({ seed: 8 });
+  g2.world.fill(-96, 0, -96, 96, 3, 96, 'water');
+  let n = 0;
+  for (let i = 0; i < 80; i++) n += g2.mobs.spawner.spawnWaterGroup((i % 9) - 4, Math.floor(i / 9) - 4, 'natural');
+  const c = g2.mobs.counts();
+  assert.ok(n > 0 && c.water === n && c.water <= 12 && c.creature === 0, `water cap 12, separate from creatures (${JSON.stringify(c)})`);
+  assert.deepEqual(g.errors, []); assert.deepEqual(g2.errors, []);
+});
+
+test('judge FID-6: rabbit hops, fox naps by day, bee flies to flowers, villager trades an emerald, golem gives a poppy', () => {
+  const g = makeGame({ seed: 9 });
+  g.time = { dayTime: 6000 };
+  const rabbit = g.mobs.spawnMob('rabbit', 6.5, 4, 0.5);
+  g.inventory.set(0, { item: 'carrot', count: 3 }); g.inventory.selected = 0;
+  let hops = 0, prev = true;
+  for (let i = 0; i < 100; i++) { g.step(); if (prev && !rabbit.onGround && rabbit.vy > 0) hops++; prev = rabbit.onGround; }
+  assert.ok(hops >= 3 && Math.hypot(rabbit.x - 0.5, rabbit.z - 0.5) < 5, `rabbit hops to the carrot (${hops} hops)`);
+  g.inventory.set(0, null);
+  const fox = g.mobs.spawnMob('fox', -8.5, 4, -8.5);
+  let slept = false;
+  for (let i = 0; i < 2000 && !slept; i++) { g.step(); slept = fox.sleeping; }
+  assert.ok(slept, 'a fox naps in the daytime');
+  g.world.setBlock(12, 4, 12, ID.poppy, 0);
+  const bee = g.mobs.spawnMob('bee', 10.5, 5.5, 10.5);
+  let hovered = false, low = 99;
+  for (let i = 0; i < 1200 && !hovered; i++) { g.step(); hovered = bee.hover > 0; low = Math.min(low, bee.y); }
+  assert.ok(hovered && low > 3.9, `bee hovers over the poppy, never lands (${low.toFixed(2)})`);
+  const vil = g.mobs.spawnMob('villager', -2.5, 4, 3.5, { variant: 'farmer' });
+  assert.ok(g.mobs.useOn(vil.id, null).ok && vil.wishTicks > 0 && vil.shake > 0, 'no emerald: head shake + emerald picture');
+  g.mobs.useOn(vil.id, 'emerald');
+  assert.equal(g.events.counts.get('mobs:trade'), 1);
+  g.step(40);
+  assert.ok(['bread', 'carrot', 'apple'].some((k) => g.inventory.count(k) > 0), 'the gift reaches the child');
+  const golem = g.mobs.spawnMob('iron_golem', 3.5, 4, -4.5);
+  g.mobs.useOn(golem.id, null);
+  g.step(40);
+  assert.equal(g.inventory.count('poppy'), 1, 'the golem gives her a poppy');
+  assert.deepEqual(g.errors, []);
+});
+
+test('judge FID-6: enderman stare + arrow dodge, slime splits, golem fights monsters (survival)', () => {
+  const g = makeGame({ mode: 'survival', difficulty: 'normal', seed: 10, rules: { hostileMobs: true } });
+  g.time = { dayTime: 18000 };
+  const end = g.mobs.spawnMob('enderman', 0.5, 4, -9.5);
+  g.player.getLookDir = undefined;
+  g.player.pitch = Math.atan2(2.55 - 1.62, 10);   // look straight at its head
+  g.step(12);
+  assert.ok(end.angryTicks > 0, 'staring makes it angry');
+  const h = end.health;
+  assert.equal(end.hurt(6, { type: 'player', player: true, projectile: true }), false, 'arrows never land');
+  assert.equal(end.health, h);
+  assert.ok(g.events.counts.get('mobs:teleport') >= 1, 'it teleported away');
+  g.entities.remove(end, 'test');
+  g.player.pitch = 0;
+  const slime = g.mobs.spawnMob('slime', 6.5, 4, 6.5, { size: 4 });
+  assert.equal(slime.maxHealth, 16);
+  for (let i = 0; i < 8 && slime.deathTime === 0; i++) { slime.hurt(4, { type: 'player', player: true }); g.step(11); }
+  g.step(25);
+  const kids = g.entities.ofType('slime').filter((e) => !e.deathTime && !e.removed);
+  assert.ok(kids.length >= 2 && kids.length <= 4 && kids.every((k) => k.data.size === 2), `split into ${kids.length} size-2 slimes`);
+  for (const k of kids) g.entities.remove(k, 'test');
+  g.player.health = 20;
+  g.mobs.spawnMob('iron_golem', -6.5, 4, 0.5);
+  const zom = g.mobs.spawnMob('zombie', -10.5, 4, 0.5);
+  for (let i = 0; i < 300 && !zom.removed && zom.deathTime === 0; i++) { g.player.health = 20; g.step(); }
+  assert.ok(zom.removed || zom.deathTime > 0, 'the iron golem defeats the zombie');
+  assert.deepEqual(g.errors, []);
+});

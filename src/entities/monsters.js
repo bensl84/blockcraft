@@ -13,7 +13,7 @@ import { createSimpleMesh } from './mob_render.js';
 
 const DIFF = (g) => (g.meta ? g.meta.difficulty : 'peaceful');
 
-class Monster extends Mob {
+export class Monster extends Mob {
   constructor(game, type, x, y, z, opts) {
     super(game, type, x, y, z, opts);
     this.persistent = false;
@@ -104,7 +104,8 @@ export class Skeleton extends Monster {
       if (this.attackCooldown === 0) {
         this.attackCooldown = interval;
         const [a, b] = this.def.ranged.damage[diff] || [1, 3];
-        shootArrow(g, this, this.x, this.y + this.eyeHeight - 0.1, this.z, p.x, p.y + 1.2, p.z, 1.6, 6 - (diff === 'normal' ? 2 : 0), randInt(() => this.grand(), a, b));
+        // aim a third of the way up the body like Java's getY(0.3333); shootArrow adds the arc lift on top
+        shootArrow(g, this, this.x, this.y + this.eyeHeight - 0.1, this.z, p.x, p.y + (p.height || 1.8) * 0.3333, p.z, 1.6, 6 - (diff === 'normal' ? 2 : 0), randInt(() => this.grand(), a, b));
       }
     }
     return true;
@@ -233,8 +234,9 @@ export class Arrow extends Entity {
       const p = game.player;
       let pt = null;
       if (!this.fromPlayer && p && !p.dead) {
-        const hw = (p.width || 0.6) / 2 + 0.1;
-        pt = rayBox(this.x, this.y, this.z, dx, dy, dz, p.x - hw, p.y - 0.1, p.z - hw, p.x + hw, p.y + (p.height || 1.8) + 0.1, p.z + hw);
+        // the player's box grows by 0.3 on every side for arrows (Java inflates the target box by 0.3)
+        const hw = (p.width || 0.6) / 2 + 0.3;
+        pt = rayBox(this.x, this.y, this.z, dx, dy, dz, p.x - hw, p.y - 0.3, p.z - hw, p.x + hw, p.y + (p.height || 1.8) + 0.3, p.z + hw);
         if (pt !== null && pt > sp) pt = null;
       }
       const blockT = this.blockHit(dx, dy, dz, sp);
@@ -244,7 +246,7 @@ export class Arrow extends Entity {
         game.entities.remove(this, 'hit'); return;
       }
       if (hit && entT < blockT) {
-        hit.entity.hurt(this.damage, { type: this.fromPlayer ? 'player' : 'mob', player: this.fromPlayer, entity: this.shooter || this });
+        hit.entity.hurt(this.damage, { type: this.fromPlayer ? 'player' : 'mob', player: this.fromPlayer, entity: this.shooter || this, projectile: true });
         game.entities.remove(this, 'hit'); return;
       }
       if (blockT !== Infinity) {

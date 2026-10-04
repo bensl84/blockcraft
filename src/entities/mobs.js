@@ -11,16 +11,25 @@ import { registerEntityType } from './entity.js';
 import { registerEntityInteract, registerItemUse, registerPreUse, hooks } from '../core/hooks.js';
 import { mobTypeDef } from './mob.js';
 import { ANIMAL_CLASSES } from './animals.js';
+import { MORE_CLASSES } from './more_mobs.js';
 import { Arrow, MONSTER_CLASSES, fireArrow } from './monsters.js';
 import { Boat, XpOrb, waterSurface } from './vehicles.js';
 import { registerItemEntityType } from './item_entity.js';
 import { createSpawner } from './spawning.js';
+import { createXpSources } from './xp_sources.js';
 import { splitXp } from './mob_ai.js';
 import { renderCacheStats } from './mob_render.js';
 import { raycast } from '../player/raycast.js';
 import { lookDir } from '../core/math.js';
 
-const CLASSES = { ...ANIMAL_CLASSES, ...MONSTER_CLASSES };
+const CLASSES = { ...ANIMAL_CLASSES, ...MONSTER_CLASSES, ...MORE_CLASSES };
+
+/**
+ * Spawn-egg cap (judge ROB-8): eggs bypass the natural-spawn caps, and mashing the pig egg on the default hotbar
+ * made 200+ pigs (2.6 ms mob tick, 26 fps at 6x CPU throttle). An egg is refused (puff + soft sound, the egg is
+ * kept) while EGG_CAP_NEAR living mobs are within EGG_CAP_RADIUS blocks of the player or EGG_CAP_LOADED are loaded.
+ */
+export const EGG_CAP_NEAR = 64, EGG_CAP_RADIUS = 48, EGG_CAP_LOADED = 100;
 
 /** Register every entity type this lane owns (idempotent; safe in Node tests). */
 export function registerMobEntityTypes() {
@@ -34,6 +43,7 @@ export function registerMobEntityTypes() {
 /** @returns {object} Mobs system (game.mobs) */
 export function createMobsSystem(game) {
   const spawner = createSpawner(game);
+  const xpSources = createXpSources(game);
 
   /**
    * The ray the player aims with: interaction's cursor ray (the kid free cursor or screen centre), else the look
@@ -62,6 +72,7 @@ export function createMobsSystem(game) {
       const def = MOBS[type];
       if (def.category === 'monster' && game.meta && game.meta.difficulty === 'peaceful') return false;
       const pt = placementPoint(ctx);
+      if (!sys.eggRoom()) { sys.refuseEgg(pt.x, pt.y, pt.z); if (game.player && game.player.swing) game.player.swing(); return true; }
       const e = sys.spawnMob(type, pt.x, pt.y, pt.z, {});
       if (!e) return false;
       if (e.touch) e.touch();
@@ -110,8 +121,10 @@ export function createMobsSystem(game) {
   const sys = {
     name: 'mobs',
     spawner,
+    xpSources,
     init() {
       registerMobEntityTypes();
+      xpSources.init();
       const interact = (ctx) => (ctx.entity && ctx.entity.interact ? !!ctx.entity.interact(ctx) : false);
       for (const type of Object.keys(CLASSES)) registerEntityInteract(type, interact);
       registerEntityInteract('boat', interact);
@@ -154,7 +167,29 @@ export function createMobsSystem(game) {
       return game.entities.spawn(type, x, y, z, o);
     },
 
-    /** Counts by category within the loaded area: {creature, monster}. */
+    /**
+     * Room for one more egg mob? False while EGG_CAP_NEAR living mobs are within EGG_CAP_RADIUS blocks of the
+     * player, or EGG_CAP_LOADED are loaded at all (ROB-8).
+     */
+    eggRoom() {
+      const p = game.player;
+      let near = 0, loaded = 0;
+      const r2 = EGG_CAP_RADIUS * EGG_CAP_RADIUS;
+      game.entities.forEach((e) => {
+        if (!e.def || e.removed || e.deathTime > 0) return;
+        loaded++;
+        if (!p || (e.x - p.x) ** 2 + (e.y - p.y) ** 2 + (e.z - p.z) ** 2 <= r2) near++;
+      });
+      return near < EGG_CAP_NEAR && loaded < EGG_CAP_LOADED;
+    },
+    /** A refused egg: a little puff where the mob would have appeared and a soft sound; the egg is not used up. */
+    refuseEgg(x, y, z) {
+      if (game.fx && game.fx.spawnParticles) game.fx.spawnParticles('poof', x, y + 0.4, z, { count: 6, spread: 0.25 });
+      game.events.emit('sound', { name: 'entity.poof', x, y, z, volume: 0.35, pitch: 1.5 });
+      game.events.emit('mobs:eggRefused', { x, y, z });
+    },
+
+    /** Counts by category within the loaded area: {creature, monster, water} (water mobs are not in creature). */
     counts() { return spawner.counts(); },
 
     /** Experience orbs worth `amount` points (P1). */
@@ -189,12 +224,15 @@ export function createMobsSystem(game) {
       if (!e || !e.hurt) return false;
       return e.hurt(amount, { type: 'player', player: true, crit: false });
     },
+    /** Test/debug: use a spawn egg of `type` exactly like the item-use hook (ctx: {stack, hit?...}). */
+    useEgg(type, ctx) { return spawnEgg(type)(ctx); },
     populatedCount() { return spawner.populated.size; },
     renderStats() { return renderCacheStats(); },
 
     tick() {
       if (!game.meta) return;
       spawner.tick();
+      if (!game.isCreative()) xpSources.tick();
       const p = game.player;
       if (p && p.riding) {
         const m = game.entities.get(p.riding);
