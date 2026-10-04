@@ -4,6 +4,15 @@ Branch `lane/menus` · worktree `C:\Users\BSLeo\AppData\Roaming\Claude\scratch-w
 
 <!-- newest first: date · what changed · commands run + results (copy the PASS/FAIL lines) · remaining · blockers · spec conflicts -->
 
+## 2026-10-04 · Judge round 1 fixes (KID-9, ROB-2, ROB-5, POL-14)
+
+- **KID-9** `src/save/autosave.js` + `storage.js`: block changes with cause `explosion` / `undo` / `redo` (and the `explosion` / `kid:undo` events) are saved 0.4 s after they settle (`AUTOSAVE_BULK_MS`), not 2.5 s. Repro `.tmp/menus-fix/kid9.mjs` (blast, autosave, Undo with the real `u` key, renderer crash via CDP `Page.crash` 0.5 / 1 s later, reopen): before `afterReopenDiff:61` (crater back), after `afterReopenDiff:0` at both 0.5 s and 1 s.
+- **ROB-2** new `src/save/worldlock.js`: Web Locks `blockcraft-world-<id>` (`ifAvailable`) held from world:ready (menus claim it before loading) to world:exit / pagehide (re-claimed on bfcache pageshow); BroadcastChannel ping fallback. `menus.loadWorld` refuses a held world and opens the new `worldBusy` screen (world picture + lock + two-windows icon, big Back). A world opened past the menus (test API, restore) emits `save:conflict`, is never saved, and goes to `worldBusy`. New save members: `claimWorld(id)`, `releaseWorld()`, `conflictId`. `.tmp/menus-fix/lock.mjs` 9/9 PASS (file://, real clicks, tab 2 Play + world card refused, tab 1 renderer crash frees the lock, gold block survives, Save & Title frees it).
+- **ROB-5** `backends.js`: no 4 s timeout; a slow open is waited for, one extra open after 6 s, memory only after two real errors; `globalIdb()` wraps the throwing `indexedDB` getter. `storage.js`: init waits at most 1.5 s, then every world call waits (`isReady`, `whenReady()`); memory fallback sets `storageProblem` ('blocked' | 'error') and emits `save:storage`. Title Play shows the loading layer while the database opens; title banner (new `nosave` icon) when saving is off. `.tmp/menus-fix/rob5.mjs` 6/6 PASS (9 s open: same world resumed on idb; storage blocked: memory + banner + Play works; no banner normally).
+- **POL-14** `menu_styles.css`: the "+" card is the opaque `--panel` bevelled card with a dashed inner frame and a pulsing green plus; the header icon sits on a bevelled grey badge instead of the dark plate.
+- New events: `save:conflict {id}`, `save:storage {available, problem}`. New icons: `windows`, `nosave`. New screen: `worldBusy`.
+- `npm run test:unit` 237/237 (6 new menus tests). `node tools/smoke.mjs --tag menus` `{"PASS":160,"SKIP":5}`; `--touch --scenario menus-touch` PASS.
+
 ## 2026-10-03 · MENUS phase 2: merged the real CORE, verified in real gameplay
 
 ### What changed

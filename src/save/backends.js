@@ -15,37 +15,62 @@ export const DB_VERSION = 1;
 
 const req = (r) => new Promise((resolve, reject) => { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
 
-/** IndexedDB backend. `idb` defaults to the global indexedDB. */
-export function createIdbBackend(idb = typeof indexedDB !== 'undefined' ? indexedDB : null, opts = {}) {
+/** The global indexedDB, or null. Reading it can throw (storage blocked by the browser): never let that escape. */
+export function globalIdb() {
+  try { return typeof indexedDB !== 'undefined' && indexedDB ? indexedDB : null; } catch { return null; }
+}
+
+/**
+ * IndexedDB backend. `idb` defaults to the global indexedDB.
+ * open() never gives up on a SLOW database (cold disk, another tab finishing an upgrade): it keeps waiting, and
+ * after `retryAfterMs` without an answer it issues one more open request; whichever answers first wins (judge
+ * ROB-5: a 4 s timeout used to fall back to memory, hide every world and make Play create a new one).
+ * It resolves false only on a real error (open throws or both requests fail). `lastError` says why.
+ */
+export function createIdbBackend(idb = globalIdb(), opts = {}) {
   let db = null;
-  const timeoutMs = opts.timeoutMs ?? 4000;
+  const retryAfterMs = opts.retryAfterMs ?? 6000;
+  let opening = null;
   const be = {
     kind: 'idb',
+    lastError: null,
     get isOpen() { return !!db; },
     open() {
       if (db) return Promise.resolve(true);
       if (!idb) return Promise.resolve(false);
-      return new Promise((resolve) => {
-        let done = false;
-        const finish = (v) => { if (!done) { done = true; resolve(v); } };
-        const timer = setTimeout(() => finish(false), timeoutMs);
-        let r;
-        try { r = idb.open(DB_NAME, DB_VERSION); } catch { clearTimeout(timer); finish(false); return; }
-        r.onupgradeneeded = () => {
-          const d = r.result;
-          if (!d.objectStoreNames.contains('worlds')) d.createObjectStore('worlds', { keyPath: 'id' });
-          if (!d.objectStoreNames.contains('columns')) d.createObjectStore('columns', { keyPath: 'key' }).createIndex('worldId', 'worldId', { unique: false });
+      if (opening) return opening;
+      opening = new Promise((resolve) => {
+        let done = false, tries = 0, failed = 0, timer = null;
+        const finish = (v) => { if (done) return; done = true; if (timer) clearTimeout(timer); opening = null; resolve(v); };
+        const attempt = () => {
+          tries++;
+          let r;
+          try { r = idb.open(DB_NAME, DB_VERSION); } catch (err) { be.lastError = (err && err.name) || 'open failed'; fail(); return; }
+          r.onupgradeneeded = () => {
+            const d = r.result;
+            if (!d.objectStoreNames.contains('worlds')) d.createObjectStore('worlds', { keyPath: 'id' });
+            if (!d.objectStoreNames.contains('columns')) d.createObjectStore('columns', { keyPath: 'key' }).createIndex('worldId', 'worldId', { unique: false });
+          };
+          r.onsuccess = () => {
+            if (done) { try { r.result.close(); } catch { /* ignore */ } return; }
+            db = r.result;
+            db.onversionchange = () => { try { db.close(); } catch { /* ignore */ } db = null; };
+            finish(true);
+          };
+          r.onerror = (e) => { be.lastError = (r.error && r.error.name) || 'open error'; if (e && e.preventDefault) e.preventDefault(); fail(); };
+          r.onblocked = () => { /* another tab holds an old version: keep waiting, it answers once that tab lets go */ };
         };
-        r.onsuccess = () => {
-          clearTimeout(timer);
-          if (done) { try { r.result.close(); } catch { /* ignore */ } return; }
-          db = r.result;
-          db.onversionchange = () => { try { db.close(); } catch { /* ignore */ } db = null; };
-          finish(true);
+        const fail = () => {
+          failed++;
+          if (done) return;
+          if (tries < 2) { if (timer) clearTimeout(timer); timer = setTimeout(attempt, 300); return; }  // retry once
+          if (failed >= tries) finish(false);
         };
-        r.onerror = () => { clearTimeout(timer); finish(false); };
-        r.onblocked = () => { /* another tab holds an old version; wait for the timeout */ };
+        attempt();
+        // no answer yet: ask once more (the first request stays alive too)
+        timer = setTimeout(() => { timer = null; if (!done && tries < 2) attempt(); }, retryAfterMs);
       });
+      return opening;
     },
     write({ metas = [], columns = [], deleteMetaIds = [], deleteColumnKeys = [] } = {}) {
       if (!db) return Promise.reject(new Error('database not open'));

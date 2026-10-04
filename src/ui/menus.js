@@ -2,7 +2,10 @@
 // Registers screens with game.ui: 'title' (original logo, parallax scenery, huge pulsing Play = resume the last
 // world or create a kid world, a worlds picture button, a dull grown-ups gear), 'worlds' + 'newWorld'
 // (menu_worlds.js), 'pause' (big Resume, Home, Save & Title, dull gear -> parent gate -> settings),
-// 'settings' (menu_settings.js, parent area), 'death' (big Respawn; not used with rules.immediateRespawn).
+// 'settings' (menu_settings.js, parent area), 'death' (big Respawn; not used with rules.immediateRespawn),
+// 'worldBusy' (the world is open in another window: its picture, a lock, a big Back; judge ROB-2).
+// Title banner (judge ROB-5): when saving is off in this browser, a picture plate tells the parent to use Export.
+// Play waits for a slow database behind the loading screen; it never makes a new world while it is still opening.
 // Own layers: the loading screen (Z.LOADING; shown on 'world:starting', progress from 'world:progress', hidden on
 // 'world:ready') and the classic-scheme "click to play" hint. No reading needed on any kid path.
 
@@ -74,6 +77,7 @@ export function createMenusSystem(game) {
       registerNewWorldScreen(ctx);
       registerPause();
       registerDeath();
+      registerBusy();
       registerSettingsScreen(ctx);
       buildLoading();
       buildHint();
@@ -97,6 +101,12 @@ export function createMenusSystem(game) {
         game.ui.open('death');
       });
       game.events.on('player:respawn', () => { if (game.ui.current === 'death') game.ui.close('death'); });
+      // another window had this world open after all (test API, restore, bfcache): leave it without saving
+      game.events.on('save:conflict', (e) => {
+        const meta = game.meta && e && game.meta.id === e.id ? { ...game.meta } : null;
+        game.exitToTitle().catch((err) => game.reportError(err, 'menus conflict exit')).then(() => game.ui.open('worldBusy', { meta }));
+      });
+      game.events.on('save:storage', () => { if (game.ui.current === 'title') updateStorageBanner(); });
       game.events.on('input:pointerLock', (e) => {
         if (e && e.locked === false && game.settings.controls === 'classic' && game.state === 'playing' && !game.ui.current && !isParentGateOpen()) game.ui.open('pause');
       });
@@ -121,11 +131,19 @@ export function createMenusSystem(game) {
       if (busy || game.meta || game.state === 'loading') return Promise.resolve(false);
       busy = true;
       return (async () => {
+        // a slow database (cold disk): wait for it behind the loading screen, never guess "no worlds"
+        if (game.save.isReady === false) {
+          showLoading(null);
+          await game.save.whenReady().catch(() => {});
+        }
         const worlds = await game.save.listWorlds().catch(() => []);
         const last = game.settings.lastWorldId && worlds.find((w) => w.id === game.settings.lastWorldId);
         if (last) return menus.loadWorld(last.id, true);
         return menus.startNew(newWorldOptions('default', 'creative', worlds.map((w) => w.name)), true);
-      })().finally(() => { busy = false; });
+      })().finally(() => {
+        busy = false;
+        if (!game.meta && game.state !== 'loading') hideLoading();
+      });
     },
 
     /** Start a new world from startWorld options. Resolves true when playing. */
@@ -138,11 +156,21 @@ export function createMenusSystem(game) {
     async loadWorld(id, inner = false) {
       if (!inner && (busy || game.state === 'loading')) return false;
       try {
+        // one window per world: another tab or window playing it would overwrite this one's blocks (ROB-2)
+        if (game.save.claimWorld && !(await game.save.claimWorld(id))) {
+          const metas = await game.save.listWorlds().catch(() => []);
+          hideLoading();
+          game.ui.open('worldBusy', { meta: metas.find((m) => m.id === id) || null });
+          return false;
+        }
         const data = await game.save.loadWorld(id);
-        if (!data) { game.ui.open('worlds'); return false; }
+        if (!data) { if (game.save.releaseWorld) game.save.releaseWorld(); game.ui.open('worlds'); return false; }
         await game.startWorld(data);
         return true;
-      } catch (err) { return startFailed(err); }
+      } catch (err) {
+        if (!game.meta && game.save.releaseWorld) game.save.releaseWorld();
+        return startFailed(err);
+      }
     },
 
     /** (MENUS addition) open the parent gate, then settings. */
@@ -181,6 +209,7 @@ export function createMenusSystem(game) {
           el('div', { class: 'bc-mtitle-play' }, [play]),
           el('div', { class: 'bc-mtitle-low' }, [worlds]),
           gear,
+          storageBanner(),
           el('div', { class: 'bc-mtitle-ver', text: `v${game.version}` }),
         ]);
         ctx.attachBackdrop(node);
@@ -196,6 +225,22 @@ export function createMenusSystem(game) {
       },
       close() { ctx.hide(node); node = null; },
     });
+  }
+
+  /** Banner for the parent when this browser does not keep worlds (storage blocked or broken). */
+  function storageBanner() {
+    const sv = game.save;
+    const off = sv && sv.isReady !== false && sv.available === false;
+    const b = el('div', { class: 'bc-panel bc-mstorage' + (off ? '' : ' bc-hidden'), 'data-banner': 'storage', role: 'note' }, [
+      iconImg('nosave', 48),
+      el('div', { class: 'bc-mstorage-text', text: 'Saving is off in this browser. Worlds last until this page closes - grown-ups can keep one with Export (gear).' }),
+    ]);
+    return b;
+  }
+  function updateStorageBanner() {
+    const old = root && root.querySelector('[data-banner=storage]');
+    if (!old) return;
+    old.replaceWith(storageBanner());
   }
 
   /** Draw the new-world pictures in small idle slices after the title shows, so the + screen opens instantly. */
@@ -262,6 +307,37 @@ export function createMenusSystem(game) {
       },
       close() { ctx.hide(node); node = null; },
     });
+  }
+
+  /* ---------------------------------------------------------------- world open in another window */
+  function registerBusy() {
+    let node = null;
+    const back = () => game.ui.open('title');
+    game.ui.register('worldBusy', {
+      owner: 'menus', pausesGame: false, escClose: false,
+      open(opts = {}) {
+        const meta = opts.meta || null;
+        const pic = meta && (meta.thumbnail || pictureURL('preset', meta.preset || 'default'));
+        const btn = iconButton(game, { icon: 'back', px: 72, cls: 'bc-btn-play bc-busy-back', action: 'back', label: 'Back', onPress: back });
+        node = el('div', { class: 'bc-screen bc-mscreen bc-mbusy', 'data-screen': 'worldBusy' }, [
+          el('div', { class: 'bc-panel bc-mbusy-panel' }, [
+            el('div', { class: 'bc-mbusy-pics' }, [
+              el('div', { class: 'bc-mbusy-world' }, [
+                pic ? el('img', { class: 'bc-mbusy-img', src: pic, alt: '', draggable: 'false' }) : iconImg('worlds', 96),
+                el('div', { class: 'bc-mbusy-lock' }, [iconImg('lock', 56)]),
+              ]),
+              iconImg('windows', 96, 'bc-mbusy-windows'),
+            ]),
+            el('div', { class: 'bc-mbusy-text', text: 'This world is open in another window.' }),
+            btn,
+          ]),
+        ]);
+        ctx.attachBackdrop(node);
+        ctx.show(node);
+      },
+      close() { ctx.hide(node); node = null; },
+    });
+    game.events.on('input:action', (e) => { if (e.down && e.action === 'pause' && game.ui.current === 'worldBusy') back(); });
   }
 
   /* ---------------------------------------------------------------- loading */

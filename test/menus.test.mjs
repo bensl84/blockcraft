@@ -16,8 +16,9 @@ import {
   GATE_HOLD_MS, GateMachine, MODE_CHOICES, PRESET_CHOICES, cleanWorldName, makeSum, makeWorldName, modeKeyOf,
   newWorldOptions, pageCount, pageSlice, pickerGrid,
 } from '../src/ui/menu_logic.js';
-import { AUTOSAVE_DEBOUNCE_MS, AUTOSAVE_MAX_MS, AutosaveScheduler } from '../src/save/autosave.js';
-import { createMemoryBackend } from '../src/save/backends.js';
+import { AUTOSAVE_BULK_MS, AUTOSAVE_DEBOUNCE_MS, AUTOSAVE_MAX_MS, AutosaveScheduler } from '../src/save/autosave.js';
+import { createIdbBackend, createMemoryBackend } from '../src/save/backends.js';
+import { createWorldLock } from '../src/save/worldlock.js';
 import { createSaveSystem } from '../src/save/storage.js';
 import { decodeWorldFile, encodeWorldFile, fromBase64, toBase64, worldFileName } from '../src/save/worldfile.js';
 
@@ -485,4 +486,143 @@ test('save + real world module: an edit survives save -> load -> reopen (CONTRAC
   for (let i = 0; i < 3000 && !w.isColumnLoaded(0, 0); i++) w.frame(game, 0.016);
   assert.equal(w.getBlock(2, 4, 2), ID.gold_block, 'the edit came back from the save');
   w.close();
+});
+
+/* ------------------------------------------------------------------ judge round 1 (KID-9, ROB-2, ROB-5) */
+test('autosave KID-9: an explosion / undo batch is saved 0.4 s after it settles, not 2.5 s', () => {
+  const s = new AutosaveScheduler();
+  for (let t = 0; t <= 50; t += 5) s.noteBlockChange(1000 + t, true);
+  assert.equal(s.due(1050 + AUTOSAVE_BULK_MS - 1), null);
+  assert.equal(s.due(1050 + AUTOSAVE_BULK_MS), 'bulk');
+  s.saved();
+  // an ordinary edit, then the 'explosion' / 'kid:undo' event marks it as a batch
+  s.noteBlockChange(5000);
+  assert.equal(s.due(5000 + AUTOSAVE_BULK_MS), null);
+  s.markBulk();
+  assert.equal(s.due(5000 + AUTOSAVE_BULK_MS), 'bulk');
+  // markBulk with nothing changed does nothing
+  const s2 = new AutosaveScheduler();
+  s2.markBulk();
+  assert.equal(s2.due(100000), null);
+});
+
+function fakeLocks() {
+  const held = new Set();
+  return {
+    held,
+    request(name, opts, cb) {
+      if (held.has(name)) return Promise.resolve(cb(null));
+      held.add(name);
+      return Promise.resolve(cb({ name })).then(() => { held.delete(name); });
+    },
+  };
+}
+
+test('world lock ROB-2: a second window cannot claim an open world until the first releases it', async () => {
+  const locks = fakeLocks();
+  const a = createWorldLock({ locks, BroadcastChannel: null });
+  const b = createWorldLock({ locks, BroadcastChannel: null });
+  assert.equal(await a.claim('w1'), true);
+  assert.equal(await a.claim('w1'), true, 'claiming again is fine');
+  assert.equal(await b.claim('w1'), false, 'open in another window');
+  assert.equal(await b.claim('w2'), true, 'another world is free');
+  a.release();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(await b.claim('w1'), true, 'free after release (b let go of w2)');
+  assert.equal(locks.held.has('blockcraft-world-w2'), false);
+  // no Web Locks and no BroadcastChannel: the old behaviour (always allowed)
+  const c = createWorldLock({ locks: null, BroadcastChannel: null });
+  assert.equal(await c.claim('w1'), true);
+});
+
+test('world lock ROB-2: BroadcastChannel fallback answers "open" for the held world', async () => {
+  const chans = [];
+  class FakeBC {
+    constructor() { this.l = []; this.onmessage = null; chans.push(this); }
+    postMessage(data) { for (const c of chans) if (c !== this) setTimeout(() => { if (c.onmessage) c.onmessage({ data }); for (const f of c.l) f({ data }); }, 1); }
+    addEventListener(_, f) { this.l.push(f); }
+    removeEventListener(_, f) { this.l = this.l.filter((x) => x !== f); }
+  }
+  const a = createWorldLock({ locks: null, BroadcastChannel: FakeBC });
+  const b = createWorldLock({ locks: null, BroadcastChannel: FakeBC });
+  assert.equal(await a.claim('w1'), true);
+  assert.equal(await b.claim('w1'), false);
+  a.release();
+  assert.equal(await b.claim('w1'), true);
+});
+
+test('save ROB-2: a world another window has open is never saved here (save:conflict)', async () => {
+  const locks = fakeLocks();
+  const other = createWorldLock({ locks, BroadcastChannel: null });
+  assert.equal(await other.claim('w1'), true);
+  const be = createMemoryBackend();
+  const events = new EventBus();
+  const game = { events, state: 'playing', settings: { lastWorldId: null }, setSetting(k, v) { game.settings[k] = v; }, reportError() {}, meta: null, world: fakeWorld(), renderer: null, systems: [] };
+  game.save = createSaveSystem(game, { backend: be, worldLock: createWorldLock({ locks, BroadcastChannel: null }) });
+  await game.save.init(game);
+  let conflict = null;
+  events.on('save:conflict', (e) => { conflict = e; });
+  openWorld(game, 'w1');
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(conflict, { id: 'w1' });
+  assert.equal(await game.save.saveNow('test'), false);
+  assert.equal(be.worlds.size, 0, 'nothing written');
+  assert.equal(await game.save.claimWorld('w1'), false);
+  other.release();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(await game.save.claimWorld('w1'), true);
+});
+
+/** Fake indexedDB: each open request answers after delays[i] ms (null = never; 'error' = fails; 'throw'). */
+function fakeIdb(delays) {
+  let n = 0;
+  const db = { objectStoreNames: { contains: () => true }, close() {} };
+  return {
+    opens: () => n,
+    open() {
+      const d = delays[n++];
+      const r = { result: null, error: null };
+      if (d === 'throw') throw new DOMException('blocked', 'SecurityError');
+      if (d !== null && d !== undefined) {
+        setTimeout(() => {
+          if (d === 'error') { r.error = { name: 'UnknownError' }; if (r.onerror) r.onerror({}); return; }
+          r.result = db; if (r.onsuccess) r.onsuccess();
+        }, d === 'error' ? 1 : d);
+      }
+      return r;
+    },
+  };
+}
+
+test('IndexedDB open ROB-5: slow is waited for (one retry), only a real error gives up', async () => {
+  // first request hangs, the retry answers: open() is true (it never times out to memory)
+  const slow = fakeIdb([null, 30]);
+  assert.equal(await createIdbBackend(slow, { retryAfterMs: 20 }).open(), true);
+  assert.equal(slow.opens(), 2);
+  // first request is just slow (longer than the retry): whichever answers first wins
+  const slow2 = fakeIdb([60, null]);
+  assert.equal(await createIdbBackend(slow2, { retryAfterMs: 20 }).open(), true);
+  // two real errors -> false with a reason
+  const be3 = createIdbBackend(fakeIdb(['error', 'error']), { retryAfterMs: 1000 });
+  assert.equal(await be3.open(), false);
+  assert.equal(be3.lastError, 'UnknownError');
+  // open() throwing (storage blocked) never escapes
+  const be4 = createIdbBackend(fakeIdb(['throw', 'throw']), { retryAfterMs: 1000 });
+  assert.equal(await be4.open(), false);
+  assert.equal(be4.lastError, 'SecurityError');
+});
+
+test('save ROB-5: no usable IndexedDB -> memory backend, storageProblem set, save:storage emitted', async () => {
+  const events = new EventBus();
+  const game = { events, state: 'title', settings: { lastWorldId: null }, setSetting() {}, reportError() {}, meta: null, world: fakeWorld(), renderer: null, systems: [] };
+  let ev = null;
+  events.on('save:storage', (e) => { ev = e; });
+  game.save = createSaveSystem(game, { worldLock: null });
+  await game.save.init(game);
+  assert.equal(game.save.isReady, true);
+  assert.equal(game.save.backend, 'memory');
+  assert.equal(game.save.available, false);
+  assert.equal(game.save.storageProblem, 'blocked', 'node has no indexedDB');
+  assert.deepEqual(ev, { available: false, problem: 'blocked' });
+  assert.deepEqual(await game.save.listWorlds(), []);
 });
