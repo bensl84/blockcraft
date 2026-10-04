@@ -82,6 +82,11 @@ export function createInteractionSystem(game) {
   let attackOnEntity = false;
   /** How far behind a grass tuft or flower an entity still wins the target (blocks). */
   const SEE_THROUGH_PLANT = 1.5;
+  /**
+   * Kid scheme, block in hand: how far behind a grass tuft or flower the solid face may lie and still take the tap
+   * (blocks along the ray). A tap 6 blocks out meets a tuft ~3 blocks before the ground at the usual -20..-30 deg view.
+   */
+  const PLACE_THROUGH_PLANT = 4;
   let useRepeat = 0;
   let useRepeatPlaces = false;
   // targeting scratch (allocation-free per frame)
@@ -277,6 +282,11 @@ export function createInteractionSystem(game) {
 
   const EYE = { x: 0, y: 0, z: 0 };
   const RAY_OPTS = { out: hitOut };
+  const passOut = {};
+  const PASS_OPTS = { out: passOut, filter: (id) => !isPassPlant(id) };
+  /** Non-solid cross plants (grass tuft, fern, flowers, sapling, dead bush): see-through for kid building taps. */
+  function isPassPlant(id) { return !B_SOLID[id] && B_SHAPE[id] === SHAPE.CROSS; }
+  function holdingPlaceable() { const s = heldStack(); return !!(s && itemPlaces(s.item)); }
 
   /* ------------------------------------------------------------------ targeting */
   function updateTarget(render) {
@@ -287,7 +297,15 @@ export function createInteractionSystem(game) {
       return;
     }
     ix.getAimRay(ray, render);
-    const hit = raycast(w, ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, ix.reach(), RAY_OPTS);
+    let hit = raycast(w, ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, ix.reach(), RAY_OPTS);
+    // Kid scheme with a block in hand: grass tufts and flowers do not catch the tap. The ray goes on to the solid
+    // face behind them, so a tap on the meadow builds where the child pointed, not one to three cells nearer
+    // (judge KID-1: walls crept toward the camera until a block sat in front of the eye). The plant stays the
+    // target when nothing solid lies close behind it (a flower on a ledge against the sky).
+    if (hit && input.scheme === 'kid' && isPassPlant(hit.id) && holdingPlaceable()) {
+      const behind = raycast(w, ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, ix.reach(), PASS_OPTS);
+      if (behind && behind.dist <= hit.dist + PLACE_THROUGH_PLANT) hit = Object.assign(hitOut, behind);
+    }
     let ent = null;
     // a grass tuft or flower (non-solid cross plant) never hides an animal standing in it or right behind it: a child
     // tapping the pig in tall grass means the pig (LEAD integration, found in the end-to-end play). An animal farther
@@ -430,6 +448,16 @@ export function createInteractionSystem(game) {
     return true;
   }
 
+  /** Kid tap on an entity: attack once? Any monster; an animal only with an empty hand, a sword or a tool. */
+  function tapAttacks(e, stack) {
+    if (!e || typeof e.hurt !== 'function') return false;
+    if (e.category === 'monster') return true;
+    if (!(LIVING.has(e.category) || e.living === true)) return false;   // boats, minecarts: no
+    if (!stack) return true;
+    const def = getItem(stack.item);
+    return !!(def && def.tool);
+  }
+
   function hitEntity(e) {
     const p = game.player;
     const def = heldDef();
@@ -457,13 +485,15 @@ export function createInteractionSystem(game) {
     const p = game.player;
     const ctx = ctxBase(action);
     const stack = ctx.stack;
+    const te = ix.targetEntity;
+    // a held-use repeat never builds through an animal that walked under the cursor
+    if (placeOnly && te && te.entity) return false;
     if (!placeOnly) {
       // 1. generic pre-handlers (riding dismount...)
       for (const fn of hooks.preUse) {
         try { if (fn(ctx)) { p.swing(); return 'hook'; } } catch (err) { game.reportError(err, 'preUse'); }
       }
       // 2. entity
-      const te = ix.targetEntity;
       if (te && te.entity) {
         const h = hooks.entityInteract.get(te.entity.type);
         if (h) {
@@ -471,6 +501,26 @@ export function createInteractionSystem(game) {
           try { ok = !!h({ game, player: p, stack, slot: ctx.slot, entity: te.entity, sneaking: ctx.sneaking, action }); } catch (err) { game.reportError(err, `entityInteract ${te.entity.type}`); }
           if (ok) { p.swing(); return 'entity'; }
         }
+        // Kid scheme: a tap on a mob the held item cannot use is one hit, like Bedrock's touch controls (judge
+        // FID-4: 23 taps on a zombie did nothing while it hurt the child). Feeding, shearing, saddles and dyes
+        // were handled by the entityInteract hook above.
+        if (game.input && game.input.scheme === 'kid' && tapAttacks(te.entity, stack)) {
+          entityCooldown = ENTITY_ATTACK_REPEAT;
+          hitEntity(te.entity);
+          return 'attack';
+        }
+        // the held item's own use (eating...) still works; it never reaches the block behind the entity
+        if (stack) {
+          const hi = hooks.itemUse.get(stack.item);
+          if (hi) {
+            let ok = false;
+            try { ok = !!hi(ctx); } catch (err) { game.reportError(err, `itemUse ${stack.item}`); }
+            if (ok) { p.swing(); return 'item'; }
+          }
+        }
+        // Nothing used the tap: never fall through to the block behind the entity (judge KID-2: a tap on a cow with
+        // wool in hand built wool behind the cow). Java never places through an entity hit either.
+        return false;
       }
       // 3. block use (unless sneaking with something in hand)
       const t = ix.target;
@@ -532,7 +582,10 @@ export function createInteractionSystem(game) {
     if (cy < 0 || cy >= WORLD_HEIGHT) return false;
     if (w.isColumnLoaded && !w.isColumnLoaded(cx >> 4, cz >> 4)) return false;
     const cur = w.getRaw(cx, cy, cz);
-    if (!isReplaceable(cur & 0xff)) return false;
+    // kid scheme: a flower or fern in the cell gives way to the block (it is picked like a break), so a tap on the
+    // meadow never does nothing just because a flower grows where the block goes
+    const plantInCell = !isReplaceable(cur & 0xff) && game.input && game.input.scheme === 'kid' && isPassPlant(cur & 0xff);
+    if (!isReplaceable(cur & 0xff) && !plantInCell) return false;
     // the face actually used for the state rules: when we replace the hit cell (grass, snow), act as its top
     const face = (cx === hit.x && cy === hit.y && cz === hit.z) ? { face: FACE.UP, nx: 0, ny: 1, nz: 0, py: hit.y } : hit;
     const state = placementState(id, places.state, face, p.yaw, w.getRaw, [cx, cy, cz]);
@@ -553,6 +606,10 @@ export function createInteractionSystem(game) {
     if (def.support === 'wall') {
       const f = state & 3, back = (f + 2) & 3, dx = [0, 1, 0, -1][back], dz = [-1, 0, 1, 0][back];
       if (!isWallSupport(cx + dx, cy, cz + dz)) return false;
+    }
+    if (plantInCell) {
+      if (blocksBodies(cx, cy, cz, id, state)) return false;
+      if (!ix.breakBlock(cx, cy, cz, { by: 'player', action })) return false;
     }
     const name = def.name;
     const placer = hooks.placers.get(name);

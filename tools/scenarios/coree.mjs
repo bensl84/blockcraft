@@ -256,13 +256,25 @@ export default [
         return ev.defaultPrevented;
       }, opts);
       const n0 = await t.eval(() => window.__game.events('input:action', 400).filter((e) => e.payload.action === 'hotbarNext').length);
-      // trackpad: a stream of small pixel deltas never changes the hotbar, but is still prevented (no page zoom/scroll)
+      await t.call('setLook', 0, 0); await t.call('waitFrames', 2);
+      // trackpad: a stream of small pixel deltas never changes the hotbar, but is still prevented (no page zoom/scroll);
+      // in the kid scheme the two-finger swipe looks around instead (judge KID-5): down = look down, right = turn right
       let prevented = true;
       for (let i = 0; i < 30; i++) { prevented = (await wheel({ deltaY: 3.5 + (i % 5), deltaMode: 0 })) && prevented; await t.call('sleep', 8); }
+      for (let i = 0; i < 20; i++) { await wheel({ deltaX: 6, deltaMode: 0 }); await t.call('sleep', 8); }
+      await t.call('waitFrames', 2);
       const n1 = await t.eval(() => window.__game.events('input:action', 400).filter((e) => e.payload.action === 'hotbarNext').length);
-      t.assert(n1 === n0, `trackpad swipe ignored (${n1 - n0} hotbar steps)`);
+      t.assert(n1 === n0, `trackpad swipe never steps the hotbar (${n1 - n0} hotbar steps)`);
       t.assert(prevented, 'wheel default prevented while playing');
+      const sw = await t.call('pos');
+      t.note('swipeLook', { yaw: +sw.yaw.toFixed(1), pitch: +sw.pitch.toFixed(1) });
+      t.assert(sw.pitch < -8 && sw.yaw < -8, `kid trackpad swipe looks down and turns right (yaw ${sw.yaw.toFixed(1)}, pitch ${sw.pitch.toFixed(1)})`);
       t.assert(await wheel({ deltaY: 120, ctrlKey: true }), 'pinch zoom prevented');
+      const pinch = await t.call('pos');
+      t.assert(pinch.pitch === sw.pitch && pinch.yaw === sw.yaw, 'pinch never looks');
+      // the kid scheme shows the large cursor over the world (judge KID-11)
+      const cur = await t.eval(() => getComputedStyle(window.__game.game.canvas).cursor);
+      t.assert(/^url\("data:image\/svg\+xml/.test(cur), `kid cursor is the large arrow (${cur.slice(0, 40)})`);
       // notched wheel: one step per notch, at most one per 150 ms
       await t.call('sleep', 200);
       const tick0 = (await t.call('stats')).ticks;
@@ -274,6 +286,8 @@ export default [
       t.assert(ev.length === 2 && ev[1].payload.action === 'hotbarPrev', `notched wheel steps the hotbar (${JSON.stringify(ev)})`);
       const nexts = ev.filter((e) => e.payload.action === 'hotbarNext').length;
       t.assert(nexts === 1, `rate-limited to one step per 150 ms (${nexts})`);
+      const after = await t.call('pos');
+      t.assert(after.pitch === pinch.pitch && after.yaw === pinch.yaw, 'a notched wheel never looks');
     },
   },
   {
@@ -589,9 +603,10 @@ export default [
       t.assert(await block(x + 2, 4, z + 2) === 'oak_slab' && await state(x + 2, 4, z + 2) === 0, 'bottom slab');
       await placeOn('oak_slab', x + 2.5, 4.5, z + 2.5);
       t.assert(await state(x + 2, 4, z + 2) === 2, `slab merged into a double slab (${await state(x + 2, 4, z + 2)})`);
-      // short grass is replaced in place
+      // short grass is replaced in place. Kid scheme with a block in hand: the tap goes through the tuft to the ground
+      // under it (judge KID-1), and the tuft in the placement cell gives way
       await t.call('setBlock', x + 3, 4, z + 3, 'short_grass');
-      await placeOn('cobblestone', x + 3.5, 4.3, z + 3.5);
+      await placeOn('cobblestone', x + 3.5, 4.0, z + 3.5);
       t.assert(await block(x + 3, 4, z + 3) === 'cobblestone', 'short grass replaced in place');
       const ev = await t.call('events', 'block:placed', 1);
       t.assert(ev[0].payload.oldId === await t.call('blockId', 'short_grass'), 'block:placed reports the replaced block');

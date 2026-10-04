@@ -531,3 +531,91 @@ test('interaction: survival mining ticks + stages; creative hold repeats every 5
     assert.equal(k.game.events.counts.get('block:placed'), 1, 'and places instead');
   } finally { hooks.blockUse.delete('stone'); }
 });
+
+/* ------------------------------------------------------------------ judge round 1 fixes (KID-1/2/4, FID-4, ROB-9) */
+test('interaction (KID-1): kid taps with a block pass through grass tufts and flowers to the ground behind', () => {
+  const k = makeIxGame({ scheme: 'kid' });
+  k.player.pitch = -30 * Math.PI / 180;
+  k.w.set(0, 4, 1, ID.short_grass);
+  k.inventory.set(0, { item: 'oak_planks', count: 64 }); k.inventory.selectSlot(0);
+  k.tick(1);
+  assert.ok(k.ix.target && k.ix.target.id === ID.stone && k.ix.target.z === 0 && k.ix.target.ny === 1, `ground behind the tuft (${JSON.stringify(k.ix.target)})`);
+  k.input.tap('use'); k.tick(1);
+  assert.equal(k.w.getBlock(0, 4, 0), ID.oak_planks, 'built where the child pointed');
+  assert.equal(k.w.getBlock(0, 4, 1), ID.short_grass, 'not in the nearer tuft cell');
+  // a flower in the target cell gives way to the block (one action)
+  k.w.set(0, 4, 0, ID.poppy);
+  const acts = [];
+  k.game.events.on('block:broken', (e) => acts.push(['broken', e.action]));
+  k.game.events.on('block:placed', (e) => acts.push(['placed', e.action]));
+  k.tick(1); k.input.tap('use'); k.tick(1);
+  assert.equal(k.w.getBlock(0, 4, 0), ID.oak_planks, 'poppy replaced');
+  assert.ok(acts.length === 2 && acts[0][1] === acts[1][1], 'break + place share one action: ' + JSON.stringify(acts));
+  // empty hand: the tuft is still the target (hold-to-break picks it)
+  k.inventory.set(0, null); k.w.set(0, 4, 0, 0); k.tick(1);
+  assert.equal(k.ix.target && k.ix.target.id, ID.short_grass, 'empty hand targets the tuft');
+  // classic: Java targeting (the tuft catches the ray)
+  const c = makeIxGame({ scheme: 'classic' });
+  c.player.pitch = -30 * Math.PI / 180; c.w.set(0, 4, 1, ID.short_grass);
+  c.inventory.set(0, { item: 'oak_planks', count: 64 }); c.inventory.selectSlot(0);
+  c.tick(1);
+  assert.equal(c.ix.target && c.ix.target.id, ID.short_grass, 'classic keeps Java targeting');
+});
+
+test('interaction (KID-2, FID-4): a tap on an entity never builds behind it; kid taps hit monsters and bare-handed animals', () => {
+  const run = (scheme, category, item) => {
+    const k = makeIxGame({ scheme });
+    let hurts = 0;
+    const mob = { id: 7, type: category === 'monster' ? 'zombie' : 'cow', category, health: 20, hurt(d) { hurts++; this.health -= d; return true; } };
+    k.game.entities = { raycast: (ox, oy, oz, dx, dy, dz, maxD, filter) => (filter(mob) && maxD >= 1 ? { entity: mob, dist: 1 } : null), queryBox: () => [] };
+    k.inventory.set(0, item ? { item, count: 64 } : null); k.inventory.selectSlot(0);
+    k.tick(1);
+    assert.ok(k.ix.targetEntity && k.ix.target, 'entity in front of a block');
+    let placed = 0; k.game.events.on('block:placed', () => placed++);
+    k.input.tap('use'); k.tick(1);
+    const tapHurts = hurts;
+    k.input.hold('use'); k.tick(8); k.input.release('use'); k.tick(1);   // a held use (classic right button) never builds either
+    return { placed, hurts: tapHurts };
+  };
+  assert.deepEqual(run('kid', 'creature', 'grass_block'), { placed: 0, hurts: 0 }, 'kid: block in hand on a cow');
+  assert.deepEqual(run('kid', 'creature', null), { placed: 0, hurts: 1 }, 'kid: empty hand on a cow is one hit');
+  assert.deepEqual(run('kid', 'monster', 'grass_block'), { placed: 0, hurts: 1 }, 'kid: any tap on a zombie is one hit');
+  assert.deepEqual(run('kid', 'monster', 'stone_sword'), { placed: 0, hurts: 1 }, 'kid: sword tap on a zombie');
+  assert.deepEqual(run('classic', 'monster', 'grass_block'), { placed: 0, hurts: 0 }, 'classic right click on a zombie: nothing');
+  // an entityInteract hook (feeding) still wins over the tap attack
+  hooks.entityInteract.set('cow', () => true);
+  try { assert.deepEqual(run('kid', 'creature', null), { placed: 0, hurts: 0 }, 'hook consumed the tap'); } finally { hooks.entityInteract.delete('cow'); }
+});
+
+test('player (KID-4): kid pushing toward a 1-block bank from 2-deep water climbs out; classic does not auto-swim', () => {
+  const pool = () => {
+    const w = makeWorld();
+    for (let x = -6; x <= 6; x++) for (let z = -30; z <= 6; z++) {
+      if (z <= -3) { for (let y = 4; y <= 6; y++) w.set(x, y, z, ID.stone); } else { w.set(x, 4, z, ID.water); w.set(x, 5, z, ID.water); }
+    }
+    return w;
+  };
+  const k = makeGame(pool(), { scheme: 'kid', settings: { autoJump: true } });
+  k.player.spawn(0.5, 4, 0.5, 0, 0);
+  k.input.move.forward = 1;
+  k.tick(80);
+  assert.ok(k.player.onGround && !k.player.inWater && k.player.y === 7 && k.player.z < -2.7, `kid climbed out (${k.player.y.toFixed(2)}, ${k.player.z.toFixed(2)})`);
+  const c = makeGame(pool(), { scheme: 'classic', settings: { autoJump: true } });
+  c.player.spawn(0.5, 4, 0.5, 0, 0);
+  c.input.move.forward = 1;
+  c.tick(80);
+  assert.ok(c.player.y < 5, `classic stays at the bottom without jump (${c.player.y.toFixed(2)})`);
+});
+
+test('player (ROB-9): a damaged save position falls back to the world spawn', () => {
+  const { game, player } = makeGame(makeWorld());
+  game.meta.spawn = { x: 10.5, y: 4, z: -7.5 };
+  player.deserialize(game, { x: NaN, y: null, z: 'abc', yaw: Infinity, pitch: NaN, spawnPoint: { x: NaN, y: 4, z: 0 } });
+  assert.deepEqual([player.x, player.y, player.z, player.yaw, player.pitch], [10.5, 4, -7.5, 0, 0]);
+  assert.deepEqual(player.spawnPoint, { x: 10.5, y: 4, z: -7.5 });
+  player.deserialize(game, { x: 1.5, y: 9999, z: 2.5 });
+  assert.equal(player.y, 4, 'y outside the world is refused too');
+  player.deserialize(game, { x: 1.5, y: 20, z: 2.5, yaw: 1, pitch: 0.5, spawnPoint: { x: 3, y: 5, z: 6 } });
+  assert.deepEqual([player.x, player.y, player.z, player.yaw, player.pitch], [1.5, 20, 2.5, 1, 0.5], 'a good save loads unchanged');
+  assert.deepEqual(player.spawnPoint, { x: 3, y: 5, z: 6 });
+});
