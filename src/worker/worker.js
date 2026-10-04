@@ -21,7 +21,7 @@ function meshTransfer(mesh) {
   if (!mesh) return t;
   for (const k of ['opaque', 'cutout', 'translucent']) {
     const m = mesh[k];
-    if (m) t.push(m.position.buffer, m.tex.buffer, m.light.buffer);
+    if (m) t.push(m.position.buffer, m.tex.buffer, m.light.buffer, m.corner.buffer);
   }
   return t;
 }

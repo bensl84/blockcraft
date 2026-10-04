@@ -4,7 +4,8 @@
 // (needs the 3x3 neighbourhood GENERATED; main thread, lighting.js) -> MESHED (needs the 3x3 neighbourhood
 // LIT; sections meshed in workers, main-thread fallback). Radii around the player's column, with the mesh radius
 // M = R + MESH_MARGIN (one ring beyond the fog): data to M + 3, light to M + 1.5, meshes within M (dropped again
-// beyond M + 1 to bound draw calls), unload beyond R + UNLOAD_MARGIN (R + 5).
+// beyond M + 1 to bound geometries), unload beyond R + UNLOAD_MARGIN (R + 5). The renderer does not DRAW columns
+// wholly beyond the fog (fog cull, review CORE-R10), so the extra ring and the hysteresis cost no draw calls.
 // Order: offsets sorted by dist^2 - 2*dot(lookDir, offset), rebuilt when the player crosses a column border
 // or turns. Budget: RENDER.CHUNK_BUDGET_MS per frame (2 ms when frames are late), 14 ms while loading.
 //

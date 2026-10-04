@@ -2,7 +2,10 @@
 // column merge (one geometry per column per pass, SPEC §5.5.6 "column-merged geometry"). Unit-tested.
 //
 // MeshBuffers (SPEC §5.3.5): {position: Float32Array(quads*12), tex: Uint16Array(quads*16),
-// light: Uint8Array(quads*16), quads}. Positions are section-local (0..16).
+// light: Uint8Array(quads*16), corner: Uint16Array(quads*16), quads}. Positions are section-local (0..16).
+// `corner` (v1.4, review CORE-R2) holds the quad's four corner lights for per-pixel bilinear light; buffers made
+// without it (older producers, hand-built test meshes) get one from withCorner(). Chunk geometry draws from
+// position + tex + corner only, so merged columns do not keep the per-vertex `light`.
 
 /** Quads addressable by the shared 16-bit index buffer (4 vertices each => 65536 vertices). */
 export const U16_QUADS = 16384;
@@ -41,12 +44,34 @@ export function quadIndices(quads) {
 }
 
 /**
+ * A MeshBuffers with the per-quad `corner` array (SPEC §5.3.5). Returns `buf` itself when it has one. Otherwise
+ * builds it from the per-vertex light, taking each quad's vertices in order as its corners BL, BR, TR, TL (they
+ * run around the quad), on a copy of `tex` whose flag bits 7-8 name each vertex's corner. Never mutates `buf`.
+ * @param {{position: Float32Array, tex: Uint16Array, light: Uint8Array, corner?: Uint16Array, quads: number}|null} buf
+ */
+export function withCorner(buf) {
+  if (!buf || buf.corner) return buf;
+  const n = buf.quads;
+  const tex = buf.tex.slice(0, n * 16), corner = new Uint16Array(n * 16), L = buf.light;
+  for (let q = 0; q < n; q++) {
+    const b = q * 16;
+    for (let j = 0; j < 4; j++) {
+      const v = b + j * 4;
+      const c = Math.min(120, Math.round(L[v] / 2)) | (Math.min(120, Math.round(L[v + 1] / 2)) << 7) | ((L[v + 2] & 3) << 14);
+      for (let k = 0; k < 4; k++) corner[b + k * 4 + j] = c;
+      tex[v + 3] = (tex[v + 3] & ~(3 << 7)) | (j << 7);
+    }
+  }
+  return { ...buf, tex, corner };
+}
+
+/**
  * Merge the 8 sections of one column pass into one set of arrays (positions offset to column-local y).
- * @param {{position:Float32Array, tex:Uint16Array, light:Uint8Array, ranges:Int32Array}|null} old previous merge
- * @param {Array<undefined|null|{position:Float32Array, tex:Uint16Array, light:Uint8Array, quads:number}>} sources
+ * @param {{position:Float32Array, tex:Uint16Array, corner:Uint16Array, ranges:Int32Array}|null} old previous merge
+ * @param {Array<undefined|null|{position:Float32Array, tex:Uint16Array, light:Uint8Array, corner?:Uint16Array, quads:number}>} sources
  *        per section sy (0..7): undefined = keep that section's quads from `old`; null = empty;
- *        MeshBuffers = new section-local data.
- * @returns {{position:Float32Array, tex:Uint16Array, light:Uint8Array, quads:number, ranges:Int32Array,
+ *        MeshBuffers = new section-local data (without `corner`, one is built by withCorner).
+ * @returns {{position:Float32Array, tex:Uint16Array, corner:Uint16Array, quads:number, ranges:Int32Array,
  *            minSy:number, maxSy:number}|null} ranges[sy*2] = first quad, ranges[sy*2+1] = quad count
  */
 export function mergeColumnPass(old, sources) {
@@ -61,7 +86,7 @@ export function mergeColumnPass(old, sources) {
   if (total === 0) return null;
   const position = new Float32Array(total * 12);
   const tex = new Uint16Array(total * 16);
-  const light = new Uint8Array(total * 16);
+  const corner = new Uint16Array(total * 16);
   const ranges = new Int32Array(16);
   let q = 0, minSy = 8, maxSy = -1;
   for (let sy = 0; sy < 8; sy++) {
@@ -71,22 +96,22 @@ export function mergeColumnPass(old, sources) {
     if (n === 0) continue;
     if (sy < minSy) minSy = sy;
     maxSy = sy;
-    const src = sources[sy];
-    if (src === undefined) {
+    if (sources[sy] === undefined) {
       const os = old.ranges[sy * 2];
       position.set(old.position.subarray(os * 12, (os + n) * 12), q * 12);
       tex.set(old.tex.subarray(os * 16, (os + n) * 16), q * 16);
-      light.set(old.light.subarray(os * 16, (os + n) * 16), q * 16);
+      corner.set(old.corner.subarray(os * 16, (os + n) * 16), q * 16);
     } else {
+      const src = withCorner(sources[sy]);
       position.set(src.position.subarray(0, n * 12), q * 12);
       const yo = sy * 16;
       if (yo) for (let i = q * 12 + 1, e = (q + n) * 12; i < e; i += 3) position[i] += yo;
       tex.set(src.tex.subarray(0, n * 16), q * 16);
-      light.set(src.light.subarray(0, n * 16), q * 16);
+      corner.set(src.corner.subarray(0, n * 16), q * 16);
     }
     q += n;
   }
-  return { position, tex, light, quads: total, ranges, minSy, maxSy };
+  return { position, tex, corner, quads: total, ranges, minSy, maxSy };
 }
 
 /**

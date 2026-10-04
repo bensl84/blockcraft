@@ -1,6 +1,6 @@
 # Blockcraft — Engineering Specification
 
-Version 1.3 · 2026-10-03 · owner: LEAD (architect / integrator) · v1.1 applies the independent review (lane isolation, persistence, undo data, test API, kid controls, content gaps) · v1.2 records the CORE integration (lanes A–E merged): light curve with the brightness lift, accepted lane spec conflicts, streaming radii, new lane events and decisions D14–D15 · v1.3 applies the CORE review (CORE-R1…R9): meshing one ring beyond the fog with a crisp linear fog, quad flip, leaves and water textures, tap classification by event time, `unmeshedWithin` after a teleport, capsule kid outline, larger climate regions, moonlit night tint
+Version 1.4 · 2026-10-03 · owner: LEAD (architect / integrator) · v1.1 applies the independent review (lane isolation, persistence, undo data, test API, kid controls, content gaps) · v1.2 records the CORE integration (lanes A–E merged): light curve with the brightness lift, accepted lane spec conflicts, streaming radii, new lane events and decisions D14–D15 · v1.3 applies the CORE review (CORE-R1…R9): meshing one ring beyond the fog with a crisp linear fog, quad flip, leaves and water textures, tap classification by event time, `unmeshedWithin` after a teleport, capsule kid outline, larger climate regions, moonlit night tint · v1.4 applies the CORE review recheck (CORE-R10, CORE-R2): columns wholly beyond the fog are not drawn, and smooth light and AO are blended bilinearly per pixel from each quad's four corners (mesh contract: `corner` array, flag bits 7–8; chunk geometry uploads no `aLight`)
 
 This file is the single source of truth for Blockcraft. Two kinds of files back it up:
 
@@ -1164,6 +1164,7 @@ It returns false for an unloaded column, out-of-range y, or no change.
 - **States:** EMPTY → GENERATED (terrain plus decoration from `generateColumn`, or restored from save) → LIT (needs the 3×3 neighbourhood GENERATED) → MESHED (needs the 3×3 neighbourhood LIT).
 - **Radii:** data out to R + 3 (`DATA_MARGIN` + 1, so the diagonal neighbours of every lit column exist; light reaches about R + 1.5), meshes within R (circular), meshes dropped beyond R + 1 (the column goes back to LIT, bounding draw calls and geometries), unload beyond R + 4 (`UNLOAD_MARGIN`). *(v1.2: as built by CORE-C.)*
 - *(v1.3, review CORE-R1)* The mesh radius is **M = R + `MESH_MARGIN` (1)**: one ring beyond the fog radius, so every gap of the circular mesh radius (and the newest, still-streaming ring) lies past `fogFar` = (R − 0.5)·16 and the fog can be a crisp linear ramp from 0.8 · `fogFar`. Data to M + 3 = R + 4, light to M + 1.5, meshes dropped beyond M + 1, unload beyond R + 5 (`UNLOAD_MARGIN`). Draw calls at R 6 stay about 150–200 (budget 300).
+- *(v1.4, review CORE-R10)* The extra ring and the M + 1 drop hysteresis cost no drawing: the renderer skips every column whose nearest horizontal point to the eye lies beyond `uFogFar` + 0.5 (it is 100 % fogged; §5.5.6 "Fog cull"). They stay meshed and cached, so a column is ready the moment it comes within the fog. Draw calls at R 6: about 157 (`cored-perf`), the same as before the ring was added.
 - **Order:**
   - Precomputed offsets sorted by distance², with a look-direction bias of `dist² − 2·dot(lookDir, offset)`.
   - Rebuild the queue when the player crosses a column border.
@@ -1219,15 +1220,16 @@ export function meshBlockModel(id, state) -> MeshBuffers          // isolated bl
 **Output: `SectionMesh = {opaque, cutout, translucent}`**
 
 - Each entry is `MeshBuffers | null`, or the whole result is `null` if empty.
-- `MeshBuffers = {position: Float32Array(quads·12), tex: Uint16Array(quads·16), light: Uint8Array(quads·16), quads}`. There are 4 vertices per quad and **no index array**: the renderer uses `QUAD_INDICES` offset by 4 per quad.
+- `MeshBuffers = {position: Float32Array(quads·12), tex: Uint16Array(quads·16), light: Uint8Array(quads·16), corner: Uint16Array(quads·16), quads}`. There are 4 vertices per quad and **no index array**: the renderer uses `QUAD_INDICES` offset by 4 per quad. *(v1.4)* `corner` is new; a producer without it still works (the renderer builds it from `light`, `chunkmerge.withCorner`).
 
 | Attribute | Layout per vertex | Meaning |
 |---|---|---|
 | `position` | f32 x, y, z | Section-local (0..16). Plants and torches use fractional values. |
-| `tex` (`aTex`) | u16 `layer`, u16 `u`, u16 `v`, u16 `flags` | `u`, `v` in 1/256 of a tile (0..256): `u` grows left to right, `v` grows top to bottom (v = 0 is the image's top row). `flags`: bits 0–2 face (0–5, 6 = non-axis plant); bits 3–4 `ANIM` mode; bits 5–6 `WAVE` mode; bits 7–15 reserved (0). |
-| `light` (`aLight`) | u8 `sky16`, u8 `block16`, u8 `ao`, u8 `shade` | `sky16`/`block16` = smooth light × 16 (0..240); `ao` 0..3 (3 = unoccluded); `shade` = face shade × 255 |
+| `tex` (`aTex`) | u16 `layer`, u16 `u`, u16 `v`, u16 `flags` | `u`, `v` in 1/256 of a tile (0..256): `u` grows left to right, `v` grows top to bottom (v = 0 is the image's top row). `flags`: bits 0–2 face (0–5, 6 = non-axis plant); bits 3–4 `ANIM` mode; bits 5–6 `WAVE` mode; *(v1.4)* bits 7–8 which corner of its quad this vertex is (0 BL, 1 BR, 2 TR, 3 TL, see below); bits 9–15 reserved (0). |
+| `light` (`aLight`) | u8 `sky16`, u8 `block16`, u8 `ao`, u8 `shade` | This vertex's light: `sky16`/`block16` = smooth light × 16 (0..240); `ao` 0..3 (3 = unoccluded); `shade` = face shade × 255. Block models and entity atlas meshes draw from it; *(v1.4)* chunk geometry does not upload it. |
+| `corner` (`aCorner`) *(v1.4)* | 4 × u16, the same on all 4 vertices of a quad | The quad's four corner lights in corner order BL, BR, TR, TL, each `sky8 \| block8 << 7 \| ao << 14` with `sky8`/`block8` = smooth light × 8 (0..120) and `ao` 0..3. The chunk shader blends them bilinearly per pixel. |
 
-**Vertex order.** Each quad's corners are bottom-left, bottom-right, top-right, top-left **as seen from outside** (CCW = front face). See `FACE_CORNERS`: the up face has its texture top toward north, the down face toward south. The quad flip rotates the start corner by one when `a00 + a11 > a01 + a10`, using combined AO × light brightness. *(v1.3, review CORE-R2)* The diagonal runs through the corner pair that differs most (`|a00 − a11|` against `|a01 − a10|`), so a single odd corner, dark or torch-bright, is shared by both triangles and spreads instead of making a sharp wedge; ties keep the rule above. True bilinear corner light (a mesh contract change) stays a P2 option.
+**Vertex order.** Each quad's corners are bottom-left, bottom-right, top-right, top-left **as seen from outside** (CCW = front face). See `FACE_CORNERS`: the up face has its texture top toward north, the down face toward south. The quad flip rotates the start corner by one when `a00 + a11 > a01 + a10`, using combined AO × light brightness. *(v1.3, review CORE-R2)* The diagonal runs through the corner pair that differs most (`|a00 − a11|` against `|a01 − a10|`), so a single odd corner, dark or torch-bright, is shared by both triangles and spreads instead of making a sharp wedge; ties keep the rule above. *(v1.4, review CORE-R2)* That flip only helped faces with a single odd corner; torch light falls off in a diamond, so most cave faces have two or more differing corners and still showed sharp triangle wedges. Every quad now carries its four corner lights (`corner`) and each vertex names its own corner (flag bits 7–8; the vertices run around the quad, so with the flip the ids are a rotation of 0, 1, 2, 3). The chunk shader blends light and AO bilinearly per pixel, so no face has a diagonal whatever its corners are, and AO is a soft gradient instead of steps. The flip still runs but no longer changes the picture.
 
 **Rules**
 
@@ -1252,7 +1254,8 @@ CORE-D builds one `BufferGeometry` per section per pass:
 
 - `position`: `BufferAttribute(Float32Array, 3)`.
 - `aTex`: `BufferAttribute(Uint16Array, 4)`, **not normalised**, read as float in the shader (no `gpuType` integer path).
-- `aLight`: `BufferAttribute(Uint8Array, 4)`, **not normalised**.
+- `aLight`: `BufferAttribute(Uint8Array, 4)`, **not normalised** — block models and entity atlas meshes only. *(v1.4)* Chunk geometry does not upload it: the chunk shader takes the face shade from the face bits and the light from `aCorner`.
+- *(v1.4)* `aCorner`: `BufferAttribute(Uint16Array, 4)`, **not normalised**, read as float (exact up to 65535) and decoded in the vertex shader. Chunk vertices are 28 bytes (position 12, `aTex` 8, `aCorner` 8; 24 before). Measured chunk geometry, seed 4242: about 35 MB at R 6 and 124 MB at R 12 (`.tmp/r10/mem.mjs`). Merged column arrays keep `position`, `tex` and `corner` only.
 - Index: a view of one shared, precomputed `Uint16Array` of `QUAD_INDICES` for 16384 quads (`subarray(0, quads·6)`); one `BufferAttribute` per geometry. A pass with **more than 16384 quads** (a section dense with stairs, fences or panes) uses a second shared `Uint32Array` index buffer, grown by doubling; the mesher never has to split.
 - Bounds: set `boundingSphere` and `boundingBox` manually (centre (8, 8, 8), radius 13.86).
 - The mesh sits at `(cx·16, sy·16, cz·16)` with `matrixAutoUpdate = false`.
@@ -1294,6 +1297,8 @@ createEntityMaterial({map?, atlas?, transparent?, alphaTest?, color?, parts?}) -
 createBlockModel(id, state) -> THREE.Mesh      // meshBlockModel geometry + atlas entity material; caller disposes geometry
 captureThumbnail(w = 160, h = 100) -> jpeg data URL (renders then copies)
 getStats() -> {drawCalls, triangles, geometries, textures, programs, sectionMeshes, dpr}   // per frame, all passes summed
+                                               // (v1.4: + fogCulled = columns skipped by the fog cull last frame)
+fogCull                                        // v1.4: true (default) skips columns wholly beyond the fog; tests set false to compare pictures
 frame(game, dt, alpha)                          // updates uniforms from game.time / sky, renders world then view model
 dispose()
 ```
@@ -1305,7 +1310,7 @@ dispose()
 - `layer = aTex.x`; if `anim = (flags >> 3) & 3` is non-zero, add `mod(floor(uTime·FPS[anim]), FRAMES[anim])`, with FRAMES and FPS from `ANIM`.
 - Output a `flat` varying for the layer (`glslVersion: THREE.GLSL3`).
 - `uv = aTex.yz / 256`.
-- `sky = aLight.x / 16`, `block = aLight.y / 16`, `ao = aLight.z`, `shade = aLight.w / 255`.
+- ~~`sky = aLight.x / 16`, `block = aLight.y / 16`, `ao = aLight.z`, `shade = aLight.w / 255`.~~ *(v1.4, review CORE-R2)* Decode `aCorner` into four corner values each of sky (`/ 8`), block (`/ 8`) and the AO factor `[0.5, 0.7, 0.85, 1.0][ao]` × face shade, all `flat` varyings; the face shade comes from the face bits (`FACE_SHADE`, plants 0.9, as the mesher's ×255 values). The vertex's corner (flag bits 7–8) gives a smooth varying `face` = BL (0, 0), BR (1, 0), TR (1, 1), TL (0, 1).
 - Wave (`(flags >> 5) & 3`, when `uWave > 0`):
   - Leaves sway ±0.03 in x/z.
   - Plants sway only the top vertices (`v < 128`).
@@ -1325,8 +1330,9 @@ lift(l) = mix(l, 1 - (1 - l)^4, uGamma)                               // classic
 moon = (1 - uDaylight) * (1 - smoothstep(0.1, 0.45, lift(blk).r))      // v1.3: moonlit sky tint, fading out inside a torch pool
 light = max(min(lift(skyB) * mix(1, (0.82, 0.95, 1.55), moon), 1), lift(blk))   // block light stays warm
 light = max(light, vec3(uMinLight))                                  // uMinLight = 0.05 + 0.15 * brightness
-aoF = [0.5, 0.7, 0.85, 1.0][ao]
-color = tex.rgb * shade * aoF * light
+w = ((1 - u)(1 - v), u(1 - v), uv, (1 - u)v) for face = (u, v)        // v1.4: bilinear weights of the 4 corners
+sky = dot(sky4, w) ; block = dot(block4, w) ; aoF·shade = dot(ao4, w)  // light() above takes the blended sky and block
+color = tex.rgb * aoF·shade * light
 fog: f = clamp((d - uFogNear) / (uFogFar - uFogNear)), linear on land (v1.3), eased 1 - (1 - f)^2 underwater / in lava, toward uFogColor
      d = horizontal distance on land (flying high must not wash out the ground), spherical underwater and in lava
 ```
@@ -1394,6 +1400,8 @@ Call `game.world.setRenderDistance` in `init`.
 - Do not scale down when frame intervals sit near 33 ms but `perf.workMs < 8` (a 30 Hz display or energy saver).
 
 **Draw calls:** log `renderer.info` with `autoReset = false`, resetting once per frame. Budget ≤ 300 typical at R = 6. Sections alone are 250–500 draws at R = 6, so CORE-D measures the SwiftShader proxy early: **if it is over budget, column-merged geometry (one geometry per column per pass) is P0**, not P1. Mobs are one draw each and items share geometry (§5.5.5).
+
+**Fog cull** *(v1.4, review CORE-R10)*: right before each render, every chunk mesh of a column whose nearest horizontal point to the eye lies beyond `uFogFar` + 0.5 is hidden (the pad covers plant jitter and sway). Land fog is horizontal and underwater or lava fog is spherical, which is never shorter, so that geometry is 100 % fogged and the picture does not change: `cored-fog` renders the same frame with the cull off and on and asserts that no pixel changes from high up, and that at ground level only pure fog-colour pixels (a fully fogged silhouette against the sky) can change. It brings the extra mesh ring of §5.3.3 back to the old draw count: R 4 on SwiftShader, same views, 94 → 74 draws on the ground and 114 → 79 in the air.
 
 **Manual render distance:** when `settings.renderDistance` is not 0 (auto), dynamic scaling may lower the DPR but never R.
 

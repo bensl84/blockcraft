@@ -3,9 +3,14 @@
 // access) so they run in the worker too; buildPadded is the only function that reads the world.
 //
 // Output per pass: MeshBuffers {position: Float32Array(quads*12), tex: Uint16Array(quads*16),
-// light: Uint8Array(quads*16), quads} - 4 vertices per quad, no index array (renderer uses QUAD_INDICES).
-//   tex   = [layer, u, v, flags]  u,v in 1/256 tile; flags: bits 0-2 face (6 = non-axis plant), 3-4 ANIM, 5-6 WAVE
-//   light = [sky*16, block*16, ao 0..3, shade*255]
+// light: Uint8Array(quads*16), corner: Uint16Array(quads*16), quads} - 4 vertices per quad, no index array
+// (renderer uses QUAD_INDICES).
+//   tex    = [layer, u, v, flags]  u,v in 1/256 tile; flags: bits 0-2 face (6 = non-axis plant), 3-4 ANIM, 5-6 WAVE,
+//            bits 7-8 which corner of the quad this vertex is (0 BL, 1 BR, 2 TR, 3 TL)
+//   light  = [sky*16, block*16, ao 0..3, shade*255] of this vertex
+//   corner = the quad's four corner lights (BL, BR, TR, TL; the same on all 4 vertices), each
+//            sky*8 | block*8 << 7 | ao << 14 (v1.4, review CORE-R2: the chunk shader blends them bilinearly per
+//            pixel, so smooth light and AO have no triangle diagonal)
 // Cubes: face culling, per-vertex AO (0fps), smooth light, quad flip on combined AO x light. Other shapes:
 // boxes with uv-lock (slabs, stairs, doors, beds, chests, cakes, carpets, snow layers, farmland, panes,
 // fences, gates, cactus), single quads (ladder), cross plants with hash jitter, crops (#), torches (tilted on
@@ -85,24 +90,25 @@ for (let id = 0; id < 256; id++) {
 
 /* ------------------------------------------------------------------ output buffers (growable scratch) */
 class Buf {
-  constructor() { this.cap = 0; this.quads = 0; this.pos = null; this.tex = null; this.light = null; this.grow(1024); }
+  constructor() { this.cap = 0; this.quads = 0; this.pos = null; this.tex = null; this.light = null; this.corner = null; this.grow(1024); }
   grow(q) {
-    const pos = new Float32Array(q * 12), tex = new Uint16Array(q * 16), light = new Uint8Array(q * 16);
-    if (this.pos) { pos.set(this.pos); tex.set(this.tex); light.set(this.light); }
-    this.pos = pos; this.tex = tex; this.light = light; this.cap = q;
+    const pos = new Float32Array(q * 12), tex = new Uint16Array(q * 16), light = new Uint8Array(q * 16), corner = new Uint16Array(q * 16);
+    if (this.pos) { pos.set(this.pos); tex.set(this.tex); light.set(this.light); corner.set(this.corner); }
+    this.pos = pos; this.tex = tex; this.light = light; this.corner = corner; this.cap = q;
   }
   finish() {
     if (this.quads === 0) return null;
     const q = this.quads;
-    return { position: this.pos.slice(0, q * 12), tex: this.tex.slice(0, q * 16), light: this.light.slice(0, q * 16), quads: q };
+    return { position: this.pos.slice(0, q * 12), tex: this.tex.slice(0, q * 16), light: this.light.slice(0, q * 16), corner: this.corner.slice(0, q * 16), quads: q };
   }
 }
 const BUFS = [new Buf(), new Buf(), new Buf()];
 
-/* per-quad scratch: positions, uvs, per-corner sky/block/ao */
+/* per-quad scratch: positions, uvs, per-corner sky/block (x16 for light, x8 for corner) and ao */
 const QP = new Float32Array(12);
 const QUV = new Int32Array(8);
 const QS = new Uint8Array(4), QB = new Uint8Array(4), QA = new Uint8Array(4);
+const QS8 = new Uint8Array(4), QB8 = new Uint8Array(4);
 
 /** Effective light (slabs/stairs take their neighbours' max light). */
 let EL = new Uint8Array(PADDED_VOLUME);
@@ -122,14 +128,18 @@ function emitQuad(buf, layer, flags, shade) {
   const b3 = (QA[3] + 1) * (16 + Math.max(QS[3], QB[3]));
   const d02 = Math.abs(b0 - b2), d13 = Math.abs(b1 - b3);
   const start = d02 > d13 ? 0 : d13 > d02 ? 1 : b0 + b2 > b1 + b3 ? 1 : 0;
+  // the quad's four corner lights, in corner order BL, BR, TR, TL (blended bilinearly per pixel by the shader)
+  const c0 = QS8[0] | (QB8[0] << 7) | (QA[0] << 14), c1 = QS8[1] | (QB8[1] << 7) | (QA[1] << 14);
+  const c2 = QS8[2] | (QB8[2] << 7) | (QA[2] << 14), c3 = QS8[3] | (QB8[3] << 7) | (QA[3] << 14);
   const q = buf.quads++;
-  const P = buf.pos, T = buf.tex, L = buf.light;
+  const P = buf.pos, T = buf.tex, L = buf.light, C = buf.corner;
   let pi = q * 12, ti = q * 16;
   for (let j = 0; j < 4; j++) {
     const k = (start + j) & 3;
     P[pi++] = QP[k * 3]; P[pi++] = QP[k * 3 + 1]; P[pi++] = QP[k * 3 + 2];
-    T[ti] = layer; T[ti + 1] = QUV[k * 2]; T[ti + 2] = QUV[k * 2 + 1]; T[ti + 3] = flags;
+    T[ti] = layer; T[ti + 1] = QUV[k * 2]; T[ti + 2] = QUV[k * 2 + 1]; T[ti + 3] = flags | (k << 7);
     L[ti] = QS[k]; L[ti + 1] = QB[k]; L[ti + 2] = QA[k]; L[ti + 3] = shade;
+    C[ti] = c0; C[ti + 1] = c1; C[ti + 2] = c2; C[ti + 3] = c3;
     ti += 4;
   }
 }
@@ -137,12 +147,7 @@ function emitQuad(buf, layer, flags, shade) {
 /** Smooth light + AO for face f of the cell at padded index p (samples the plane of the face neighbour). */
 function faceLight(p, f, withAO) {
   const q = p + FD[f];
-  if (!SMOOTH) {
-    const l = EL[q];
-    const s = (l >> 4) * 16, b = (l & 15) * 16;
-    for (let k = 0; k < 4; k++) { QS[k] = s; QB[k] = b; QA[k] = 3; }
-    return;
-  }
+  if (!SMOOTH) { flatLight(q); return; }
   const lq = EL[q];
   const base = f * 8;
   for (let k = 0; k < 4; k++) {
@@ -154,6 +159,8 @@ function faceLight(p, f, withAO) {
     if (!sc && !(s1 && s2)) { const l = EL[c]; sky += l >> 4; blk += l & 15; n++; }
     QS[k] = Math.round(sky * 16 / n);
     QB[k] = Math.round(blk * 16 / n);
+    QS8[k] = Math.round(sky * 8 / n);
+    QB8[k] = Math.round(blk * 8 / n);
     QA[k] = withAO ? (s1 && s2 ? 0 : 3 - (s1 + s2 + sc)) : 3;
   }
 }
@@ -161,7 +168,7 @@ function faceLight(p, f, withAO) {
 function flatLight(p) {
   const l = EL[p];
   const s = (l >> 4) * 16, b = (l & 15) * 16;
-  for (let k = 0; k < 4; k++) { QS[k] = s; QB[k] = b; QA[k] = 3; }
+  for (let k = 0; k < 4; k++) { QS[k] = s; QB[k] = b; QA[k] = 3; QS8[k] = s >> 1; QB8[k] = b >> 1; }
 }
 
 /** UV of a point on face f (uv-lock: texture follows block-local coordinates). */
@@ -554,9 +561,9 @@ export function meshBlockModel(id, state = 0) {
   }
   MB_BLOCKS[c] = 0;
   const quads = parts.reduce((a, m) => a + m.quads, 0);
-  const out = { position: new Float32Array(quads * 12), tex: new Uint16Array(quads * 16), light: new Uint8Array(quads * 16), quads };
+  const out = { position: new Float32Array(quads * 12), tex: new Uint16Array(quads * 16), light: new Uint8Array(quads * 16), corner: new Uint16Array(quads * 16), quads };
   let q = 0;
-  for (const m of parts) { out.position.set(m.position, q * 12); out.tex.set(m.tex, q * 16); out.light.set(m.light, q * 16); q += m.quads; }
+  for (const m of parts) { out.position.set(m.position, q * 12); out.tex.set(m.tex, q * 16); out.light.set(m.light, q * 16); out.corner.set(m.corner, q * 16); q += m.quads; }
   for (let i = 0; i < out.position.length; i += 3) { out.position[i] -= 0.5; out.position[i + 2] -= 0.5; }
   return out;
 }

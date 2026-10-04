@@ -37,8 +37,11 @@
  * Mesher output for one pass of one section (SPEC §5.4). quads*4 vertices.
  * @typedef {Object} MeshBuffers
  * @property {Float32Array} position  xyz per vertex, section-local (0..16)
- * @property {Uint16Array} tex        [layer, u, v, flags] per vertex (u,v in 1/256 units of a tile)
+ * @property {Uint16Array} tex        [layer, u, v, flags] per vertex (u,v in 1/256 units of a tile; flags bits 7-8 =
+ *                                    the vertex's corner of its quad: 0 BL, 1 BR, 2 TR, 3 TL)
  * @property {Uint8Array} light       [sky*16, block*16, ao 0..3, shade*255] per vertex
+ * @property {Uint16Array} [corner]   v1.4: the quad's 4 corner lights (BL, BR, TR, TL) on every vertex, each
+ *                                    sky*8 | block*8 << 7 | ao << 14 (the chunk shader blends them per pixel)
  * @property {number} quads
  */
 /**

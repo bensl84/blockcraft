@@ -3,6 +3,16 @@
 // modelViewMatrix/cameraPosition uniforms and the attributes `position`, `normal`, `uv`.
 // Pure strings: importable from Node unit tests.
 
+import { FACE_SHADE } from '../core/constants.js';
+
+/** Face shade by face bits (flags 0-2: E, W, up, down, S, N, 6 = plant), exactly as the mesher writes it (x255). */
+const SHADE_GLSL = (() => {
+  const s = [...FACE_SHADE.map((v) => Math.round(v * 255)), Math.round(0.9 * 255)].map((v) => (v / 255).toFixed(6));
+  return `float bcFaceShade(float face) {
+  return face < 0.5 ? ${s[0]} : face < 1.5 ? ${s[1]} : face < 2.5 ? ${s[2]} : face < 3.5 ? ${s[3]} : face < 4.5 ? ${s[4]} : face < 5.5 ? ${s[5]} : ${s[6]};
+}`;
+})();
+
 /** Shared lighting + fog helpers (chunk and entity materials use the SAME curve). */
 const LIGHT_FOG_GLSL = /* glsl */ `
 uniform float uDaylight;
@@ -66,21 +76,38 @@ vec3 bcWave(vec3 wp, float wave, float v) {
 }
 `;
 
+// Smooth light and AO are blended BILINEARLY per pixel from the quad's four corners (v1.4, review CORE-R2): every
+// vertex carries all four corner values (aCorner, flat) and its own corner of the face (flags bits 7-8), so a face
+// has no triangle diagonal, whatever its corners are. aCorner per corner (BL, BR, TR, TL): sky*8 | block*8 << 7 |
+// ao << 14, read as float (exact up to 65535). AO is turned into its brightness factor per corner and multiplied by
+// the face shade (from the face bits, so chunk geometry needs no aLight attribute), then blended.
 export const CHUNK_VERT = /* glsl */ `
 in vec4 aTex;    // layer, u, v (1/256 tile), flags
-in vec4 aLight;  // sky*16, block*16, ao 0..3, shade*255
+in vec4 aCorner; // the quad's corner lights BL, BR, TR, TL
 uniform vec4 uAnimFrames; // frames per ANIM mode (0, water, lava, fire)
 uniform vec4 uAnimFps;
 ${WAVE_GLSL}
+${SHADE_GLSL}
 out vec2 vUv;
 flat out float vLayer;
-out vec3 vLight;   // sky, block, ao
-out float vShade;
+flat out vec4 vSky4;   // sky level per corner
+flat out vec4 vBlk4;   // block level per corner
+flat out vec4 vAo4;    // AO brightness factor x face shade per corner
+out vec2 vFace;        // position inside the face: BL (0,0), BR (1,0), TR (1,1), TL (0,1)
 out vec3 vRel;     // world position relative to the camera (fog)
 void main() {
   float flags = aTex.w;
   float anim = mod(floor(flags / 8.0), 4.0);
   float wave = mod(floor(flags / 32.0), 4.0);
+  float corner = mod(floor(flags / 128.0), 4.0);
+  vFace = vec2(step(0.5, corner) * step(corner, 2.5), step(1.5, corner));
+  vec4 ao = floor(aCorner / 16384.0);
+  vec4 rest = aCorner - ao * 16384.0;
+  vec4 blk = floor(rest / 128.0);
+  vSky4 = (rest - blk * 128.0) * 0.125;
+  vBlk4 = blk * 0.125;
+  // AO 0..3 -> 0.5, 0.7, 0.85, 1.0, times the face shade
+  vAo4 = (0.5 + 0.2 * min(ao, 1.0) + 0.15 * clamp(ao - 1.0, 0.0, 1.0) + 0.15 * clamp(ao - 2.0, 0.0, 1.0)) * bcFaceShade(mod(flags, 8.0));
   float layer = aTex.x;
   if (anim > 0.5) {
     int ai = int(anim + 0.5);
@@ -90,8 +117,6 @@ void main() {
   vUv = aTex.yz / 256.0;
   vec4 wp = modelMatrix * vec4(position, 1.0);
   wp.xyz += bcWave(wp.xyz, wave, aTex.z);
-  vLight = vec3(aLight.x / 16.0, aLight.y / 16.0, aLight.z);
-  vShade = aLight.w / 255.0;
   vRel = wp.xyz - cameraPosition;
   gl_Position = projectionMatrix * viewMatrix * wp;
 }
@@ -103,10 +128,14 @@ uniform sampler2DArray uTex;
 ${LIGHT_FOG_GLSL}
 in vec2 vUv;
 flat in float vLayer;
-in vec3 vLight;
-in float vShade;
+flat in vec4 vSky4;
+flat in vec4 vBlk4;
+flat in vec4 vAo4;
+in vec2 vFace;
 in vec3 vRel;
 layout(location = 0) out highp vec4 outColor;
+// bilinear blend of corner values (x BL, y BR, z TR, w TL) with the weights w of the face position
+float bcBilerp(vec4 c, vec4 w) { return dot(c, w); }
 void main() {
   vec4 tex = texture(uTex, vec3(vUv, vLayer));
 #if defined(CUTOUT)
@@ -122,8 +151,9 @@ void main() {
 #else
   tex.a = 1.0;
 #endif
-  float ao = vLight.z < 0.5 ? 0.5 : vLight.z < 1.5 ? 0.7 : vLight.z < 2.5 ? 0.85 : 1.0;
-  vec3 color = tex.rgb * vShade * ao * bcLight(vLight.x, vLight.y);
+  vec2 f = clamp(vFace, 0.0, 1.0), g = 1.0 - f;
+  vec4 w = vec4(g.x * g.y, f.x * g.y, f.x * f.y, g.x * f.y);
+  vec3 color = tex.rgb * bcBilerp(vAo4, w) * bcLight(bcBilerp(vSky4, w), bcBilerp(vBlk4, w));
   color = mix(color, uFogColor, bcFog(vRel));
   outColor = vec4(color, tex.a);
 }

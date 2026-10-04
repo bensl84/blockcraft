@@ -3,12 +3,14 @@
 // WebGL2 renderer in the gamma-space pipeline (SPEC §3.7):
 //   - one DataArrayTexture of every block texture (nearest magnification, per-layer mipmaps),
 //   - three chunk ShaderMaterials (opaque / cutout / translucent) sharing ONE uniforms object
-//     (sky*daylight + warm block light, AO, face shade, min-light floor, linear fog, waving, animated layers),
+//     (sky*daylight + warm block light, AO, face shade, min-light floor, linear fog, waving, animated layers);
+//     smooth light and AO are blended bilinearly per pixel from each quad's 4 corners (aCorner, review CORE-R2),
 //   - opaque + cutout geometry MERGED per column per pass (one draw call each; SPEC §5.5.6) - an edit to an
 //     already-merged column draws the edited section as its own small "hot" mesh (its old quads collapse to
 //     degenerate triangles with a partial upload) and the column is re-merged 3 s after the last edit,
 //   - translucent geometry per section (water, ice, stained glass), sorted back-to-front by three,
-//   - sky gradient dome + sunrise/sunset glow, fog that matches the horizon (hides column pop-in),
+//   - sky gradient dome + sunrise/sunset glow, fog that matches the horizon (hides column pop-in); columns wholly
+//     beyond the fog are not drawn (fog cull, review CORE-R10),
 //     underwater / lava fog, all from uniforms (setTime never remeshes),
 //   - selection outline (classic thin lines, kid thick white-on-black ribbons),
 //   - entity materials (one draw call per mob via uParts), block models, view-model pass,
@@ -17,7 +19,7 @@
 import * as THREE from 'three';
 import { SKY_PALETTE, computeSky } from './sky.js';
 import { CHUNK_FRAG, CHUNK_VERT, SKY_FRAG, SKY_VERT } from './shaders.js';
-import { degenerateSection, mergeColumnPass, quadCenters, quadIndices, sortQuadsBackToFront } from './chunkmerge.js';
+import { degenerateSection, mergeColumnPass, quadCenters, quadIndices, sortQuadsBackToFront, withCorner } from './chunkmerge.js';
 import { DynamicScaler, detectPreset } from './quality.js';
 import { Outline } from './outline.js';
 import { makeEntityMaterial } from './entitymat.js';
@@ -33,6 +35,10 @@ const FULL_MERGE_SECTIONS = 4;           // >= this many sections changed at onc
 const SORT_RADIUS = 48;                  // translucent sections closer than this get back-to-front quad sorting
 const SORT_MOVE2 = 0.5 * 0.5;            // re-sort after the eye moved this far (squared)
 const SORTS_PER_FRAME = 12;
+// Fog cull (review CORE-R10): a column whose nearest horizontal point is farther than fogFar + this pad is 100 %
+// fogged, so it is not drawn (it stays meshed and cached). The pad covers geometry that pokes out of its column:
+// cross-plant jitter (0.1) plus plant sway (0.06).
+const FOG_CULL_PAD = 0.5;
 
 /**
  * @param {object} game
@@ -65,6 +71,8 @@ export function createRendererSystem(game) {
   const tmpColor = new THREE.Color();
   const invViewProj = new THREE.Matrix4();
   const counters = { sectionSets: 0, merges: 0, hotUploads: 0, compactions: 0, textureUploads: 0, contextLosses: 0, contextRestores: 0, qualityChanges: 0, quadSorts: 0 };
+  /** columns hidden by the fog cull in the last rendered frame (getStats().fogCulled) */
+  let fogCulled = 0;
 
   const r = {
     name: 'renderer',
@@ -98,6 +106,8 @@ export function createRendererSystem(game) {
     renderFar: 88,
     contextLost: false,
     debugVisible: false,
+    /** CORE-D addition: skip drawing columns wholly beyond the fog (review CORE-R10). Tests switch it off to prove the picture is unchanged. */
+    fogCull: true,
     counters,
 
     /* ------------------------------------------------------------------ init */
@@ -201,6 +211,10 @@ export function createRendererSystem(game) {
       const had = (rec.present >> sy) & 1;
       const has = mesh && (mesh.opaque || mesh.cutout || mesh.translucent) ? 1 : 0;
       if (had !== has) { sectionCount += has - had; rec.present ^= 1 << sy; }
+      // every pass carries the per-quad corner lights (the mesher writes them; older producers get them built)
+      if (has && !((!mesh.opaque || mesh.opaque.corner) && (!mesh.cutout || mesh.cutout.corner) && (!mesh.translucent || mesh.translucent.corner))) {
+        mesh = { opaque: withCorner(mesh.opaque || null), cutout: withCorner(mesh.cutout || null), translucent: withCorner(mesh.translucent || null) };
+      }
       rec.pending[sy] = has ? mesh : null;
       dirtyCols.add(rec);
     },
@@ -353,7 +367,7 @@ export function createRendererSystem(game) {
         programs: info && info.programs ? info.programs.length : 0,
         sectionMeshes: sectionCount, dpr: r.quality.dpr,
         // CORE-D extras
-        columnMeshes: merged, hotSections: hot, translucentMeshes: trans, preset: r.quality.preset,
+        columnMeshes: merged, hotSections: hot, translucentMeshes: trans, preset: r.quality.preset, fogCulled,
         renderFar: r.renderFar, eyeMedium: r.eyeMedium, contextLost: r.contextLost, ...counters,
       };
     },
@@ -485,7 +499,7 @@ export function createRendererSystem(game) {
   function precompile() {
     try {
       const sc = new THREE.Scene();
-      const g = makeGeometry(new Float32Array(12), new Uint16Array(16), new Uint8Array(16), 1);
+      const g = makeGeometry(new Float32Array(12), new Uint16Array(16), new Uint8Array(16), 1, false, new Uint16Array(16));
       for (const m of chunkMats) sc.add(new THREE.Mesh(g, m));
       sc.add(skyMesh.clone());
       const common = [r.createEntityMaterial({ atlas: true, alphaTest: 0.5 }), r.createEntityMaterial({ color: 0xffffff }),
@@ -499,11 +513,15 @@ export function createRendererSystem(game) {
 
   /* ================================================================== geometry */
 
-  function makeGeometry(position, tex, light, quads, ownIndex = false) {
+  function makeGeometry(position, tex, light, quads, ownIndex = false, corner = null) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(position, 3));
     g.setAttribute('aTex', new THREE.BufferAttribute(tex, 4, false));
-    g.setAttribute('aLight', new THREE.BufferAttribute(light, 4, false));
+    // block models / entity atlas: per-vertex light (aLight.z AO, .w shade)
+    if (light) g.setAttribute('aLight', new THREE.BufferAttribute(light, 4, false));
+    // chunk geometry: the quad's four corner lights, blended per pixel (v1.4, review CORE-R2); not normalised.
+    // The chunk shader takes the face shade from the face bits, so chunks upload no aLight (28 bytes per vertex).
+    if (corner) g.setAttribute('aCorner', new THREE.BufferAttribute(corner, 4, false));
     // shared index view, except for translucent sections which re-order their quads (own copy)
     g.setIndex(new THREE.BufferAttribute(ownIndex ? quadIndices(quads).slice() : quadIndices(quads), 1));
     return g;
@@ -522,7 +540,7 @@ export function createRendererSystem(game) {
   }
 
   function sectionMesh(rec, sy, buf, pass) {
-    const g = makeGeometry(buf.position, buf.tex, buf.light, buf.quads, pass === 2);
+    const g = makeGeometry(buf.position, buf.tex, null, buf.quads, pass === 2, buf.corner);
     g.boundingBox = new THREE.Box3(new THREE.Vector3(-0.1, -0.1, -0.1), new THREE.Vector3(16.1, 16.1, 16.1));
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(8, 8, 8), SECTION_RADIUS);
     const m = new THREE.Mesh(g, chunkMats[pass]);
@@ -560,7 +578,7 @@ export function createRendererSystem(game) {
   }
 
   function columnMesh(rec, merged, pass) {
-    const g = makeGeometry(merged.position, merged.tex, merged.light, merged.quads);
+    const g = makeGeometry(merged.position, merged.tex, null, merged.quads, false, merged.corner);
     const y0 = merged.minSy * 16, y1 = (merged.maxSy + 1) * 16;
     g.boundingBox = new THREE.Box3(new THREE.Vector3(-0.1, y0 - 0.1, -0.1), new THREE.Vector3(16.1, y1 + 0.1, 16.1));
     const c = new THREE.Vector3(8, (y0 + y1) / 2, 8);
@@ -731,8 +749,39 @@ export function createRendererSystem(game) {
     return liq === 2 ? 'lava' : 'water';
   }
 
+  /**
+   * Fog cull (review CORE-R10): hide every chunk mesh of a column whose nearest horizontal point to the eye lies
+   * beyond uFogFar + FOG_CULL_PAD. That geometry is 100 % fogged (land fog is horizontal; underwater and lava fog
+   * are spherical, which is never shorter), so the picture does not change, but the extra mesh ring beyond R
+   * (CORE-R1) and the +1 drop hysteresis cost no draw calls or vertex work. Runs right before every render, after
+   * flushPending, so meshes created this frame are covered too.
+   */
+  function cullFogged() {
+    const e = r.camera.matrixWorld.elements;
+    const ex = e[12], ez = e[14];
+    const lim = r.uniforms.uFogFar.value + FOG_CULL_PAD;
+    const lim2 = lim * lim;
+    const on = r.fogCull !== false;
+    let hidden = 0;
+    for (const rec of columns.values()) {
+      const x0 = rec.cx * 16, z0 = rec.cz * 16;
+      const dx = Math.max(x0 - ex, 0, ex - x0 - 16), dz = Math.max(z0 - ez, 0, ez - z0 - 16);
+      const vis = !on || dx * dx + dz * dz <= lim2;
+      if (!vis) hidden++;
+      for (let pi = 0; pi < 2; pi++) {
+        const p = rec.passes[pi];
+        if (p.mesh) p.mesh.visible = vis;
+        for (let sy = 0; sy < 8; sy++) if (p.hot[sy]) p.hot[sy].mesh.visible = vis;
+      }
+      for (let sy = 0; sy < 8; sy++) if (rec.trans[sy]) rec.trans[sy].visible = vis;
+    }
+    fogCulled = hidden;
+  }
+
   function render() {
     const three = r.three;
+    r.camera.updateMatrixWorld();
+    cullFogged();
     three.info.reset();
     three.render(r.scene, r.camera);
     if (r.viewModelScene.children.length) {

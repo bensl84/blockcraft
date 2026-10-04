@@ -148,6 +148,43 @@ export default [
       });
       t.note('ringBeyondR', ring);
       t.assert(ring.n > 0 && ring.meshed >= ring.n * 0.9, `the ring just beyond R is meshed (${ring.meshed}/${ring.n})`);
+      // fog cull (review CORE-R10): chunk meshes lying wholly beyond fogFar are not drawn; nothing nearer is hidden
+      const fogCull = () => t.eval(() => {
+        const g = window.__game.game, r = g.renderer;
+        // same frame, same uTime: the picture with the cull must equal the picture without it
+        r.fogCull = false;
+        const off = r.capturePixels(640, 360);
+        const drawsOff = r.getStats().drawCalls;
+        r.fogCull = true;
+        const on = r.capturePixels(640, 360);
+        const drawsOn = r.getStats().drawCalls;
+        // a pixel may only change where the uncut picture showed pure fog colour (a fully fogged silhouette)
+        const fc = r.uniforms.uFogColor.value, fog = [fc.r * 255, fc.g * 255, fc.b * 255];
+        let diff = 0, diffNotFog = 0;
+        for (let i = 0; i < on.data.length; i += 4) {
+          if (on.data[i] === off.data[i] && on.data[i + 1] === off.data[i + 1] && on.data[i + 2] === off.data[i + 2]) continue;
+          diff++;
+          if (Math.abs(off.data[i] - fog[0]) > 1.01 || Math.abs(off.data[i + 1] - fog[1]) > 1.01 || Math.abs(off.data[i + 2] - fog[2]) > 1.01) diffNotFog++;
+        }
+        const e = r.camera.matrixWorld.elements, far = r.uniforms.uFogFar.value;
+        let drawnBeyond = 0, hiddenNear = 0, meshes = 0, hidden = 0;
+        r.worldGroup.traverse((o) => {
+          if (!o.isMesh) return;
+          meshes++;
+          const x0 = o.matrixWorld.elements[12], z0 = o.matrixWorld.elements[14];
+          const dx = Math.max(x0 - e[12], 0, e[12] - x0 - 16), dz = Math.max(z0 - e[14], 0, e[14] - z0 - 16);
+          const d = Math.hypot(dx, dz);
+          if (!o.visible) hidden++;
+          if (o.visible && d > far + 0.501) drawnBeyond++;
+          if (!o.visible && d < far) hiddenNear++;
+        });
+        return { far, meshes, hidden, drawnBeyond, hiddenNear, fogCulled: r.getStats().fogCulled, drawsOff, drawsOn, diffPixels: diff, diffNotFog };
+      });
+      const cull = await fogCull();
+      t.note('fogCull', cull);
+      t.assert(cull.hidden > 0 && cull.fogCulled > 0 && cull.drawsOn < cull.drawsOff, `columns past the fog are not drawn (${cull.hidden} of ${cull.meshes} meshes hidden, draws ${cull.drawsOff} -> ${cull.drawsOn})`);
+      t.assert(cull.drawnBeyond === 0 && cull.hiddenNear === 0, `fog cull is exact: ${cull.drawnBeyond} drawn wholly past fogFar, ${cull.hiddenNear} hidden inside it`);
+      t.assert(cull.diffNotFog === 0, `the fog cull removes only fully fogged pixels (${cull.diffPixels} changed, ${cull.diffNotFog} of them not pure fog colour)`);
       // no seam at the horizon: from high up, the band around the horizon is the fog colour (terrain and sky)
       const p = await t.call('pos');
       await t.call('teleport', p.x, 120, p.z);
@@ -162,6 +199,13 @@ export default [
       }
       t.note('horizonDev', Math.round((dev / n) * 10) / 10);
       t.assert(dev / n < 6, `horizon band matches the fog colour (mean dev ${(dev / n).toFixed(1)})`);
+      // looking down from high up every culled column lies below the horizon: the picture must not change at all
+      await t.call('setLook', 45, -20);
+      const cullHigh = await fogCull();
+      t.note('fogCullHigh', cullHigh);
+      t.assert(cullHigh.diffPixels === 0 && cullHigh.drawnBeyond === 0 && cullHigh.hiddenNear === 0, `fog cull from high up: exact, and no pixel changed (${cullHigh.diffPixels})`);
+      await t.call('setLook', 45, 0);
+      await t.call('waitFrames', 2);
       await t.shot('cored-horizon');
       // ground level: distant terrain melts into the sky
       await t.call('teleport', p.x, p.y, p.z);

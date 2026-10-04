@@ -5,7 +5,7 @@ This is the compact progress record. **Only the integrator (LEAD) edits this fil
 - **Evidence must be reproducible:** a command plus its result, a screenshot path under `.tmp/`, or a report JSON.
 - **Never tick a box from a handoff claim alone.** Re-run the command.
 
-**Build under test:** `0.1.0-b7eb8e11` (root `index.html`, 807 KB minified, three.js + inlined worker) · **Updated:** 2026-10-03 (CORE review findings CORE-R1…R9 fixed on `main`, SPEC v1.3; CORE integration: lanes A–E merged, SPEC v1.2)
+**Build under test:** `0.1.0-18da9388` (root `index.html`, 810 KB minified, three.js + inlined worker) · **Updated:** 2026-10-03 (CORE review recheck: CORE-R10 and CORE-R2 fixed on `main`, SPEC v1.4; CORE review findings CORE-R1…R9 fixed, SPEC v1.3; CORE integration: lanes A–E merged, SPEC v1.2)
 
 ## Before dispatching lanes
 
@@ -29,6 +29,31 @@ This is the compact progress record. **Only the integrator (LEAD) edits this fil
 | KID | `src/ui/touch*`, `src/kid/*` | `touch`, `kid` | `bc-kid` · `kid.md` | stub (Home works) | |
 | MECH | `src/mechanics/*` | `mechanics` | `bc-mech` · `mech.md` | stub | |
 | FX | `src/fx/*`, `src/render/celestial*` | `fx` | `bc-fx` · `fx.md` | stub | |
+
+## CORE review recheck fixes (LEAD, 2026-10-03, SPEC v1.4)
+
+The reviewer's recheck filed CORE-R10 (major: the CORE-R1 extra mesh ring drew a lot of fully fogged geometry) and kept CORE-R2 open (minor: torch-lit cave walls still showed triangle creases). Both were reproduced on the build under review (`0.1.0-b7eb8e11`, kept as `.tmp/r10/before.html`) and checked again after the fix. Scripts and pictures: `.tmp/r10/`; the reviewer's own scripts in `.tmp/review/` were re-run unchanged.
+
+| Finding | Fix | Proof (before → after) |
+|---|---|---|
+| **R10 (major)** The extra ring cost about a third of the frame rate on the weak-laptop proxy | **Fog cull** in `src/render/renderer.js`: right before each render, every chunk mesh of a column whose nearest horizontal point to the eye lies beyond `uFogFar` + 0.5 is hidden. That geometry is 100 % fogged (land fog is horizontal; underwater and lava fog are spherical, never shorter), so the picture does not change. The ring and the M + 1 drop hysteresis stay meshed and cached. `getStats().fogCulled` reports the hidden columns; `renderer.fogCull = false` turns it off for tests. | Reproduced first: `v1b-fogged-geo.mjs` share of drawn triangles wholly past the fog R 4 **39.9 %**, R 6 20.3 %, R 8 18.1 %; after: **1.6 %, 0.6 %, 0.5 %** (what is left sits inside the 0.5 pad). SwiftShader, R 4, the reviewer's same views (`v12q-perf.mjs`), median of 3 interleaved runs (`.tmp/r10/ab.mjs`, `ab2-ss-R4.json`) for ground / air / second ground: before **42.2 / 55.9 / 87.2 fps** (94 / 114 / 75 draws) → fog cull only **47.3 / 73.6 / 139.7 fps** (74 / 79 / 43 draws); old build 68.0 / 76.1 / 144.9. The first ground view stays lower than the old build because the terrain there changed with the CORE-R8 climate change: an experiment build with the old mesh radius and the same world (`.tmp/r10/m0/`) gives 47.0 fps and 66 draws at that spot. New `cored-fog` checks: the cull is exact (nothing drawn wholly past `fogFar` + 0.5, nothing hidden inside `fogFar`), the same frame with the cull off and on changes **0 pixels** from high up and only pure fog-colour pixels at ground level (0 changed in practice); draws at that view 181 → 144. `cored-perf` R 6: 189 → **157** draws (the build before CORE-R1 had 156). `perf` R 8: 259 → 234. Playtest maximum draws: 341 → 273 (GPU), 159 → 94 (SwiftShader). |
+| **R2 (minor, was kept open)** Triangle creases on torch-lit cave walls | **Per-pixel bilinear corner light.** The mesher now gives every quad its four corner lights (`corner`: sky × 8, block × 8 and AO per corner, on all 4 vertices) and names each vertex's corner in flag bits 7–8. The chunk vertex shader decodes them into `flat` varyings, and the fragment shader blends sky, block and AO with bilinear weights from the face position. No face has a diagonal any more, whatever its corners are, and AO is a soft gradient instead of hard steps. Chunk geometry drops the per-vertex `aLight` upload (the face shade now comes from the face bits), so a chunk vertex is 28 bytes (24 before). Hand-built meshes without `corner` still work (`chunkmerge.withCorner`). Mesh contract recorded in SPEC v1.4 §5.3.5, §5.4 and §5.5.3. | The reviewer's cave (`v2-crease.mjs`, seed 2024, the same torches): `.tmp/r10/cmp-R2-cave-zoom.png` (2× zoom of the ceiling block and right wall, before on top): the lighter and darker wedges are gone. The same cave with every texture painted grey (`.tmp/r10/lightonly.mjs`, light × AO × shade only): `.tmp/r10/cmp-R2-lightonly-1.png` and `-2.png` show the chevrons and AO steps before and smooth gradients after. Crease score (mean absolute second difference inside faces, 6 views): **1.42–2.15 → 0.97–1.49** (30–35 % lower); the build before CORE-R1 scored the same as the build under review, confirming the old flip rule changed almost nothing in a real cave. White-wool torch room: `.tmp/r10/cmp-R2-room.png`. New unit tests: every quad of a torch-lit room carries 4 cyclic corner ids whose corner values match the vertex light, its corners form a parallelogram, and the blend at the face centre is the mean of all 4 corners; `withCorner` and the merge keep corner data. **Costs:** chunk geometry (seed 4242, `.tmp/r10/mem.mjs`) 29.8 → 34.8 MB at R 6 and 106 → 124 MB at R 12; SwiftShader same views 47.3 / 73.6 / 139.7 → **44.8 / 65.7 / 130.7 fps** (5–11 % below the fog cull alone, still 6–50 % above the build under review). Experiment builds showed the cost is not the vertex decode or the fragment weights alone (`.tmp/r10/e1`, `e2`, within noise). RTX: display-capped at 144 fps. |
+
+**Commands and results** (`main` working tree at build `0.1.0-18da9388`, RTX 3080 Ti headless Chrome unless noted; the machine was shared with other work, so SwiftShader frame rates were compared only in interleaved runs):
+
+| Command | Result |
+|---|---|
+| `npm run build` | `0.1.0-18da9388`, root `index.html` 810 KB |
+| `npm run test:unit` | **89 / 89 pass** (adds `mesher: every quad carries its four corner lights…` and `chunkmerge: corner lights are merged…`) |
+| `npm test` | **57 PASS**, 3 PENDING (`mobs`, `survival-fall`, `save-load`), 2 SKIP (touch only); `cored-fog` now asserts the fog cull |
+| `node tools/smoke.mjs --swiftshader --tag ss` | 57 PASS, 3 PENDING, 2 SKIP |
+| `node tools/smoke.mjs --http --tag http` | 57 PASS, 3 PENDING, 2 SKIP |
+| `node tools/smoke.mjs --file index.html --tag prod` | 57 PASS, 3 PENDING, 2 SKIP |
+| `node tools/smoke.mjs --touch --tag touch` | 58 PASS, 4 PENDING |
+| `node tools/playtest.mjs --file index.html --tag r10` | **39 / 39**, median 144.9 fps, p99 7.1 ms, max 27.8 ms, at most 273 draws (`.tmp/r10-NN-*.png`) |
+| `node tools/playtest.mjs --file index.html --swiftshader --tag r10-ss` | **39 / 39**, median 71.9 fps, p90 20.9 ms, at most 94 draws |
+| `node .tmp/review/v1b-fogged-geo.mjs index.html` | fogged share 1.6 / 0.6 / 0.5 % at R 4 / 6 / 8 |
+| `node .tmp/r10/ab.mjs --reps=3 .tmp/fix/old.html .tmp/r10/before.html .tmp/r10/r10only.html .tmp/r10/after2.html` | the SwiftShader table above (`.tmp/r10/ab2-ss-R4.json`) |
 
 ## CORE review fixes (LEAD, 2026-10-03, SPEC v1.3)
 
@@ -118,7 +143,8 @@ Merged one lane at a time with `git merge --no-ff lane/<lane>` in the order core
 **Remaining defects and gaps**
 
 - FEATURE lanes are not merged: no HUD or hotbar on screen, no crosshair in the classic scheme, hotbar keys 1–9 do nothing (the HUD owns them), placeholder title and pause screens, no sounds, no mobs, no save or load, no sun, moon or clouds, no upper door half (MECH placer), no touch overlay. The playtest picks hotbar slots through the test API for that reason.
-- Smooth lighting still interpolates per triangle. The CORE-R2 flip rule removes the sharp torch-light wedges, but a soft diagonal can remain on faces with mixed corners (the original has it too). Blending all four corners per pixel needs per-corner light in the vertex format: a mesher and renderer contract change (P2).
+- *(fixed, CORE-R2 recheck, SPEC v1.4)* Smooth light and AO are blended bilinearly per pixel from each quad's four corners, so torch-lit faces have no triangle creases. It costs 4 bytes per chunk vertex (124 MB of chunk geometry at R 12, 35 MB at R 6) and 5–11 % on the SwiftShader proxy.
+- *(fixed, CORE-R10)* The extra mesh ring beyond R is not drawn where it is fully fogged (fog cull): draw calls at R 6 are back to 157.
 - *(fixed, CORE-R1)* Fog haze: the world meshes one ring beyond R and the fog is linear from 80 % of the radius. This costs about 20–35 % more draw calls (189 at R 6, budget 300).
 - *(fixed, CORE-R4)* A quick kid tap during a main-thread stall stays a tap (event timestamps, hold committed on the next tick). Pinned by `coree-tap-stall`.
 - Biome tint (D4) is still a single grass and leaf colour; taiga and snowy ground use the plains green (CORE-R8 note, P2).
@@ -170,7 +196,7 @@ CORE scope (2026-10-03, see the CORE integration evidence): the CORE parts of it
 | save-load | save, world | PENDING (MENUS stub) | |
 | touch-controls | touch, input (`--touch`) | PENDING (KID stub) | |
 | context-loss | renderer | **PASS** | |
-| perf | — | PASS (259 draws at R 8, 144 fps; SwiftShader 100 draws at R 4, 41 fps; meshes one ring beyond R since CORE-R1) | `.tmp/smoke-report.json` |
+| perf | — | PASS (234 draws at R 8, 144 fps; SwiftShader 80–91 draws at R 4; meshes one ring beyond R since CORE-R1, fully fogged columns not drawn since CORE-R10) | `.tmp/smoke-report.json` |
 | lead-events-roundtrip | — | PASS | |
 | lead-unload-persist | — | PASS (real world) | |
 | lead-break-contract | — | PASS (real interaction) | |
@@ -193,6 +219,7 @@ CORE scope (2026-10-03, see the CORE integration evidence): the CORE parts of it
 ## Handoff log
 
 <!-- newest first: date · lane · what changed · commands run + results · remaining · blockers -->
+- 2026-10-03 · LEAD · Core review recheck: CORE-R10 fog cull (columns wholly beyond the fog are not drawn; the CORE-R1 ring stays meshed), CORE-R2 per-pixel bilinear corner light and AO (mesh contract: `corner` array, flag bits 7–8, chunk geometry without `aLight`); SPEC v1.4 · unit 89/89; smoke 57 PASS / 3 PENDING / 2 SKIP on file://, http, SwiftShader and the minified file; touch 58 PASS / 4 PENDING; playtest 39/39 on GPU and SwiftShader; SwiftShader R 4 same views 42.2 / 55.9 / 87.2 → 44.8 / 65.7 / 130.7 fps · next: reviewer recheck of R10 and R2, then merge the FEATURE lanes · blockers: none
 - 2026-10-03 · LEAD · Core review fixes CORE-R1…R9: mesh one ring beyond R with a crisp linear fog, a quad flip that spreads a single bright corner, more open leaves, calmer water, kid taps classified by event time, `unmeshedWithin` after a teleport, capsule kid outline, 1/800 climate with no desert beside snow, moonlit night tint; SPEC v1.3; playtest robust to the moved spawn · unit 87/87; smoke 57 PASS / 3 PENDING / 2 SKIP on file://, http, SwiftShader and the minified file; touch 58 PASS / 4 PENDING; playtest 39/39 on GPU and SwiftShader · next: reviewer recheck of R1–R9, then merge the FEATURE lanes · blockers: none
 - 2026-10-03 · LEAD · CORE integration: merged lane/corea, coreb, corec, cored, coree into `main` one at a time (build, unit and smoke after each); fixed the LEAD light checks, the CORE-C debug view, the light curve, SwiftShader determinism and settle, the new-world hotbar slot, the outline capture and the entity test cleanup; SPEC v1.2; added `tools/playtest.mjs` · unit 85/85; smoke 56 PASS / 3 PENDING / 2 SKIP on file://, http, SwiftShader and the minified file; touch 57 PASS / 4 PENDING; playtest 39/39 on GPU and SwiftShader · next: merge the FEATURE lanes (INV, KID, MECH, FX first: HUD, touch, doors, sky objects), then `--strict` · blockers: none for CORE; the MOBS, MENUS and AUDIO branches had no commits yet when CORE was merged
 - 2026-10-03 · LEAD · v1.1: applied the independent review (lane worktrees + handoff files, persistence invariant, block entity in `block:broken`, single drop owner, undo from `block:changed` with action ids, `voidRescue`, entity streaming, batch edits, test API additions, 8 picker tabs, survival item sources, mob movement rules, one draw per mob, workers P0 + kid flight cap, no Shift, kid outline, fences/gates/panes, boats owner, bedrock rule, minor data and spec fixes) · build 567 KB, unit 13/13, smoke 14 PASS / 7 PENDING / 1 SKIP, http, swiftshader+touch and production-file runs clean · next: integrator commits the foundation, then dispatches CORE lanes A–E in worktrees · blockers: foundation commit (not done in this pass by instruction)

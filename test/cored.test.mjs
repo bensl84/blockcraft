@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { SKY_PALETTE, celestialAngle, computeSky, daylightFor } from '../src/render/sky.js';
 import { DynamicScaler, SCALE, detectPreset } from '../src/render/quality.js';
-import { U16_QUADS, degenerateSection, mergeColumnPass, quadCenters, quadIndices, sortQuadsBackToFront } from '../src/render/chunkmerge.js';
+import { U16_QUADS, degenerateSection, mergeColumnPass, quadCenters, quadIndices, sortQuadsBackToFront, withCorner } from '../src/render/chunkmerge.js';
 import { CHUNK_FRAG, CHUNK_VERT, ENTITY_FRAG, ENTITY_VERT, SKY_FRAG } from '../src/render/shaders.js';
 import { lineSegmentsFor, ribbonFor } from '../src/render/outline.js';
 import { SHARED_ENTITY_UNIFORMS, makeEntityMaterial } from '../src/render/entitymat.js';
@@ -139,7 +139,7 @@ test('chunkmerge: merging sections offsets y, keeps old ranges, and degenerates 
   assert.equal(m2.quads, 4);
   assert.equal(m2.position[1], 11 + 32);
   assert.equal(m2.position[12 + 1], 7 + 64, 'old section 4 data kept (already offset)');
-  assert.equal(m2.light[16], 5);
+  assert.equal(m2.tex[16], 5, 'old section 4 tex kept');
   // degenerate section 4 in place
   const range = degenerateSection(m2, 4);
   assert.deepEqual(range, [12, 36]);
@@ -147,6 +147,37 @@ test('chunkmerge: merging sections offsets y, keeps old ranges, and degenerates 
   assert.equal(m2.ranges[9], 0, 'degenerated slot holds no live quads');
   assert.equal(mergeColumnPass(m2, new Array(8).fill(undefined)).quads, 1, 're-merge drops the degenerate quads');
   assert.equal(mergeColumnPass(null, new Array(8).fill(null)), null);
+});
+
+test('chunkmerge: corner lights are merged, and buffers without them get them built (review CORE-R2)', () => {
+  // legacy buffer (no corner): each quad's vertices become its corners BL, BR, TR, TL in order
+  const b = buf(2, 0);
+  for (let v = 0; v < 8; v++) { b.light[v * 4] = v * 30; b.light[v * 4 + 1] = 240 - v * 30; b.light[v * 4 + 2] = v & 3; }
+  b.tex.fill(0x1ff); // garbage in bits 7-8 must be replaced
+  const w = withCorner(b);
+  assert.notEqual(w, b, 'a new object');
+  assert.equal(b.corner, undefined, 'the input is not mutated');
+  assert.equal(b.tex[3], 0x1ff, 'input tex untouched');
+  for (let q = 0; q < 2; q++) for (let j = 0; j < 4; j++) {
+    const v = q * 4 + j;
+    assert.equal((w.tex[v * 4 + 3] >> 7) & 3, j, 'vertex j is corner j');
+    assert.equal(w.tex[v * 4 + 3] & 0x7f, 0x7f, 'other flag bits kept');
+    for (let jj = 0; jj < 4; jj++) {
+      const c = w.corner[v * 4 + jj], src = q * 4 + jj;
+      assert.equal(c & 127, Math.round(b.light[src * 4] / 2), 'sky*8');
+      assert.equal((c >> 7) & 127, Math.round(b.light[src * 4 + 1] / 2), 'block*8');
+      assert.equal(c >> 14, b.light[src * 4 + 2], 'ao');
+    }
+  }
+  assert.equal(withCorner(w), w, 'a buffer with corners is returned as is');
+  // merged columns carry corner data for new and kept sections
+  const m1 = mergeColumnPass(null, [b, undefined, undefined, undefined, undefined, undefined, undefined, undefined]);
+  assert.equal(m1.corner.length, m1.quads * 16);
+  assert.deepEqual([...m1.corner], [...w.corner]);
+  const own = { ...buf(1, 3), corner: new Uint16Array(16).fill(1234) };
+  const m2 = mergeColumnPass(m1, [undefined, own, undefined, undefined, undefined, undefined, undefined, undefined]);
+  assert.deepEqual([...m2.corner.subarray(0, 32)], [...w.corner], 'kept section corners copied');
+  assert.ok(m2.corner.subarray(32, 48).every((c) => c === 1234), 'new section corners copied');
 });
 
 test('chunkmerge: translucent quads sort back to front', () => {
@@ -169,8 +200,12 @@ test('chunkmerge: translucent quads sort back to front', () => {
 
 /* ------------------------------------------------------------------ shaders */
 test('shaders: chunk contract (SPEC §5.5.3) is present', () => {
-  for (const s of [CHUNK_VERT]) for (const k of ['aTex', 'aLight', 'flat out float vLayer', 'aTex.yz / 256.0', 'aLight.w / 255.0', 'uAnimFps', 'uWave']) assert.ok(s.includes(k), k);
-  for (const k of ['sampler2DArray', 'pow(0.8, 15.0 - effSky)', '(1.0 - uDaylight) * 11.0', 'b * ((b * 0.6 + 0.4) * 0.6 + 0.4)', 'uGamma', 'uMinLight', 'CUTOUT', 'discard', '0.85', 'uFogNear', 'uFogFar']) assert.ok(CHUNK_FRAG.includes(k), k);
+  for (const s of [CHUNK_VERT]) for (const k of ['aTex', 'flat out float vLayer', 'aTex.yz / 256.0', 'uAnimFps', 'uWave']) assert.ok(s.includes(k), k);
+  // v1.4 (review CORE-R2): the quad's four corner lights, flat, blended bilinearly per pixel; AO 0..3 -> 0.5/0.7/0.85/1.0
+  // times the face shade from the face bits (0.6 E/W, 1.0 up, 0.5 down, 0.8 S/N, 0.9 plants, as the mesher's x255 values)
+  for (const k of ['in vec4 aCorner', 'flat out vec4 vSky4', 'flat out vec4 vBlk4', 'flat out vec4 vAo4', 'floor(flags / 128.0)', '0.5 + 0.2 * min(ao, 1.0) + 0.15', 'bcFaceShade(mod(flags, 8.0))', '0.600000', '1.000000', '0.501961', '0.800000', '0.901961']) assert.ok(CHUNK_VERT.includes(k), k);
+  assert.ok(!CHUNK_VERT.includes('in vec4 aLight'), 'chunk geometry uploads no per-vertex light');
+  for (const k of ['sampler2DArray', 'pow(0.8, 15.0 - effSky)', '(1.0 - uDaylight) * 11.0', 'b * ((b * 0.6 + 0.4) * 0.6 + 0.4)', 'uGamma', 'uMinLight', 'CUTOUT', 'discard', 'bcBilerp(vAo4', 'bcBilerp(vSky4', 'bcBilerp(vBlk4', 'uFogNear', 'uFogFar']) assert.ok(CHUNK_FRAG.includes(k), k);
   for (const k of ['uParts[PARTS]', 'aPart', 'ATLAS', 'MAP']) assert.ok(ENTITY_VERT.includes(k), k);
   for (const k of ['uLightSky', 'uLightBlock', 'uTint', 'uAlphaTest']) assert.ok(ENTITY_FRAG.includes(k), k);
   assert.ok(SKY_FRAG.includes('uSunset') && SKY_FRAG.includes('uFogColor'));

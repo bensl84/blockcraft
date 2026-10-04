@@ -255,6 +255,66 @@ test('mesher: a single bright (torch-lit) corner is shared by both triangles (re
   assert.ok(bright === 0 || bright === 2, `the lit corner is on the shared diagonal (vertex ${bright})`);
 });
 
+/** Decode the corner attribute like the chunk vertex shader: [sky*8, block*8, ao] per corner BL, BR, TR, TL. */
+function decodeCorners(m, v) {
+  const out = [];
+  for (let k = 0; k < 4; k++) { const c = m.corner[v * 4 + k]; out.push([c & 127, (c >> 7) & 127, c >> 14]); }
+  return out;
+}
+/** The chunk fragment shader's bilinear blend at face position (fu, fv). */
+function bilerp(c, fu, fv) { const a = c[0] + (c[1] - c[0]) * fu, b = c[3] + (c[2] - c[3]) * fu; return a + (b - a) * fv; }
+
+test('mesher: every quad carries its four corner lights for per-pixel bilinear light (review CORE-R2)', () => {
+  // a torch-lit cave: dark stone room with torch light, so faces have 2+ differing corners (diamond falloff)
+  const { blocks, light } = padded();
+  for (let i = 0; i < light.length; i++) light[i] = 0;
+  for (let x = -1; x <= 16; x++) for (let z = -1; z <= 16; z++) for (let y = -1; y <= 16; y++) {
+    const inside = x >= 2 && x <= 12 && z >= 2 && z <= 12 && y >= 2 && y <= 8;
+    if (!inside) blocks[padIndex(x, y, z)] = ID.stone;
+    else light[padIndex(x, y, z)] = Math.max(0, 14 - Math.abs(x - 5) - Math.abs(z - 6) - Math.abs(y - 3));
+  }
+  blocks[padIndex(9, 2, 9)] = ID.stone; // a block in the room: AO and light corners differ around it
+  light[padIndex(9, 2, 9)] = 0;
+  const m = meshSection(blocks, light, {}).opaque;
+  assert.equal(m.corner.length, m.quads * 16);
+  let multi = 0;
+  for (let q = 0; q < m.quads; q++) {
+    const ids = [];
+    for (let j = 0; j < 4; j++) {
+      const v = q * 4 + j;
+      ids.push((m.tex[v * 4 + 3] >> 7) & 3);
+      for (let k = 0; k < 4; k++) assert.equal(m.corner[v * 4 + k], m.corner[q * 16 + k], 'all 4 vertices hold the same corners');
+    }
+    // the vertices run around the quad: corner ids are consecutive mod 4 (a rotation of BL, BR, TR, TL)
+    for (let j = 1; j < 4; j++) assert.equal(ids[j], (ids[0] + j) & 3, `cyclic corner ids ${ids}`);
+    const c = decodeCorners(m, q * 4);
+    for (let j = 0; j < 4; j++) {
+      const v = q * 4 + j, own = c[ids[j]];
+      assert.ok(Math.abs(own[0] * 2 - m.light[v * 4]) <= 1 && Math.abs(own[1] * 2 - m.light[v * 4 + 1]) <= 1 && own[2] === m.light[v * 4 + 2],
+        `vertex light matches its corner (${own} vs ${[...m.light.subarray(v * 4, v * 4 + 3)]})`);
+    }
+    // corner positions form a parallelogram (BL + TR = BR + TL), so face (u, v) maps affinely onto the quad
+    const pos = [];
+    for (let j = 0; j < 4; j++) pos[ids[j]] = [0, 1, 2].map((a) => m.position[(q * 4 + j) * 3 + a]);
+    for (let a = 0; a < 3; a++) assert.ok(Math.abs(pos[0][a] + pos[2][a] - pos[1][a] - pos[3][a]) < 1e-5, 'parallelogram');
+    const ch = (k) => c[k][1] * 4 + c[k][2];
+    if (new Set([0, 1, 2, 3].map(ch)).size >= 3) multi++;
+  }
+  assert.ok(multi > 10, `the torch-lit room has faces with 3+ different corners (${multi})`);
+  // the blend is the same whichever diagonal the triangles use: at the centre it is the mean of the 4 corners,
+  // where per-vertex interpolation gave the mean of the 2 diagonal corners only
+  const blk = [112, 40, 72, 104];
+  assert.equal(bilerp(blk, 0.5, 0.5), (112 + 40 + 72 + 104) / 4);
+  assert.equal(bilerp(blk, 0, 0), 112); assert.equal(bilerp(blk, 1, 0), 40); assert.equal(bilerp(blk, 1, 1), 72); assert.equal(bilerp(blk, 0, 1), 104);
+  // smooth lighting off: one light per face, all corners equal
+  const flat = meshSection(blocks, light, { smoothLighting: false }).opaque;
+  for (let q = 0; q < flat.quads; q++) { const fc = flat.corner.subarray(q * 16, q * 16 + 4); assert.ok(fc.every((x) => x === fc[0]), 'flat faces'); }
+  // block models carry corners too
+  const bm = meshBlockModel(ID.stone, 0);
+  assert.equal(bm.corner.length, bm.quads * 16);
+  assert.ok([...bm.corner].every((x) => x === (120 | (3 << 14))), 'block model: full sky, no AO');
+});
+
 test('mesher: culling rules (glass, leaves fancy/fast, water) and passes', () => {
   const { blocks, light } = padded();
   blocks[padIndex(2, 2, 2)] = ID.glass; blocks[padIndex(3, 2, 2)] = ID.glass;
@@ -351,7 +411,7 @@ test('mesher: every block and state meshes inside its cell with valid attributes
             assert.ok(x >= 6.9 && x <= 8.1 && z >= 6.9 && z <= 8.1 && y >= 5.9 && y <= 8.2, `id ${id}/${state} vertex ${x},${y},${z}`);
           }
           assert.ok(b.tex[v * 4 + 1] <= 256 && b.tex[v * 4 + 2] <= 256, `uv range id ${id}`);
-          assert.ok((b.tex[v * 4 + 3] & 7) <= 6 && (b.tex[v * 4 + 3] >> 7) === 0, 'flags');
+          assert.ok((b.tex[v * 4 + 3] & 7) <= 6 && (b.tex[v * 4 + 3] >> 9) === 0, 'flags');
           assert.ok(b.light[v * 4] <= 240 && b.light[v * 4 + 1] <= 240 && b.light[v * 4 + 2] <= 3, 'light ranges');
         }
         total += b.quads;
