@@ -13,6 +13,8 @@ import { VoiceTable, LIMITS, spatial, busGains } from '../src/audio/mixer.js';
 import { fillImpulse } from '../src/audio/reverb.js';
 import { composePiece, nextGap, MODES, NOTE_RANGE, SAMPLE_NOTES, sampleFor, degreeToMidi } from '../src/audio/music.js';
 import { wireAudioEvents, soundOfBlock, voiceOf, isNightTime } from '../src/audio/wiring.js';
+import { scanAmbient, ambienceTargets, AMBIENCE } from '../src/audio/ambience.js';
+import { targetRms } from '../src/audio/levels.js';
 import { createAudioSystem, softClipCurve } from '../src/audio/audio.js';
 import { SOUND_TYPES } from '../src/data/blocks.js';
 import { MOBS } from '../src/data/mobs.js';
@@ -543,4 +545,130 @@ test('audio: listener follows the camera pose (third-person front view mirrors l
   assert.equal(sys.stats().listener.yaw, 3.14);
   const v = sys.play('cow.idle', { x: 5, y: 5.6, z: 0 }); // east of the player
   assert.ok(v && v.panner && v.panner.pan.value < -0.3, `east pans left when the camera faces the player (${v && v.panner && v.panner.pan.value})`);
+});
+
+/* ------------------------------------------------------------------ judge polish round 1 (POL-5..8) */
+test('audio POL-7: priming TNT plays only the fuse, not a block break crunch', () => {
+  const game = fakeGame(), a = fakeAudio();
+  wireAudioEvents(game, a);
+  const E = (n, p) => game.events.emit(n, p);
+  E('block:broken', { x: 1, y: 2, z: 3, id: ID.tnt, by: 'tnt', drops: [] });   // flint and steel / tnt use
+  E('block:broken', { x: 1, y: 2, z: 3, id: ID.tnt, by: 'fire', drops: [] });  // lit by fire or lava
+  E('tnt:primed', { id: 5, x: 1.5, y: 2, z: 3.5, fuse: 80 });
+  E('block:broken', { x: 1, y: 2, z: 3, id: ID.oak_planks, by: 'fire', drops: [] }); // fire burning wood still sounds
+  E('block:broken', { x: 1, y: 2, z: 3, id: ID.tnt, by: 'player', drops: [] });  // a hand break still sounds
+  assert.deepEqual(names(a), ['tnt.fuse', 'break.wood', 'break.grass']);
+});
+
+test('audio POL-8: the explosion family sits well above a block break and keeps a long rumble tail', () => {
+  assert.ok(targetRms('explosion') >= targetRms('block.break.stone') + 4, 'explosion target >= 4 dB over a break');
+  const { v } = runRecipe('explosion', { kid: true });
+  assert.ok(v.end - v.t0 >= 3, `rumble tail lasts (${(v.end - v.t0).toFixed(2)} s)`);
+  assert.ok(SOUNDS.explosion.ref >= 6, 'a blast is full loudness within several blocks');
+});
+
+test('audio POL-6: title music after the first gesture (quieter), fades on Play, world schedule after', async () => {
+  const { game, sys } = await liveSystem();
+  game.state = 'title';
+  game.events.emit('game:state', { from: 'boot', to: 'title' });
+  assert.equal(sys.stats().music.wantedTitle, true, 'title music requested before unlock');
+  await sys.unlock();
+  await new Promise((r) => setTimeout(r, 10));
+  const m = sys.music;
+  assert.ok(m.ready && m.enabled && m.title, 'title music on after the first gesture');
+  assert.equal(m.level, 0.5, '-6 dB under the in-world level');
+  assert.ok(m.nextAt <= 1.01, `title piece starts at once (${m.nextAt})`);
+  sys.context.currentTime = 1.5;
+  sys.frame(game, 0.016, 1);
+  assert.ok(m.playing && m.notesPlayed > 0, 'title notes play');
+  const titleFade = m.fade;
+  game.state = 'loading';
+  game.events.emit('game:state', { from: 'title', to: 'loading' });
+  assert.equal(m.enabled, false, 'Play stops the title music');
+  assert.ok(m.fadeStopped && titleFade.gain.n > 0, 'title session fades out');
+  game.state = 'playing';
+  game.events.emit('world:ready', { meta: game.meta, isNew: true });
+  assert.ok(m.enabled && !m.title && m.level === 1, 'world music mode at full level');
+  assert.notEqual(m.fade, titleFade, 'world music has its own gain (the title fade-out is not cut short)');
+  const gap = m.nextAt - sys.context.currentTime;
+  assert.ok(gap >= 20 && gap <= 40.1, `first world piece after 20-40 s (${gap})`);
+  // exit to title: world music stops, title music comes back after the fade
+  game.events.emit('world:exit', { meta: game.meta });
+  game.state = 'title';
+  game.events.emit('game:state', { from: 'playing', to: 'title' });
+  assert.ok(m.enabled && m.title && Math.abs(m.nextAt - sys.context.currentTime - 2) < 1e-9, 'title music again after exit');
+  assert.equal(sys.stats().music.wanted, false);
+});
+
+test('audio POL-6: unlocking in a world never starts title music', async () => {
+  const { game, sys } = await liveSystem();
+  game.state = 'playing';
+  await sys.unlock();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(!sys.music.enabled, 'no music until world:ready');
+});
+
+test('audio POL-5: ambience scan finds lit furnaces (nearest first), open water and lava', () => {
+  const cells = new Map();
+  const set = (x, y, z, id) => cells.set(`${x},${y},${z}`, id);
+  set(3, 10, 0, ID.furnace_lit); set(-6, 9, 2, ID.furnace_lit); set(1, 10, 1, ID.furnace_lit); set(7, 10, 7, ID.furnace_lit);
+  set(0, 8, 5, ID.furnace); // unlit: silent
+  for (let x = -4; x <= 4; x++) for (let z = -8; z <= -2; z++) set(x, 8, z, ID.water); // a pond (open)
+  set(5, 8, 5, ID.water); set(5, 9, 5, ID.stone); // covered water: silent
+  set(-3, 7, 6, ID.lava);
+  const getRaw = (x, y, z) => cells.get(`${x},${y},${z}`) || 0;
+  const s = scanAmbient(getRaw, 0, 10, 0);
+  assert.deepEqual(s.furnaces, [[1, 10, 1], [3, 10, 0], [-6, 9, 2]], 'nearest 3 lit furnaces');
+  assert.equal(s.water.length, 24, 'a spread of up to 24 open water cells');
+  assert.ok(s.water.every(([x, y, z]) => getRaw(x, y, z) === ID.water && !getRaw(x, y + 1, z)));
+  assert.deepEqual(s.lava, [[-3, 7, 6]]);
+});
+
+test('audio POL-5: rain bed follows strength, is muffled under a roof, silent in caves and snow; cave drone underground', () => {
+  const open = ambienceTargets(1, false, 15, -5, false, true);
+  assert.equal(open.rainGain, AMBIENCE.RAIN_LEVEL);
+  assert.equal(open.rainHz, AMBIENCE.RAIN_OPEN_HZ);
+  assert.equal(ambienceTargets(0.5, false, 15, -5, false, true).rainGain, AMBIENCE.RAIN_LEVEL / 2, 'scaled by rain strength');
+  const roof = ambienceTargets(1, false, 14, 2, false, true);
+  assert.ok(roof.rainGain > 0 && roof.rainGain < open.rainGain * 0.5 && roof.rainHz < 1000, 'quieter and muffled under a roof');
+  assert.equal(ambienceTargets(1, false, 0, 20, false, true).rainGain, 0, 'deep cave: no rain');
+  assert.equal(ambienceTargets(1, true, 15, -5, false, true).rainGain, 0, 'snow is silent');
+  assert.equal(ambienceTargets(1, false, 15, -5, false, false).rainGain, 0, 'nothing off the playing state');
+  assert.equal(ambienceTargets(0, false, 0, 20, false, true).cave, 1, 'cave air underground');
+  assert.equal(ambienceTargets(0, false, 0, 2, false, true).cave, 0, 'a dark hut is not a cave');
+  assert.equal(ambienceTargets(0, false, 0, 20, true, true).cave, 0, 'not under water');
+});
+
+test('audio POL-5: live ambience plays rain, furnace crackle, water lapping and cave drips', async () => {
+  const { game, sys } = await liveSystem();
+  await sys.unlock();
+  const cells = new Map();
+  const key = (x, y, z) => `${x},${y},${z}`;
+  cells.set(key(2, 4, 0), ID.furnace_lit);
+  for (let x = -3; x <= -1; x++) cells.set(key(x, 3, 3), ID.water);
+  let sky = 15, height = 4;
+  game.world = { getBlock: () => ID.stone, getRaw: (x, y, z) => cells.get(key(x, y, z)) || 0, getSkyLight: () => sky, getHeight: () => height };
+  game.player.eyeInWater = false;
+  game.fx = { weather: { rain: 1, target: 1, snow: false } };
+  sys.context.currentTime = 1;
+  sys.frame(game, 0.016, 1);
+  let st = sys.stats().ambience;
+  assert.ok(st.rainBed && st.rain > 0.02, `rain bed on (${JSON.stringify(st)})`);
+  assert.ok(sys.recent().some((r) => r.name === 'ambient.rain'), 'rain start is logged');
+  for (let i = 0; i < 400; i++) { sys.context.currentTime += 0.05; sys.tick(game); if (i % 5 === 4) await new Promise((r) => setTimeout(r, 17)); } // real time: the per-frame voice budget
+  const heard = new Set(sys.recent().map((r) => r.name));
+  assert.ok(heard.has('furnace.crackle'), `lit furnace crackles (${[...heard]})`);
+  assert.ok(heard.has('water.ambient'), 'water laps');
+  // go underground: no sky light, rock far overhead
+  sky = 0; height = 40; game.fx.weather.rain = 0;
+  sys.context.currentTime += 0.2;
+  sys.frame(game, 0.016, 1);
+  st = sys.stats().ambience;
+  assert.equal(st.cave, 1, 'cave detected');
+  assert.ok(st.caveBed, 'cave air drone on');
+  for (let i = 0; i < 400; i++) { sys.context.currentTime += 0.05; sys.tick(game); if (i % 5 === 4) await new Promise((r) => setTimeout(r, 17)); } // real time: the per-frame voice budget
+  assert.ok(sys.recent().some((r) => r.name === 'cave.drip'), 'cave drips');
+  game.events.emit('world:exit', { meta: game.meta });
+  st = sys.stats().ambience;
+  assert.ok(!st.rainBed && !st.caveBed, 'beds stop on world exit');
 });

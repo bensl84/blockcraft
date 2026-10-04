@@ -369,17 +369,30 @@ add('tnt.fuse', soft((v) => { // soft fizz for the whole fuse (v.q.dur seconds, 
   noise(v, { dur: d, type: 'highpass', f: 3000, f2: 3800, g: 0.22, a: 0.08, hold: d - 0.3 });
   crackle(v, { dur: d, n: Math.round(d * 14), type: 'highpass', f: 4500, g: 0.16, len: 0.005 });
 }, 6500), 0.5, 16, { gap: 0.05, pj: 0 });
+/** Soft saturation for the explosion: quiet parts pass unchanged, the peaks are rounded off (tanh, ceiling 0.55), so
+ *  the blast can be much louder overall while its peak stays under the kid-safe -6 dBFS limit. */
+const ROUND = (() => {
+  const n = 1025, c = new Float32Array(n), T = 0.55;
+  for (let i = 0; i < n; i++) { const x = (i / (n - 1)) * 2 - 1; c[i] = T * Math.tanh(x / T); }
+  return c;
+})();
 add('explosion', (v) => {
   // Kid-safe: a round soft "whump" (no sharp crack), rumble, then a gentle patter of falling bits.
   const kid = v.q.kid !== false;
   const a = kid ? 0.03 : 0.012;
-  const lp = lowpass(v, kid ? 2500 : 5000);
-  tone(v, { f: 68, f2: 30, dur: 1.0, a, g: kid ? 0.5 : 0.52, to: lp });
+  const sat = v.ctx.createWaveShaper(); // rounded peaks; the low-pass after it removes the saturation's overtones
+  sat.curve = ROUND;
+  sat.connect(lowpass(v, kid ? 2500 : 5000));
+  const lp = sat;
+  tone(v, { f: 68, f2: 30, dur: 1.0, a, g: kid ? 0.4 : 0.42, to: lp });
   tone(v, { f: 110, f2: 45, dur: 0.5, a, g: 0.25, to: lp });
-  noise(v, { color: 'brown', dur: 1.5, type: 'lowpass', f: kid ? 700 : 1200, f2: 140, g: kid ? 0.55 : 0.58, a: a * 1.5, to: lp });
+  noise(v, { color: 'brown', dur: 1.5, type: 'lowpass', f: kid ? 700 : 1200, f2: 140, g: kid ? 0.45 : 0.48, a: a * 1.5, to: lp });
   noise(v, { color: 'pink', dur: 0.5, f: kid ? 900 : 1500, f2: 250, q: 0.7, g: kid ? 0.25 : 0.3, a, to: lp });
   crackle(v, { t: 0.18, dur: 1.1, n: 16, color: 'pink', f: 1400, fJit: 0.5, q: 1, g: 0.22, len: 0.016, decay: 0.8, to: lp });
-}, 0.55, 48, { gap: 0.08, pj: 0.08 });
+  // the long, low, rounded rumble that rolls away after the blast (the big payoff moment: felt more than heard)
+  noise(v, { t: 0.08, color: 'brown', dur: 3.4, type: 'lowpass', f: 260, f2: 55, q: 0.6, g: 0.62, a: 0.12, hold: 0.45, to: lp });
+  tone(v, { t: 0.05, f: 48, f2: 27, dur: 2.6, a: 0.08, g: 0.36, hold: 0.25, to: lp });
+}, 0.55, 48, { gap: 0.08, pj: 0.08, ref: 8 }); // full loudness within 8 blocks: a blast carries
 const creak = (v, t, f, dur, g) => voiced(v, { t, dur, f0: [[0, f], [dur * 0.5, f * 1.3], [dur, f * 1.1]], formants: [[700, 6, 1], [1500, 7, 0.5]], am: { rate: 38, depth: 0.7 }, a: 0.02, g });
 add('door.open', (v) => { knock(v, 0, 900, 0.15, 0.03); creak(v, 0.02, rr(v, 85, 100), 0.3, 0.9); }, 0.6, 16, { gap: 0.1 });
 add('door.close', (v) => { knock(v, 0, rr(v, 170, 200), 0.55, 0.12); noise(v, { color: 'brown', dur: 0.1, type: 'lowpass', f: 500, g: 0.35 }); knock(v, 0.03, 1000, 0.12, 0.03); }, 0.65, 16, { gap: 0.1 });
@@ -396,6 +409,11 @@ add('lava.pop', (v) => { tone(v, { f: 220, f2: 90, dur: 0.08, g: 0.45 }); noise(
 add('shear', soft((v) => { for (const t of [0, 0.12]) { crackle(v, { t, dur: 0.03, n: 1, type: 'highpass', f: 5000, g: 0.45, len: 0.02 }); tone(v, { t, f: 3800, dur: 0.04, g: 0.12, a: 0.001 }); } }, 7500), 0.5, 16, { gap: 0.15 });
 add('bonemeal', (v) => { for (let i = 0; i < 4; i++) bell(v, { t: i * 0.06, f: rr(v, 1800, 3200), dur: 0.3, g: 0.1 }); noise(v, { dur: 0.15, type: 'highpass', f: 6000, g: 0.08, a: 0.02 }); }, 0.45, 16, { gap: 0.1 });
 add('egg.lay', (v) => { tone(v, { f: 600, f2: 250, dur: 0.08, g: 0.45 }); noise(v, { color: 'pink', dur: 0.05, type: 'lowpass', f: 900, g: 0.2 }); }, 0.45, 12, { gap: 0.2 });
+add('cave.drip', (v) => { // one soft water drop somewhere in a cave: a rising 'plink' and a faint echo
+  const f = rr(v, 1100, 1700);
+  tone(v, { f, f2: f * 1.9, dur: 0.07, a: 0.002, g: 0.4, glideFrac: 0.5 });
+  tone(v, { t: 0.19, f: f * 1.02, f2: f * 1.9, dur: 0.07, a: 0.002, g: 0.1, glideFrac: 0.5 });
+}, 0.35, 20, { gap: 0.5, pj: 0.12 });
 add('water.ambient', (v) => {
   noise(v, { color: 'pink', dur: 2, f: 900, q: 0.5, g: 0.2, a: 0.5, hold: 1 });
   bubbles(v, 0.2, 6, 0.08, 1.5);

@@ -17,7 +17,7 @@ export const TARGET_RMS = Object.freeze([
   [/\.step$/, -37], [/\.(idle|hurt|death)$/, -28], [/^(wolf\.bark|horse\.neigh|creeper\.hiss)$/, -28],
   [/^(wolf\.whine|wolf\.angry)$/, -30], [/^cat\.purr$/, -32],
   [/^mob\.eat$/, -33], [/^mob\.love$/, -30], [/^entity\.pop$/, -32], [/^entity\.poof$/, -31],
-  [/^explosion$/, -28], [/^tnt\.fuse$/, -31], [/^water\.ambient$/, -36], [/^furnace\.crackle$/, -34],
+  [/^explosion$/, -21.5], [/^tnt\.fuse$/, -31], [/^water\.ambient$/, -36], [/^furnace\.crackle$/, -34], [/^cave\.drip$/, -37],
   [/^(lava\.pop|egg\.lay|bonemeal)$/, -32], [/./, -30],
 ]);
 
@@ -165,7 +165,7 @@ export const TRIM_DB = Object.freeze({
   'entity.pop': -15,
   'entity.poof': -8,
   'tnt.fuse': -10.7,
-  'explosion': -14,
+  'explosion': -6.6,
   'door.open': -3.1,
   'door.close': -16.9,
   'chest.open': -2.2,
@@ -179,4 +179,5 @@ export const TRIM_DB = Object.freeze({
   'bonemeal': -4.7,
   'egg.lay': -15.4,
   'water.ambient': -0.1,
+  'cave.drip': -15.3,
 });

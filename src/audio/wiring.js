@@ -3,7 +3,7 @@
 // Pure with respect to WebAudio: it only calls the audio API object `a` (play / playBlock / stop / music
 // helpers), so the unit tests drive it with a fake `a` and a real EventBus.
 
-import { blockDef } from '../core/registry.js';
+import { ID, blockDef } from '../core/registry.js';
 import { MOBS } from '../data/mobs.js';
 
 const MINING_HIT_TICKS = 4;  // SPEC: hit sound every 4 ticks while mining
@@ -63,6 +63,9 @@ export function wireAudioEvents(game, a) {
   /* ---------------- blocks ---------------- */
   on('block:broken', (e) => {
     if (!e || e.by === 'explosion') return; // the explosion sound covers its blocks (up to 600 of them)
+    // priming TNT (flint and steel, fire, redstone-less 'tnt' use) swaps the block for a TNT entity: the fuse hiss
+    // and the ignite are the sound, not a grass crunch
+    if (e.by === 'tnt' || (e.id === ID.tnt && e.by === 'fire')) return;
     const p = pos(e);
     a.playBlock('break', soundOfBlock(e.id), p.x, p.y, p.z, { volume: e.by === 'player' || e.by === 'test' ? 1 : 0.7 });
     if (st.mining && st.mining.x === e.x && st.mining.y === e.y && st.mining.z === e.z) st.mining = null;
@@ -210,7 +213,14 @@ export function wireAudioEvents(game, a) {
   on('settings:changed', (e) => { if (e && /volume|muted/i.test(e.key)) a.applySettings(); });
   on('world:ready', () => { a.music.setNight(isNightNow(game)); a.music.start(); });
   on('world:exit', () => { reset(); a.music.stop(1.5); });
-  on('game:state', (e) => { if (e && e.to === 'title') a.music.stop(1.5); });
+  on('game:state', (e) => {
+    if (!e) return;
+    if (e.to === 'title') {
+      // back on the title (boot or exit): world music fades, then the soft title music (once unlocked)
+      a.music.stop(1.5);
+      if (a.music.title) a.music.title(e.from === 'boot' || !e.from ? undefined : 2);
+    } else if (e.from === 'title') a.music.stop(1.5); // Play pressed: the title music fades out over 1.5 s
+  });
   for (const n of ['dusk', 'night', 'midnight']) on('time:' + n, () => a.music.setNight(true));
   for (const n of ['dawn', 'day', 'noon']) on('time:' + n, () => a.music.setNight(false));
   on('time:set', (e) => a.music.setNight(isNightTime(e && e.dayTime)));
@@ -223,6 +233,7 @@ export function wireAudioEvents(game, a) {
     st.lastMob.clear();
     st.inWater = false;
     if (st.eyeInWater) { st.eyeInWater = false; a.setMuffle(false); }
+    if (a.ambience) a.ambience.reset();
   }
 
   return {

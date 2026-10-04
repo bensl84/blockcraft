@@ -4,6 +4,40 @@ Branch `lane/audio` · worktree `C:\Users\BSLeo\AppData\Roaming\Claude\scratch-w
 
 <!-- newest first: date · what changed · commands run + results (copy the PASS/FAIL lines) · remaining · blockers · spec conflicts -->
 
+## 2026-10-04 · JUDGE POLISH ROUND 1 - POL-5, POL-6, POL-7, POL-8 fixed
+
+Merged `main` first (fast-forward to `7f105b0`). All changes are inside `src/audio/*`, `test/audio.test.mjs` and
+lane tools; no file outside the lane was touched (FX was NOT edited: the ambience reads `game.fx.weather` and the
+world itself instead of asking FX to emit sounds).
+
+| Finding | What a player notices now | Change |
+|---|---|---|
+| POL-5 silent ambience | Rain is a soft "shhh" (~ -33 dBFS RMS in the open at full rain, follows FX's eased rain strength); under a roof it drops ~10 dB and goes muffled (650 Hz low-pass); gone deep in caves; snow stays silent. Lit furnaces crackle (~1 per second each, nearest 3), open water laps every 4-9 s, open lava pops. Underground (no sky light, >= 4 blocks of rock overhead) a very quiet "cave air" (~ -44 dBFS RMS, slowly breathing low-pass brown noise) and a soft water drip every 3-8 s | new `src/audio/ambience.js` (two looping beds into the SFX bus, so mute / effects volume / underwater muffle apply; a 17x9x17 `getRaw` scan once a second for furnaces/water/lava); new catalogue sound `cave.drip`; `stats().ambience`; beds log `ambient.rain` / `ambient.cave` in `recent()` |
+| POL-6 no title music | After the first click/tap on the title a calm piano piece starts within ~1 s at -6 dB under the in-world level (5-11 s breaths between title pieces). Pressing Play fades it out over 1.5 s; the world keeps its own 20-40 s first-piece schedule. Exit to title: world music fades, title music returns after 2 s | `music.js` (per-session fade gain so a fade-out is never cut short; `start(delay, {title, level})`, `TITLE_LEVEL`, `titleGap`), `audio.js` (`music.title()`, `wantedTitle` in stats), `wiring.js` (`game:state`) |
+| POL-7 TNT lit = grass crunch | Flint and steel on TNT: only `tnt.fuse` + `fire.ignite` | `wiring.js` `block:broken` skips `by:'tnt'` and TNT broken `by:'fire'` |
+| POL-8 explosion as quiet as a dirt block | Explosion RMS -28.4 -> -21.5 dBFS (+6.9 dB; +5.4 over a stone break, +6.5 over grass), peak -15.5 -> -11.3, plus a 3.8 s low rounded rumble tail; full loudness within 8 blocks | `sounds.js` explosion: soft tanh saturation (rounds the peaks, so the body can be louder) before the low-pass, rumble tail, `ref: 8`; `levels.js` target -21.5. Still kid-safe: 30 ms soft attack, low-pass, max-volume peak -7.6 offline / -7.4..-7.9 live (<= -6), chain ducking unchanged |
+
+Diagnostics added: `listenPeak()` also returns `rmsDb`; `stats().music.title/level/wantedTitle`; `stats().ambience`.
+New tool `tools/audio-polish-play.mjs` (real mouse clicks on the title and Play button, real flint-and-steel click on
+TNT; screenshots `.tmp/audio-polish/NN-*.png`). New smoke scenarios `audio-title-music`, `audio-ambience`,
+`audio-tnt-prime`; `audio-music` now expects the title music to take over after exit to title.
+
+Commands and results:
+```
+node build.mjs --dev --out .tmp/build-audio        -> [build] 0.1.0-5cdf8631-dev (2415 KB)
+npm run test:unit                                  -> tests 238 / pass 238 / fail 0
+node tools/smoke.mjs --tag audio                   -> [smoke] {"PASS":163,"SKIP":5}  (all 16 audio scenarios PASS)
+node tools/audio-polish-play.mjs                   -> [audio-polish] {"PASS":17,"FAIL":0}
+node tools/audio-inworld.mjs                       -> [audio-inworld] {"PASS":46,"FAIL":0}
+judge repros: j15-rain -> audio ["ambient.rain"] (was []); j7 TNT -> ["tnt.fuse","fire.ignite",...] no block.break;
+  j7 title -> music {title:true, playing:true, level:0.5}; j7 explosion live gain 0.26 (was 0.05)
+```
+Screenshots looked at: title with music playing, heavy rain in the open, the plank roof in the rain, lit furnace +
+pond, dark carved cave, TNT smoking after the flint-and-steel click.
+
+Note for the merger: an earlier smoke run showed `coree-survival-mining` FAIL once (dirt by hand in 5 ticks, not
+audio); it passed in the next full `--tag audio` run - load-dependent, CORE-E owner.
+
 ## 2026-10-03 · PHASE 2 - merged real core, verified in real gameplay
 
 Merges: `git merge main` into `lane/audio` = `5047df5`, and again after the integrator's brightness + playtest commits = `5e9145b` (both clean, no conflicts; no LEAD file touched by this lane). After the second merge: unit 108/108, all 13 audio smoke scenarios PASS (mob voices PENDING), `audio-inworld` 46/46 PASS.

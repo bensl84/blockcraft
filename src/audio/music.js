@@ -5,6 +5,8 @@
 // schedules notes (pitch-shifted samples) through the music bus (which feeds the shared convolver reverb).
 //
 // Timing: first piece 20-40 s after a world starts, then 40-150 s of silence between pieces.
+// Title screen (after the first gesture): a calm day piece ~1 s in, about 6 dB under the in-world level, then
+// short 5-11 s breaths between title pieces; it fades out over 1.5 s when Play is pressed.
 // Night mood (dusk..dawn): Dorian or Lydian and a wetter reverb.
 
 import { noiseBuffers } from './dsp.js';
@@ -159,6 +161,10 @@ export function composePiece(rng, o = {}) {
 /** Seconds of silence before the next piece. first: 20-40 s; later: 40-150 s (SPEC). */
 export function nextGap(rng, first) { return first ? 20 + rng() * 20 : 40 + rng() * 110; }
 
+/** Title-screen music: level (linear, ~ -6 dB under the in-world level) and the breath between title pieces. */
+export const TITLE_LEVEL = 0.5;
+export function titleGap(rng) { return 5 + rng() * 6; }
+
 /* ------------------------------------------------------------------ piano samples */
 export const SAMPLE_NOTES = Object.freeze([31, 35, 39, 43, 47, 51, 55, 59, 63, 67, 71, 75, 79, 83, 87, 91, 95]);
 const SAMPLE_RATE = 22050;
@@ -260,9 +266,13 @@ export class MusicPlayer {
   constructor(ctx, dest, rng) {
     this.ctx = ctx;
     this.rng = rng;
-    this.fade = ctx.createGain();
-    this.fade.gain.value = 1;
-    this.fade.connect(dest);
+    this.dest = dest;
+    this.fade = null;         // per-session gain: stop() fades its own node out, a later start() gets a fresh one
+    this.fadeStopped = true;
+    this.active = new Set();
+    this.title = false;       // title-screen mode (quieter, day mood, short breaths)
+    this.level = 1;
+    this.newFade(1);
     this.buffers = null;      // AudioBuffer[] once prepared
     this.preparing = null;    // Promise
     this.enabled = false;
@@ -275,7 +285,6 @@ export class MusicPlayer {
     this.lastTonic = undefined;
     this.notesPlayed = 0;
     this.piecesStarted = 0;
-    this.active = new Set();
     this.error = null;
   }
 
@@ -298,28 +307,57 @@ export class MusicPlayer {
   get ready() { return !!this.buffers; }
   get playing() { return !!this.piece; }
 
-  /** Enable music; the next piece starts after `delay` seconds (default: the SPEC first-piece gap). */
-  start(delay) {
-    const now = this.ctx.currentTime;
-    this.fade.gain.cancelScheduledValues(now);
-    this.fade.gain.setValueAtTime(this.fade.gain.value, now);
-    this.fade.gain.linearRampToValueAtTime(1, now + 0.3);
-    if (this.enabled && (this.piece || this.nextAt < Infinity) && delay === undefined) return;
-    this.enabled = true;
-    this.nextAt = now + (delay === undefined ? nextGap(this.rng, this.first) : Math.max(0, delay));
+  /** A fresh session gain node at `level` (a stopped session's node keeps fading out on its own). */
+  newFade(level) {
+    const g = this.ctx.createGain();
+    g.gain.value = level;
+    g.connect(this.dest);
+    this.fade = g;
+    this.fadeStopped = false;
+    this.active = new Set();
   }
 
-  /** Fade out and stop scheduling. */
+  /**
+   * Enable music; the next piece starts after `delay` seconds (default: the SPEC first-piece gap in a world,
+   * 1 s on the title). o: {title = false, level = 1 (title: TITLE_LEVEL)}.
+   */
+  start(delay, o = {}) {
+    const now = this.ctx.currentTime;
+    const title = !!o.title;
+    const level = Number.isFinite(o.level) ? o.level : (title ? TITLE_LEVEL : 1);
+    const sameMode = this.enabled && title === this.title;
+    if (!sameMode && this.enabled) this.stop(0.6); // switching title <-> world while scheduled: fade the old one out
+    if (this.fadeStopped) this.newFade(0);
+    if (!sameMode && !title) this.first = true;   // every world gets the SPEC first-piece gap (20-40 s)
+    this.title = title;
+    this.level = level;
+    const g = this.fade.gain;
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(g.value, now);
+    g.linearRampToValueAtTime(level, now + 0.3);
+    if (sameMode && (this.piece || this.nextAt < Infinity) && delay === undefined) return;
+    this.enabled = true;
+    const d = delay !== undefined ? Math.max(0, delay) : title ? 1 : nextGap(this.rng, this.first);
+    this.nextAt = now + d;
+  }
+
+  /** Fade this session's notes out and stop scheduling. */
   stop(fade = 1.5) {
     const now = this.ctx.currentTime;
     this.enabled = false;
     this.piece = null;
     this.nextAt = Infinity;
-    this.fade.gain.cancelScheduledValues(now);
-    this.fade.gain.setValueAtTime(this.fade.gain.value, now);
-    this.fade.gain.linearRampToValueAtTime(0, now + Math.max(0.05, fade));
-    const stopAt = now + Math.max(0.05, fade) + 0.05;
+    if (this.fadeStopped) return;
+    const f = Math.max(0.05, fade);
+    const g = this.fade.gain;
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(g.value, now);
+    g.linearRampToValueAtTime(0, now + f);
+    const stopAt = now + f + 0.05;
     for (const s of this.active) { try { s.stop(stopAt); } catch { /* already stopped */ } }
+    this.fadeStopped = true;
+    const old = this.fade;
+    if (typeof setTimeout === 'function') setTimeout(() => { try { old.disconnect(); } catch { /* ignore */ } }, (f + 0.3) * 1000);
   }
 
   /** Scheduler; call often (every frame). */
@@ -327,7 +365,7 @@ export class MusicPlayer {
     if (!this.enabled || !this.buffers) return;
     if (!this.piece) {
       if (now < this.nextAt) return;
-      this.piece = composePiece(this.rng, { night: this.night, avoidTonic: this.lastTonic });
+      this.piece = composePiece(this.rng, { night: this.night && !this.title, avoidTonic: this.lastTonic });
       this.lastTonic = this.piece.tonic;
       this.pieceStart = now + 0.2;
       this.idx = 0;
@@ -346,7 +384,7 @@ export class MusicPlayer {
     }
     if (this.idx >= p.events.length && now > this.pieceStart + p.seconds + 2) {
       this.piece = null;
-      this.nextAt = now + nextGap(this.rng, false);
+      this.nextAt = now + (this.title ? titleGap(this.rng) : nextGap(this.rng, false));
     }
   }
 
@@ -368,13 +406,14 @@ export class MusicPlayer {
     const end = Math.min(t + natural, rel + 1.6);
     src.start(t);
     src.stop(end);
-    this.active.add(src);
-    src.onended = () => { this.active.delete(src); try { g.disconnect(); } catch { /* ignore */ } };
+    const active = this.active;
+    active.add(src);
+    src.onended = () => { active.delete(src); try { g.disconnect(); } catch { /* ignore */ } };
     this.notesPlayed++;
   }
 
   stats() {
-    return { ready: this.ready, enabled: this.enabled, playing: this.playing, night: this.night, notesPlayed: this.notesPlayed,
+    return { ready: this.ready, enabled: this.enabled, playing: this.playing, title: this.enabled && this.title, level: this.level, night: this.night, notesPlayed: this.notesPlayed,
       piecesStarted: this.piecesStarted, nextIn: Number.isFinite(this.nextAt) ? Math.max(0, this.nextAt - this.ctx.currentTime) : null,
       mode: this.piece ? this.piece.mode : null, bpm: this.piece ? this.piece.bpm : null, error: this.error };
   }
