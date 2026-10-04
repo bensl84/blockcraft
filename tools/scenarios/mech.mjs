@@ -49,11 +49,18 @@ export default [
       await t.shot('mech-tnt-primed');
       const res = await t.eval(async () => {
         const g = window.__game.game;
-        let worst = 0;
-        for (let i = 0; i < 160; i++) { const t0 = performance.now(); g.stepTicks(1); worst = Math.max(worst, performance.now() - t0); }
-        return { worst };
+        // time the TICK only (stepTicks also renders a frame, which under SwiftShader can take 250 ms on its own;
+        // LEAD integration: the old measure failed one SwiftShader run at 244 ms while the ticks took a few ms)
+        let worst = 0, frameWorst = 0, t0 = 0;
+        const done = () => { worst = Math.max(worst, performance.now() - t0); };
+        g.afterTick.add(done);
+        try {
+          for (let i = 0; i < 160; i++) { t0 = performance.now(); g.stepTicks(1); frameWorst = Math.max(frameWorst, performance.now() - t0); }
+        } finally { g.afterTick.delete(done); }
+        return { worst, frameWorst };
       });
       t.note('worstTickMs', Math.round(res.worst * 10) / 10);
+      t.note('worstTickPlusFrameMs', Math.round(res.frameWorst * 10) / 10);
       const after = await t.call('eventCount', 'explosion');
       t.assert(after - before === 2, `explosion emitted twice (${after - before})`);
       t.assert(await t.call('getBlock', x, 4, z) === 'air' && await t.call('getBlock', x + 3, 4, z) === 'air', 'both TNT gone');
