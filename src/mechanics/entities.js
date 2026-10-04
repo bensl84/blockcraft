@@ -104,7 +104,9 @@ export class PrimedTnt extends Entity {
     super('tnt', x, y, z);
     this.width = 0.98; this.height = 0.98;
     this.category = 'block';
-    this.data = { fuse: Number.isFinite(opts.fuse) ? opts.fuse | 0 : 80, action: opts.action | 0, source: opts.source || 'tnt' };
+    // `action` is the undo action of whatever lit it (a tap, or the explosion that chain-primed it); the blast
+    // reuses it so a whole chain is ONE undo entry. A loaded save drops it: action ids restart every session.
+    this.data = { fuse: Number.isFinite(opts.fuse) ? opts.fuse | 0 : 80, action: opts.loaded ? 0 : opts.action | 0, source: opts.source || 'tnt' };
     this.fuseStart = Math.max(1, this.data.fuse);
     if (opts.hop !== false && !opts.loaded) {
       const a = (game.rand ? game.rand() : 0.5) * Math.PI * 2;
@@ -125,7 +127,7 @@ export class PrimedTnt extends Entity {
     this.data.fuse--;
     if (this.data.fuse <= 0) {
       this.remove();
-      game.mechanics.queueExplosion(this.x, this.y + 0.98 / 16, this.z, 4, { source: this.data.source === 'test' ? 'test' : 'tnt' });
+      game.mechanics.queueExplosion(this.x, this.y + 0.98 / 16, this.z, 4, { source: this.data.source === 'test' ? 'test' : 'tnt', action: this.data.action });
     }
   }
 
