@@ -60,7 +60,13 @@ export function applyGuiScale(game) {
   const root = document.documentElement.style;
   root.setProperty('--gui', s + 'px');
   const kid = game.settings.controls === 'kid';
-  const hotbarSlot = Math.min(88, Math.max(kid ? 64 : 40, (kid ? GUI.KID_HOTBAR_SLOT : GUI.HOTBAR_SLOT) * s));
+  let hotbarSlot = Math.min(88, Math.max(kid ? 64 : 40, (kid ? GUI.KID_HOTBAR_SLOT : GUI.HOTBAR_SLOT) * s));
+  // The 9 slots plus the backpack button beside them must fit the window (phone portrait, narrow windows):
+  // room = width - 16 px margins - 10 px hotbar frame - 16 px gap; backpack = clamp(slot, 64, 96).
+  const room = w - 42;
+  let fit = Math.floor(room / 10);
+  if (fit < 64) fit = Math.floor((room - 64) / 9);
+  hotbarSlot = Math.max(24, Math.min(hotbarSlot, fit));
   root.setProperty('--hotbar-slot', Math.round(hotbarSlot) + 'px');
   root.setProperty('--slot', Math.round(Math.max(kid ? 48 : 36, GUI.CONTAINER_SLOT * s)) + 'px');
   root.setProperty('--touch-btn', ({ S: 80, M: 96, L: 112 })[game.settings.buttonSize] + 'px');

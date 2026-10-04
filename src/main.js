@@ -294,6 +294,17 @@ async function startWorld(opts = {}) {
   if (game.meta) await closeWorld(false);
   if (game.ui.current) game.ui.close();
   game.setState('loading');
+  try {
+    return await openWorld(opts);
+  } catch (err) {
+    // a failed open/pregenerate must not leave the game stuck in 'loading' (MENUS request): back to the title
+    try { if (game.meta) await closeWorld(false); } catch (e2) { reportError(e2, 'startWorld cleanup'); }
+    game.setState('title');
+    throw err;
+  }
+}
+
+async function openWorld(opts) {
   window.__game && (window.__game.worldReady = false);
   const isNew = !opts.meta;
   const meta = isNew ? createWorldMeta(opts) : { ...createWorldMeta(opts.meta), ...opts.meta, rules: { ...DEFAULT_RULES, ...opts.meta.rules } };

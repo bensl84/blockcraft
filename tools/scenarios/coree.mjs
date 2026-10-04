@@ -358,7 +358,13 @@ export default [
           const re = await t.eval(async () => window.__game.game.input.requestPointerLock());
           t.note('relock', re);
         }
-        t.assert(await t.call('state') === 'playing', 'still playing');
+        // Losing the lock in the classic scheme opens the pause screen (SPEC §8.4.1, MENUS); without a lock
+        // (headless refused it) the game simply keeps playing.
+        const st = await t.call('state');
+        if (r.locked) {
+          t.assert(st === 'playing' || (st === 'paused' && await t.call('uiOpen') === 'pause'), `still playing, or paused by the lost lock (${st})`);
+          if (st === 'paused') await t.call('closeUI');
+        } else t.assert(st === 'playing', 'still playing');
       } finally {
         await t.eval(() => { if (document.pointerLockElement) document.exitPointerLock(); });
         await t.call('setSetting', 'controls', 'kid');

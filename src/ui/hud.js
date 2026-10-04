@@ -177,6 +177,8 @@ export function createHudSystem(game) {
     ]);
     nameEl = el('div', { class: 'inv-name-pop', 'data-hud': 'name' });
     bottom = el('div', { class: 'inv-hud-bottom' }, [nameEl, statsEl, xpEl, hotbarWrap]);
+    // narrow window: centre hotbar + backpack together so the backpack stays on screen (LEAD integration)
+    if (hotbarW + 2 * (bp + 16) > window.innerWidth) bottom.style.transform = `translateX(calc(-50% - ${(bp + 16) / 2}px))`;
     root.appendChild(bottom);
     nameEl.style.bottom = '100%';
 
