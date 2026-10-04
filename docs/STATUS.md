@@ -5,12 +5,12 @@ This is the compact progress record. **Only the integrator (LEAD) edits this fil
 - **Evidence must be reproducible:** a command plus its result, a screenshot path under `.tmp/`, or a report JSON.
 - **Never tick a box from a handoff claim alone.** Re-run the command.
 
-**Build under test:** `0.1.0-60b11726` (root `index.html`, 812 KB minified, three.js + inlined worker) · **Updated:** 2026-10-03 (CORE review second recheck: CORE-R11 fixed on `main`, SPEC v1.5; CORE review recheck: CORE-R10 and CORE-R2 fixed, SPEC v1.4; CORE review findings CORE-R1…R9 fixed, SPEC v1.3; CORE integration: lanes A–E merged, SPEC v1.2)
+**Build under test:** `0.1.0-84771e68` (root `index.html`, 1275 KB minified, three.js + inlined worker, all 12 lanes) · **Updated:** 2026-10-04 (FEATURE integration: lanes INV, MENUS, AUDIO, FX, MOBS, MECH, KID merged, SPEC v1.6; CORE review second recheck: CORE-R11 fixed on `main`, SPEC v1.5; CORE review recheck: CORE-R10 and CORE-R2 fixed, SPEC v1.4; CORE review findings CORE-R1…R9 fixed, SPEC v1.3; CORE integration: lanes A–E merged, SPEC v1.2)
 
 ## Before dispatching lanes
 
 - [x] **Foundation committed on `main`** (`0eee714`, line endings normalised in `0ff6b18`).
-- [x] Lane worktrees created (`../bc-<lane>` on `lane/<lane>`). CORE lanes A–E are finished and merged (below). FEATURE lanes have branches; MOBS, MENUS and AUDIO had no commits beyond the foundation when CORE was merged.
+- [x] Lane worktrees created (`../bc-<lane>` on `lane/<lane>`). All twelve lanes are finished and merged (CORE A–E on 2026-10-03, the seven FEATURE lanes on 2026-10-04).
 
 ## Lanes
 
@@ -22,13 +22,113 @@ This is the compact progress record. **Only the integrator (LEAD) edits this fil
 | CORE-C world / light / mesh | `src/world/*`, `src/worker/*` | `world`, `lighting`, `mesher` | `bc-corec` · `corec.md` | **merged** `5a0e790` (lane `e9c98b5`) + LEAD test fix `d0fe68f` | `corec-*` PASS; 3 blob workers from file:// and http |
 | CORE-D renderer / sky | `src/render/*` | `renderer`, `sky` | `bc-cored` · `cored.md` | **merged** `e600531` (lane `484ad1c`) + integration fixes `12b3389`, `e262d21`, `1efeeb3`, `b0f4bd8` | `cored-*`, `terrain-render`, `context-loss` PASS |
 | CORE-E player / input / physics | `src/player/*` | `input`, `physics`, `raycast`, `player`, `interaction` | `bc-coree` · `coree.md` | **merged** `b2b7348` (lane `7c2be68`) | `move-jump`, `break-place`, `coree-*` PASS (touch run included) |
-| MOBS | `src/entities/*`, `src/survival/*` | `mobs`, `items`, `survival` | `bc-mobs` · `mobs.md` | stub (entity base with streaming park/restore done) | |
-| INV | `src/inventory/*`, `src/ui/hud*`, `src/ui/inventory_ui.js` | `invui`, `hud`, `crafting`, `furnace` | `bc-inv` · `inv.md` | stub (inventory model done; picker tabs in data) | |
-| AUDIO | `src/audio/*` | `audio`, `music` | `bc-audio` · `audio.md` | stub | |
-| MENUS | `src/ui/menus.js`, `pixelfont.js`, `parentgate.js`, `src/save/*` | `menus`, `save`, `font`, `gate` | `bc-menus` · `menus.md` | stub (placeholder title/pause; codec done) | |
-| KID | `src/ui/touch*`, `src/kid/*` | `touch`, `kid` | `bc-kid` · `kid.md` | stub (Home works) | |
-| MECH | `src/mechanics/*` | `mechanics` | `bc-mech` · `mech.md` | stub | |
-| FX | `src/fx/*`, `src/render/celestial*` | `fx` | `bc-fx` · `fx.md` | stub | |
+| MOBS | `src/entities/*`, `src/survival/*` | `mobs`, `items`, `survival` | `bc-mobs` · `mobs.md` | **merged** `091212f` (lane `7e6b229`) + `ec50eee`, `1da649c`, `6589cc6`, `d8b4f1c` | `mobs-*` 16 PASS; `mobs-play` 68 + touch 5 PASS |
+| INV | `src/inventory/*`, `src/ui/hud*`, `src/ui/inventory_ui.js` | `invui`, `hud`, `crafting`, `furnace` | `bc-inv` · `inv.md` | **merged** `0f9926c` (lane `e6ffa12`) + `1ec7714` | `inv-*` 12 PASS; `inv-play` 48 + touch 34 PASS |
+| AUDIO | `src/audio/*` | `audio`, `music` | `bc-audio` · `audio.md` | **merged** `913dc10` (lane `ea39749`) | `audio-*` 13 PASS; `audio-inworld` 46 PASS |
+| MENUS | `src/ui/menus.js`, `pixelfont.js`, `parentgate.js`, `src/save/*` | `menus`, `save`, `font`, `gate` | `bc-menus` · `menus.md` | **merged** `a1723bf` (lane `1a35f4b`) + `1ec7714`, `1da649c` | `menus-*` 16 PASS; `menus-inworld` 21/21 |
+| KID | `src/ui/touch*`, `src/kid/*` | `touch`, `kid` | `bc-kid` · `kid.md` | **merged** `ac1a58a` (lane `dbf6efc`) + `18a6141` | `kid-*` 14 PASS (touch run); `kid-play` 41 PASS |
+| MECH | `src/mechanics/*` | `mechanics` | `bc-mech` · `mech.md` | **merged** `52e8117` (lane `de166a2`) + `1da649c`, `2cd87ba` | `mech-*` 15 PASS; `mech-play` 57/57 |
+| FX | `src/fx/*`, `src/render/celestial*` | `fx` | `bc-fx` · `fx.md` | **merged** `bcf0343` (lane `2a9b281`) + `2dd7115`, `ec50eee`, `ba34de9` | `fx-*` 12 PASS |
+
+## FEATURE integration (LEAD, 2026-10-04, SPEC v1.6)
+
+All seven FEATURE lanes are merged into `main` with `git merge --no-ff`, one at a time, in the order INV, MENUS, AUDIO, FX, MOBS, MECH, KID. After each merge: `npm run build`, `npm run test:unit`, `npm test`; every break was fixed on `main` before the next merge. No merge had a conflict (each lane only touched its own files). No stub is registered any more (`stub lanes: (none)`), so `--strict` now means every scenario really runs.
+
+| Lane | Merge (lane head) | After the merge | Integration fix commit |
+|---|---|---|---|
+| INV | `0f9926c` (`e6ffa12`) | unit 106/106; smoke 67 PASS, 5 PENDING, 2 SKIP | none needed |
+| MENUS | `a1723bf` (`1a35f4b`) | unit 121/121; smoke 82 PASS, 2 FAIL (`coree-classic-lock`, `menus-sizes`) | `1ec7714` |
+| AUDIO | `913dc10` (`ea39749`) | unit 144/144; smoke 96 PASS, 4 PENDING, 3 SKIP | none needed |
+| FX | `bcf0343` (`2a9b281`) | unit 163/163; smoke 106 PASS, 1 FAIL (`fx-inworld-break`) | `2dd7115` |
+| MOBS | `091212f` (`7e6b229`) | unit 185/185; smoke 125 PASS, 3 FAIL (`survival-fall`, `inv-hud`, `mobs-pickup`) | `ec50eee` |
+| MECH | `52e8117` (`de166a2`) | unit 215/215; smoke 143 PASS, 2 FAIL (`cored-perf`, `menus-autosave`) | `1da649c` |
+| KID | `ac1a58a` (`dbf6efc`) | unit 230/230; smoke 154 PASS, 2 FAIL (`corec-light-border`, `kid-stuck`); touch 3 FAIL | `18a6141` |
+
+Later integration commits: `6589cc6` (starter animals, lane play-throughs fitted to the merged game, SPEC v1.6), `d8b4f1c` (fixes from the end-to-end play), `ba34de9` (clouds and the fog cull, grass-tuft targeting range).
+
+### Cross-lane defects reported by the lanes, and what was done
+
+| Reported by | Defect | Fix on `main` | Proof |
+|---|---|---|---|
+| MOBS 4 | Kid world: a hold that started on an animal turned into digging after it hopped away (12 holds dug 11 holes) | `interaction.js`: in the kid scheme a hold that hit an entity stays an entity hold until released; SPEC §7.4 | new `lead-kid-hold-entity` fails on the old code (grass dug), passes now |
+| KID 2, INV 4, MECH 3, INV 3 | New worlds kept the previous hotbar slot, kid cursor, health, food, air, XP; `lookAt` did not re-centre the cursor | hotbar reset was already on `main`; `input.js` re-centres the kid cursor on `world:ready`; test API `setLook` / `lookAt` re-centre it; survival values were already reset by the real SURVIVAL lane | new `lead-new-world-reset` (health 20, food 20, air 300, XP 0, slot 1, cursor centred); `fx-inworld-break` passes |
+| KID 4 | Head inside a block saw through the world with a huge outline | FX overlay: inside an opaque full cube the block's side texture fills the screen at about a third of its brightness; SPEC §8.7 | new `lead-head-in-block`; picture `.tmp/smoke-m5j-lead-head-in-block.png` |
+| KID 3, INV 2, FX 1, AUDIO, MECH 1 | `cored-daynight` flaky (merges from streaming and growth ticks) | every CORE-D scenario runs with MECH random ticks off (`freezeWorld` wrapper) and `settle()` | no `cored-daynight` failure in any full run since |
+| MENUS 1, FX 3 | `coree-classic-lock` expected `playing` after the lost pointer lock (MENUS opens pause); order-dependent pick | accepts pause, selects slot 1, waits for the crosshair on the placed block | 3/3 isolated runs, every suite since |
+| KID 1 | `coree-touch` depended on test order | selects slot 1 and resets the pointer type first | touch suites PASS |
+| MOBS 3 | `lead-testapi` seed and draws in separate calls | seed + draws in one evaluation | PASS |
+| MOBS 1 | `survival-fall` read health after regeneration | judges the fall by its `player:hurt` event (7 HP, health 13) | PASS |
+| MOBS 2 | `eventCount` is per page session | documented in `testapi.js` (scenarios compare against a baseline) | — |
+| MECH 2 | Placer return-value contract undocumented | `hooks.js` + SPEC §7.4 step 5: true = placed (interaction consumes one item), false = refused, no default placement | — |
+| MECH 4 | Generated pumpkins and boulders on grass (grass turned to dirt in every new area, background remeshes) | worldgen puts dirt under pumpkins, melons and boulder stones; SPEC §2 | unit + `coreb-*` PASS |
+| MECH 5 | Wall torches flat against the wall | already lean 22.5° in the mesher; the report came from a front view | side view `.tmp/torch-side.png` |
+| MENUS 2 | Renderer redrew the frozen world behind pause (33 full frames/s on SwiftShader) | paused, or on the title with no world, the world is drawn twice and then skipped until something visible changes; `getStats().frozenSkips`; SPEC §5.5 | new `lead-pause-no-redraw` (≥15 of 20 frames skipped; a resize redraws) |
+| MENUS 3 | `captureThumbnail` showed the outline | the renderer hides it itself; storage no longer toggles it | `menus-thumbnail` PASS |
+| MENUS request 1 | `startWorld` stuck in `loading` after a failed open | back to the title state, error rethrown | — |
+| AUDIO | Title Play gave no `ui:click` | the real MENUS lane emits it on every button | `audio-*` PASS |
+| FX 2, INV 1 | `cored-entity` left its test objects | already fixed on `main` | — |
+| FX 4 | Hotbar number keys did nothing | the real HUD handles them | `lead-play` "number key 2 selects slot 2" |
+| Lane fallbacks | Creeper explosion fallback (MOBS), kid fade layer (KID), `!stub` guards, stale FX comments | removed; MECH owns explosions and scales creeper damage on easy (half + 1) like the fallback did | unit test with a mechanics stand-in |
+| KID request 2 | Touch: hotbar under the Jump/Down buttons on narrow screens | the jump / down / fly column is lifted above the HUD block when they would overlap (1024 × 600, and Down while flying at 1280 × 720); SPEC §8.5.1 | new unit test; `.tmp/touch-layout-1024x600.png` |
+| INV request 1 | Default skin used the famous default character's palette | original yellow shirt + teal trousers; a saved copy of the old default migrates | `.tmp/lead-play/*recipe-book.png` (doll) |
+
+Not done (honest): KID `touchStyle` setting (stored in localStorage by the lane), smelting XP award (INV request 2), the remaining "document new events" requests for SPEC §6, MECH "lie down in bed" camera, MOBS slimes and extra animals, KID photo button (P2), KID minor 0.1-block drift right after a teleport into an unloaded area.
+
+### Integration problems found and fixed on `main`
+
+- **HUD at narrow widths** (MENUS × INV): at 375 px the backpack button was off screen. The hotbar slot is capped so slots + backpack fit, and the pair is centred together (`menus-sizes`).
+- **Autosave never debounced in a living world** (MENUS × MECH): growth/melt/decay changes reset the 2.5 s debounce, so edits waited for the 30 s interval. Natural changes are now soft changes (`menus-autosave`).
+- **Item pickup** (MOBS): a drop that rolled to the far side of the 1-deep hole just dug was out of reach (`mobs-pickup` flaked). Pickup distance now reaches 0.5 below the feet, like Java's box; the scenario checks every pop direction and fails on the old rule.
+- **Kid buried by falling sand** (KID × MECH): sand that falls on the child lands in the feet cell; the stuck helper now pops a body inside a solid block too (`kid-stuck`, fails without the fix).
+- **Order-dependent scenarios**: `inv-hud` (real survival regenerated air), `mobs-gallery` (streaming changed draw counts), `menus-touch` (cards loaded after the tap), `audio-locked`/`audio-unlock` (an earlier touch gesture unlocked audio), `corec-light-border` (real MECH pops an unsupported torch), `cored-perf` (settle never went quiet with growth ticks, so the quality scaler raised the render distance), `menus-autosave` (random ticks re-dirtied columns).
+- **Clouds and the fog cull** (FX × CORE-D): on the low preset the flat cloud layer let far fogged water paint over it and changed about 400 pixels between cull off and on from high up (`cored-fog` under SwiftShader). Clouds past the fog at or below the camera are discarded, and the flat layer writes depth: 0 pixels on SwiftShader and GPU.
+
+### Found by playing it (tools/lead-play.mjs) and fixed
+
+| What a child would hit | Fix |
+|---|---|
+| The nearest animal was 75 blocks away, outside the kid world's 48-block border | a new world starts with one small group each of cows, sheep, pigs and chickens 10–28 blocks from the spawn (inside the border, deterministic per seed, never culled); the passive top-up stays inside the border (`lead-starter-animals`: 9–14 animals within 32 blocks on 5 presets/seeds) |
+| A tap on a pig standing in tall grass hit the grass | an entity in or up to 1.5 blocks behind a grass tuft / flower wins the target (`lead-entity-through-grass`, both cases) |
+| A fed cow walked into the camera and filled the screen | animals step aside from the player |
+| The HUD popup said "Tnt" | display names: TNT, Flint and Steel, Carrot on a Stick, Lily of the Valley, Jack o'Lantern |
+| Default skin looked like the famous default character | original palette (see above) |
+
+### Commands and results (final `main`, build `0.1.0-84771e68`, RTX 3080 Ti headless Chrome unless noted)
+
+| Command | Result |
+|---|---|
+| `npm run build` | `0.1.0-84771e68`, root `index.html` 1275 KB minified (was 812 KB before the FEATURE lanes) |
+| `npm run test:unit` | **231 / 231 pass** |
+| `npm test -- --strict` | **160 PASS, 5 SKIP** (touch-only), 0 FAIL, 0 PENDING, page-errors PASS |
+| `npm test -- --strict --http` | **160 PASS, 5 SKIP**, service worker registered |
+| `npm test -- --swiftshader` | **160 PASS, 5 SKIP**. `cored-fog` 0 changed pixels with the cull off/on (it changed about 400 before `ba34de9`); `mech-tnt-chain` worst tick 3.9 ms (the scenario timed tick + SwiftShader frame and failed one run at 244 ms; fixed in `2cd87ba`); `perf` 43 fps at R 4 |
+| `npm test -- --touch` | **165 PASS** (every touch-only scenario included: `touch-controls`, `coree-touch`, `kid-touch-overlay`, `kid-touch-world`, `menus-touch`) |
+| `node tools/inv-play.mjs` / `--touch` | **48 PASS**; touch **34 PASS, 2 SKIP** (the keyboard block, and the chest hold-break: Playwright touch has no long press) |
+| `node tools/kid-play.mjs` | **41 PASS, 0 FAIL** |
+| `node tools/mech-play.mjs` | **57 / 57** |
+| `node tools/mobs-play.mjs` / `--touch touch` | **68 PASS**; touch **5 PASS** |
+| `node tools/audio-inworld.mjs` | **46 PASS, 0 FAIL** |
+| `node tools/menus-inworld.mjs` | **21 / 21 PASS** |
+| `node tools/lead-play.mjs` | **48 / 48 PASS** (kid 20, survival 28), 144 fps, at most 252 draws at the end |
+| `node tools/playtest.mjs --file index.html` | **40 / 40**, median 144.9 fps, p99 7.1 ms, max 27.8 ms, at most 306 draws |
+
+The whole matrix ran twice on the final code (`.tmp/verify1/`, `.tmp/verify/`): the first pass found `cored-fog` under SwiftShader and one `kid-play` tap-build miss (fixed in `ba34de9`), the second a SwiftShader timing flake in `mech-tnt-chain` (fixed in `2cd87ba`, SwiftShader suite rerun: 160 PASS). Logs: `.tmp/verify/*.log`; reports `.tmp/smoke-report-v-*.json`. The lane play-throughs build their dev copies into `.tmp/build-<lane>` from the same `main`.
+
+### End-to-end play-through (`tools/lead-play.mjs`, screenshots `.tmp/lead-play/NN-*.png`, all looked at)
+
+Real mouse clicks, holds and keys. **Kid creative:** title → big Play → a kid creative world; the backpack opens the picture picker, yellow wool and glass go into the hotbar, number key 2 selects; taps build a little wall (wool with glass on top); a herd near the spawn; walk up to a cow and feed it wheat (hearts); saddle a pig and get on with taps, steer with the carrot on a stick (third-person view too), C gets off; TNT placed with a tap, lit with flint and steel, the blast leaves a crater, one Undo tap puts it all back; fly away and the Home button brings the child home. **Survival Easy:** Esc → pause → door button → title → Worlds → + → Hills & trees + Survival Easy → Play; an empty bag; hold the mouse on a tree trunk (leaves in the way punched too) and collect the logs; the backpack's recipe book makes planks, a crafting table and sticks (the pickaxe shows it needs the table); place the table and tap it, make a wooden pickaxe; hold the mouse looking down to dig a shaft for 9 cobblestone; push against the wall until the "hold jump" picture shows, hold Space and pop out; craft a furnace at the table, place it, cook cobblestone into stone with planks as fuel; dusk with monsters about; a bed from 3 wool + 3 planks, tap it at night, sleep, wake at time 0 with the fade gone, health 20. After the real menu flow opens each world, the script continues in a world with the same options and a fixed seed (kid 12345, survival 314) so its taps land the same way every run; random seeds work too (`--seed random`). The random-seed runs found the starter-animal and grass-targeting problems above; the misses left after those fixes were the script itself tripping over terrain (a hill in front of the tap, TNT placed in a river, a herd member stepping in front), each checked on its screenshot.
+
+### Known issues (honest)
+
+- **Needs a person on the real laptop:** a real touchscreen and trackpad, holding Esc in fullscreen, Sticky Keys, and listening to the sounds (all 150 sounds and the music are in `.tmp/audio-wav/` from the audio lane).
+- **Phone portrait (375 px)** is squeezed: hotbar slots shrink to about 29 px and container screens do not fit; laptops and landscape tablets are fine.
+- **1024 × 600 touch:** the hearts row sits under the D-pad's right turn button (visual only; the buttons themselves are clear).
+- Monsters spawn in dark caves during the day (Java-like) and count toward the monster cap of 20.
+- Sleeping keeps the camera standing (no lie-down pose); the hand is not drawn over the in-block overlay.
+- Item icons are drawn at 32 px and scaled to 48 px in 1280-wide containers (slightly uneven pixels).
+- Tapping animals reaches 5 blocks (blocks reach 8 in the kid scheme).
+- Saved worlds made before this build do not get the starter animals (only new worlds).
+- The root build grew to 1275 KB (three.js plus all lanes).
 
 ## CORE review second recheck fix (LEAD, 2026-10-03, SPEC v1.5)
 
@@ -188,24 +288,24 @@ Merged one lane at a time with `git merge --no-ff lane/<lane>` in the order core
 - [x] `node tools/smoke.mjs --file index.html --tag prod --scenario boot,world,lead-unload-persist,lead-testapi`: 5 PASS against the minified production file with its strict CSP (string `waitFor` predicates are polled from the harness).
 - [x] `node tools/lane-worktree.mjs corec --dry-run` refuses while the foundation is uncommitted; happy path verified on a throwaway committed copy under `.tmp/` (removed afterwards; the shared `node_modules` was untouched).
 
-## Whole-game acceptance (SPEC §13.1). Unchecked until verified in integration with `--strict`.
+## Whole-game acceptance (SPEC §13.1)
 
-CORE scope (2026-10-03, see the CORE integration evidence): the CORE parts of items 1 (file:// and http, zero errors, no network), 3 (walk, jump, break and place in both schemes), 4 (terrain, caves, ores, trees, torches with no column seams, day/night without remeshing) and 9 (performance, SwiftShader interactive) hold. The boxes stay unchecked until the FEATURE lanes are in and `--strict` passes.
+Verified on 2026-10-04 in integration with `--strict` (no stub left) on build `0.1.0-84771e68`; evidence in the FEATURE integration section above. A real touchscreen, trackpad and Sticky Keys, and listening to the sounds, still need a person (Known issues).
 
-- [ ] 1. Builds; runs from `file://` and over http with the service worker; zero console errors; no third-party network.
-- [ ] 2. Kid default path with no reading: Play → creative world in under 4 s → arrows walk and turn, tap places, hold breaks, F flies, H goes home, E opens the picker and red wool goes into the hotbar.
-- [ ] 3. Block-loop fidelity: walk about 4.3 b/s, jump apex about 1.25, survival break times, tool wear, drops with magnet and pop.
-- [ ] 4. World: biomes, sea, caves, ores, trees; smooth torch light with no seams at column borders; the day/night cycle never forces a remesh.
-- [ ] 5. Animals: natural spawns that never pile up; breeding with hearts and babies; shear and dye sheep; tame a wolf (sit, follow); animals can't die in kid mode; pens hold animals (P1).
-- [ ] 6. Survival: 2×2 and 3×3 crafting with the recipe book, furnace, chest; health and hunger; fall damage; death → respawn with keep-inventory.
-- [ ] 7. Mechanics: TNT chain, falling sand, doors, bed sets spawn (nap in kid worlds), water flow, farming with bone meal.
-- [ ] 8. Persistence: autosave and reload restore blocks (including columns that were unloaded), inventory, chest contents, animals, time and position.
-- [ ] 9. Performance within SPEC §12; SwiftShader at R 4 stays at 10 fps or more; no streaming holes while flying.
-- [ ] 10. Kid accessibility: target sizes, no stuck keys, no Shift binding, no trackpad hotbar spin, no page zoom, exit guards.
+- [x] 1. Builds; runs from `file://` and over http with the service worker; zero console errors; no third-party network. (`--strict` file:// and `--strict --http`: 160 PASS with page-errors PASS; playtest "no page, console, network or game errors".)
+- [x] 2. Kid default path with no reading: Play → creative world in under 4 s → arrows walk and turn, tap places, hold breaks, F flies, H goes home, E opens the picker and red wool goes into the hotbar. (`playtest` 40/40, `kid-play` 41, `inv-play` 48, `menus-inworld` world in 0.3–0.4 s, `lead-play` kid section.)
+- [x] 3. Block-loop fidelity: walk about 4.3 b/s, jump apex about 1.25, survival break times, tool wear, drops with magnet and pop. (`coree-*`, `move-jump` 4.18 b/s and apex 1.252, `mobs-pickup` in every pop direction.)
+- [x] 4. World: biomes, sea, caves, ores, trees; smooth torch light with no seams at column borders; the day/night cycle never forces a remesh. (`coreb-*`, `corec-*`, `cored-daynight`.)
+- [x] 5. Animals: natural spawns that never pile up; breeding with hearts and babies; shear and dye sheep; tame a wolf (sit, follow); animals can't die in kid mode; pens hold animals (P1). (`mobs-*` 16, `mech-fence-pen`, `mobs-play` 68, `lead-starter-animals`.)
+- [x] 6. Survival: 2×2 and 3×3 crafting with the recipe book, furnace, chest; health and hunger; fall damage; death → respawn with keep-inventory. (`inv-*`, `survival-fall`, `menus-death`, `inv-play`, `lead-play` survival section.)
+- [x] 7. Mechanics: TNT chain, falling sand, doors, bed sets spawn (nap in kid worlds), water flow, farming with bone meal. (`mech-*` 15, `mech-play` 57/57, `lead-play` TNT + Undo and the bed.)
+- [x] 8. Persistence: autosave and reload restore blocks (including columns that were unloaded), inventory, chest contents, animals, time and position. (`save-load`, `menus-reload-persist`, `menus-autosave`, `inv-chest-persist`, `mobs-persist`, `menus-inworld` with a real reload.)
+- [x] 9. Performance within SPEC §12; SwiftShader at R 4 stays at 10 fps or more; no streaming holes while flying. (playtest median 144.9 fps, p99 7.1 ms; SwiftShader `perf` 43 fps at R 4; `corec-flight-stream` backlog 0.)
+- [x] 10. Kid accessibility: target sizes, no stuck keys, no Shift binding, no trackpad hotbar spin, no page zoom, exit guards. (`menus-sizes` at 4 window sizes, `coree-keys-blur`, `coree-wheel`, `kid-*` guards, touch column clear of the HUD.)
 
 ## Smoke scenarios
 
-| Scenario | Requires | Last result (2026-10-03, `474e798`) | Evidence |
+| Scenario | Requires | Last result (2026-10-03 `474e798`; rows marked 2026-10-04 on `0.1.0-84771e68`) | Evidence |
 |---|---|---|---|
 | boot | — | PASS (file://, http with service worker, SwiftShader, minified) | `.tmp/smoke-title.png` |
 | world | — | PASS (`worldReadyMs` about 300) | `.tmp/smoke-world.png` |
@@ -216,10 +316,10 @@ CORE scope (2026-10-03, see the CORE integration evidence): the CORE parts of it
 | inventory-ui | — | PASS (placeholder screens) | `.tmp/smoke-inventory.png` |
 | time | — | PASS | `.tmp/smoke-night.png` |
 | kid-home | — | PASS | |
-| mobs | mobs, physics, world | PENDING (MOBS stub) | |
-| survival-fall | survival, player, physics | PENDING (MOBS stub) | |
-| save-load | save, world | PENDING (MENUS stub) | |
-| touch-controls | touch, input (`--touch`) | PENDING (KID stub) | |
+| mobs | mobs, physics, world | **PASS** (2026-10-04) | `.tmp/smoke-v-strict-mobs.png` |
+| survival-fall | survival, player, physics | **PASS** (2026-10-04; the fall costs 7 HP, judged by `player:hurt`) | |
+| save-load | save, world | **PASS** (2026-10-04) | |
+| touch-controls | touch, input (`--touch`) | **PASS** (2026-10-04, touch run) | `.tmp/smoke-v-touch-touch.png` |
 | context-loss | renderer | **PASS** | |
 | perf | — | PASS (234 draws at R 8, 144 fps; SwiftShader 80–91 draws at R 4; meshes one ring beyond R since CORE-R1, fully fogged columns not drawn since CORE-R10) | `.tmp/smoke-report.json` |
 | lead-events-roundtrip | — | PASS | |
@@ -228,7 +328,9 @@ CORE scope (2026-10-03, see the CORE integration evidence): the CORE parts of it
 | lead-batch | — | PASS (sky 13 under the 3×3 roof) | |
 | lead-entity-streaming | — | PASS | |
 | lead-testapi | — | PASS | |
-| corea-* (3), coreb-* (4), corec-* (8), cored-* (11), coree-* (13, one of them touch-only) | lane | all PASS (GPU, http, SwiftShader, touch, minified) | `.tmp/smoke-*.png` |
+| corea-* (3), coreb-* (4), corec-* (8), cored-* (11), coree-* (14, one of them touch-only) | lane | all PASS on 2026-10-04 (file:// strict, http strict, SwiftShader, touch) | `.tmp/smoke-v-*.png` |
+| inv-* (12), menus-* (16), audio-* (13), fx-* (12), mobs-* (16), mech-* (15), kid-* (14) | lane | all PASS on 2026-10-04 (file:// strict, http strict, SwiftShader, touch; touch-only ones in the touch run) | `.tmp/smoke-report-v-*.json` |
+| lead-* (12: the 6 contract scenarios + `lead-kid-hold-entity`, `lead-head-in-block`, `lead-pause-no-redraw`, `lead-new-world-reset`, `lead-starter-animals`, `lead-entity-through-grass`) | various | all PASS on 2026-10-04 | `.tmp/smoke-v-strict-lead-*.png` |
 
 ## Open decisions (SPEC §14)
 
@@ -240,10 +342,14 @@ CORE scope (2026-10-03, see the CORE integration evidence): the CORE parts of it
 - **D11 no Shift in the kid scheme:** fly down is C / Z / ▼; parent tip covers the Sticky Keys shortcut.
 - **D12 survival item sources:** gravel 5% bone and leaves 2% string are original twists; TNT stays creative-only until creepers (P1).
 - **D13 recipe book:** P0 for survival worlds.
+- **D16 starter animals (2026-10-04, LEAD):** every new world gets one small group each of cows, sheep, pigs and chickens 10–28 blocks from the spawn, inside the kid border. On; the parent can only change it in code (`STARTER_TYPES` in `src/entities/spawning.js`).
+- **D17 default skin (2026-10-04, LEAD):** an original yellow shirt and teal trousers replace the famous default palette.
+- **Lane decisions waiting for the parent / a reviewer:** MECH paintings pick a random fitting size (favouring bigger) and an empty-hand tap takes one down in kid creative; sugar cane and cactus grow by a 1/16 roll per random tick; leaves decay 6 steps from a log; creative buckets swap in the hand; survival sleep uses `setTime(0)` (the moon phase does not advance). MOBS: chunk-generation spawns and idle AI use per-column / per-mob random streams; Space also dismounts a pig or boat. MENUS: the pause screen shows Save & Title as a door and Home as a house; the title backdrop is 2D parallax art.
 
 ## Handoff log
 
 <!-- newest first: date · lane · what changed · commands run + results · remaining · blockers -->
+- 2026-10-04 · LEAD · FEATURE integration: merged lane/inv, menus, audio, fx, mobs, mech, kid into `main` one at a time with `--no-ff` (no conflicts); fixed every reported cross-lane defect and the integration breaks after each merge; found and fixed more by playing (starter animals near the spawn, taps through grass, animals stepping aside, names, an original default skin, clouds against the fog cull); new `tools/lead-play.mjs`; SPEC v1.6 · build `0.1.0-84771e68` 1275 KB; unit 231/231; `--strict` 160 PASS / 5 SKIP; `--strict --http` 160 / 5; SwiftShader 160 / 5; touch 165 PASS; inv-play 48 + touch 34 (2 SKIP); kid-play 41; mech-play 57/57; mobs-play 68 + touch 5; audio-inworld 46; menus-inworld 21/21; lead-play 48/48; playtest 40/40 · next: a person plays it on the real laptop (touchscreen, trackpad, sound), then a FEATURE review · blockers: none
 - 2026-10-03 · LEAD · Core review second recheck: CORE-R11. The fog cull is now picture-exact: it hides fully fogged far sections per pass only where the sky behind them is the fog colour, so distant fogged mountains stay. Also added `chunkmerge.fogCutFrom`, `SKY_GLOW_FLOOR` shared with the sky shader, `getStats().fogTrimmed`, a silhouette view in `cored-fog`, and a playtest take-off centring fix; SPEC v1.5 · unit 90/90; smoke 57 PASS / 3 PENDING / 2 SKIP on file://, http, SwiftShader and the minified file; touch 58 PASS / 4 PENDING; playtest 39/39 on GPU and SwiftShader; cull off/on 0 changed pixels in 83 views (53 changed before); SwiftShader R 4 same views 44.7 / 68.9 / 131.2 → 42.0 / 64.5 / 126.3 fps (the air view has identical draws and is run noise) · next: reviewer recheck of R11, then merge the FEATURE lanes (FX must keep the SPEC v1.5 horizon contract) · blockers: none
 - 2026-10-03 · LEAD · Core review recheck: CORE-R10 fog cull (columns wholly beyond the fog are not drawn; the CORE-R1 ring stays meshed), CORE-R2 per-pixel bilinear corner light and AO (mesh contract: `corner` array, flag bits 7–8, chunk geometry without `aLight`); SPEC v1.4 · unit 89/89; smoke 57 PASS / 3 PENDING / 2 SKIP on file://, http, SwiftShader and the minified file; touch 58 PASS / 4 PENDING; playtest 39/39 on GPU and SwiftShader; SwiftShader R 4 same views 42.2 / 55.9 / 87.2 → 44.8 / 65.7 / 130.7 fps · next: reviewer recheck of R10 and R2, then merge the FEATURE lanes · blockers: none
 - 2026-10-03 · LEAD · Core review fixes CORE-R1…R9: mesh one ring beyond R with a crisp linear fog, a quad flip that spreads a single bright corner, more open leaves, calmer water, kid taps classified by event time, `unmeshedWithin` after a teleport, capsule kid outline, 1/800 climate with no desert beside snow, moonlit night tint; SPEC v1.3; playtest robust to the moved spawn · unit 87/87; smoke 57 PASS / 3 PENDING / 2 SKIP on file://, http, SwiftShader and the minified file; touch 58 PASS / 4 PENDING; playtest 39/39 on GPU and SwiftShader · next: reviewer recheck of R1–R9, then merge the FEATURE lanes · blockers: none
