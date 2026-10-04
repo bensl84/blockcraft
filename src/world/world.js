@@ -18,7 +18,13 @@
 // PERSISTENCE INVARIANT (SPEC §5.3.2): a loaded column is the authority for its own data. For every MODIFIED
 // column that is NOT loaded, world.savedColumns holds the latest data (encoded bytes, decoded lazily);
 // world.pendingSave additionally holds the ones not yet written to IndexedDB. Never drop either without
-// moving the data to the other or into a loaded column.
+// moving the data to the other or into a loaded column. The one exception is a DAMAGED record (it does not
+// decode): it is moved into world.corruptColumns (kept as found, never overwritten) and that column is generated
+// from the seed again, so one bad column never stops the world from opening or streaming (review ROB-1).
+//
+// FAULT ISOLATION: every per-column step of streaming (restore/generate, light, mesh, worker results, urgent
+// remesh) runs in its own try/catch. A column that throws is reported once and skipped for a short back-off;
+// the rest of the world keeps streaming.
 
 import { COL_STATE, Column } from './column.js';
 import { generateColumn } from './worldgen.js';
@@ -26,7 +32,7 @@ import { computeHeightmap, lightColumn, relightBatch, updateHeightAt } from './l
 import { PADDED_VOLUME, buildPadded, meshSection } from './mesher.js';
 import { createWorkerPool } from './workers.js';
 import { B_SOLID, getCollisionBoxes } from '../core/registry.js';
-import { RENDER, SECTIONS_PER_COLUMN, WORLD_HEIGHT, colIndex, colKey, packBlock } from '../core/constants.js';
+import { COLUMN_VOLUME, RENDER, SECTIONS_PER_COLUMN, WORLD_HEIGHT, colIndex, colKey, packBlock } from '../core/constants.js';
 import { decodeColumn, encodeColumn } from '../save/codec.js';
 
 const ALL = (1 << SECTIONS_PER_COLUMN) - 1;
@@ -38,7 +44,25 @@ const ALL = (1 << SECTIONS_PER_COLUMN) - 1;
  * written by the world are compact (`data`), and FEATURE-MENUS loadWorld() should hand over `data` too so
  * columns are only decoded when they are actually visited.
  */
-function recordBlocks(rec) { return rec.blocks || decodeColumn(rec.data); }
+function recordBlocks(rec) {
+  if (!rec || typeof rec !== 'object') throw new Error('column record: missing');
+  if (rec.blocks) {
+    if (!(rec.blocks instanceof Uint16Array) || rec.blocks.length !== COLUMN_VOLUME) throw new Error('column record: bad blocks array');
+    return rec.blocks;
+  }
+  const data = rec.data instanceof ArrayBuffer ? new Uint8Array(rec.data) : rec.data;
+  if (!data || typeof data.length !== 'number') throw new Error('column record: no block data');
+  return decodeColumn(data);
+}
+/** Block entities of a record, keeping only well-formed entries ([{i, data}] with i inside the column). */
+function recordEntities(rec) {
+  const list = rec && rec.blockEntities;
+  if (!Array.isArray(list)) return [];
+  return list.filter((be) => be && typeof be === 'object' && Number.isInteger(be.i) && be.i >= 0 && be.i < COLUMN_VOLUME && be.data != null && typeof be.data === 'object');
+}
+/** Retry delay after a column step threw, and how often it may throw before it stops counting as unmeshed. */
+const FAIL_BACKOFF_MS = 1000;
+const FAIL_GIVE_UP = 3;
 function compactRecord(rec) { return rec.data && !rec.blocks ? rec : { data: encodeColumn(rec.blocks), blockEntities: rec.blockEntities || [] }; }
 
 /** Numeric map key for a column (exact for |cx|, |cz| < 2^20). */
@@ -74,6 +98,8 @@ export function createWorldSystem(game) {
   let batchChanges = [];
   // 1-entry column cache for getRaw/getLight hot paths
   let cacheCx = NaN, cacheCz = NaN, cacheCol = null;
+  /** numeric key -> {n: failures, retryAt: ms} for columns whose streaming step threw (fault isolation) */
+  const failed = new Map();
 
   function colAt(cx, cz) {
     if (cx === cacheCx && cz === cacheCz) return cacheCol;
@@ -95,6 +121,12 @@ export function createWorldSystem(game) {
     savedColumns: new Map(),
     /** records of unloaded columns changed since the last save (FEATURE-MENUS writes them, then markColumnSaved) */
     pendingSave: new Map(),
+    /**
+     * CORE-C addition (ROB-1): damaged saved records that did not decode, colKey -> {record, error, at}. The
+     * column is generated from the seed instead. Entries are kept as found (never overwritten) for a later
+     * restore or inspection; an unedited regenerated column is never saved over the stored record.
+     */
+    corruptColumns: new Map(),
     center: { cx: 0, cz: 0 },
 
     init() {
@@ -117,6 +149,7 @@ export function createWorldSystem(game) {
       world.preset = meta.preset || 'default';
       world.savedColumns = savedColumns || new Map();
       world.pendingSave = new Map();
+      world.corruptColumns = new Map();
       world.isOpen = true;
       epoch++;
       if (pool === null && game.textures) startWorkers();
@@ -132,6 +165,7 @@ export function createWorldSystem(game) {
       genResults.length = 0;
       meshResults.length = 0;
       batchDepth = 0; batchChanges = [];
+      failed.clear();
       orderCx = NaN;
       world.isOpen = false;
       epoch++;
@@ -392,7 +426,11 @@ export function createWorldSystem(game) {
       for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) {
         if (dx * dx + dz * dz > r2) continue;
         const c = colAt(ccx + dx, ccz + dz);
-        if (c === null || c.state !== COL_STATE.MESHED) n++;
+        if (c === null || c.state !== COL_STATE.MESHED) {
+          // a column that keeps failing must not hold the kid flight cap forever
+          const f = failed.size ? failed.get(nk(ccx + dx, ccz + dz)) : undefined;
+          if (f === undefined || f.n < FAIL_GIVE_UP) n++;
+        }
       }
       return n;
     },
@@ -407,8 +445,10 @@ export function createWorldSystem(game) {
     exportColumn(cx, cz) {
       const c = colAt(cx, cz);
       if (c === null) {
-        const p = world.pendingSave.get(colKey(cx, cz));
-        return p ? { blocks: recordBlocks(p), blockEntities: p.blockEntities || [] } : null;
+        const key = colKey(cx, cz);
+        const p = world.pendingSave.get(key);
+        if (!p) return null;
+        try { return { blocks: recordBlocks(p), blockEntities: recordEntities(p) }; } catch (err) { quarantine(key, p, err); return null; }
       }
       return { blocks: c.blocks.slice(), blockEntities: [...c.blockEntities].map(([i, data]) => ({ i, data: JSON.parse(JSON.stringify(data)) })) };
     },
@@ -421,7 +461,11 @@ export function createWorldSystem(game) {
       const c = colAt(cx, cz);
       if (c !== null) c.saveDirty = false;
       const p = world.pendingSave.get(key);
-      if (p) { world.savedColumns.set(key, compactRecord(p)); world.pendingSave.delete(key); }
+      if (p) {
+        let rec;
+        try { rec = compactRecord(p); } catch (err) { quarantine(key, p, err); return; }
+        world.savedColumns.set(key, rec); world.pendingSave.delete(key);
+      }
     },
 
     /** CORE-C addition (diagnostics/tests): stop the worker pool; everything continues on the main thread. */
@@ -474,17 +518,56 @@ export function createWorldSystem(game) {
     const pending = world.pendingSave.get(key);
     const saved = pending || world.savedColumns.get(key);
     if (!saved) return null;
+    let blocks;
+    try { blocks = recordBlocks(saved); } catch (err) {
+      // damaged record: keep it aside and let the caller generate this column from the seed (ROB-1)
+      quarantine(key, saved, err);
+      return null;
+    }
     const col = new Column(cx, cz);
-    col.blocks.set(recordBlocks(saved));
+    col.blocks.set(blocks);
     col.fresh = false;
     col.modified = true;
     col.saveDirty = !!pending; // not yet in IndexedDB -> keep it in getDirtyColumns()
-    if (saved.blockEntities) for (const be of saved.blockEntities) col.blockEntities.set(be.i, be.data);
+    for (const be of recordEntities(saved)) col.blockEntities.set(be.i, be.data);
     // the loaded column becomes the authority: drop both records (unload re-exports)
     world.pendingSave.delete(key);
     world.savedColumns.delete(key);
     return col;
   }
+  /**
+   * Move a damaged record out of pendingSave/savedColumns into world.corruptColumns (first copy wins) and say
+   * so once. Not a game error: the world recovers by generating that column again.
+   */
+  function quarantine(key, rec, err) {
+    world.pendingSave.delete(key);
+    world.savedColumns.delete(key);
+    if (world.corruptColumns.has(key)) return;
+    const error = String((err && err.message) || err);
+    world.corruptColumns.set(key, { record: rec, error, at: Date.now() });
+    console.warn(`[blockcraft] damaged saved column ${key} (${error}): set aside, regenerating it from the seed`);
+    const [cx, cz] = key.split(',').map(Number);
+    game.events.emit('world:columnCorrupt', { cx, cz, error });
+  }
+  /** A column's streaming step threw: report once per column, then back off before trying it again. */
+  function columnFailed(cx, cz, err) {
+    const k = nk(cx, cz);
+    let f = failed.get(k);
+    if (f === undefined) {
+      f = { n: 0, retryAt: 0 };
+      failed.set(k, f);
+      if (game.reportError) game.reportError(err, `world column ${cx},${cz}`); else console.error('[world] column', cx, cz, err);
+    }
+    f.n++;
+    f.retryAt = now() + FAIL_BACKOFF_MS * Math.min(f.n, 10);
+  }
+  /** true while a failed column is still backing off (skip it this frame). */
+  function backingOff(cx, cz) {
+    if (failed.size === 0) return false;
+    const f = failed.get(nk(cx, cz));
+    return f !== undefined && now() < f.retryAt;
+  }
+
   function addGenerated(col) {
     computeHeightmap(col);
     col.computeNonEmpty();
@@ -502,6 +585,8 @@ export function createWorldSystem(game) {
     if (col === null) {
       col = new Column(cx, cz);
       generateColumn(world.seed, cx, cz, world.preset, col);
+      // a regenerated damaged column was visited before: not a fresh chunk for chunk-generation animals
+      if (world.corruptColumns.size > 0 && world.corruptColumns.has(colKey(cx, cz))) col.fresh = false;
     }
     addGenerated(col);
     st.genMs += now() - t0; st.genN++;
@@ -535,8 +620,10 @@ export function createWorldSystem(game) {
       const U = world.renderDistance + RENDER.UNLOAD_MARGIN;
       if (dx * dx + dz * dz > U * U) { st.dropped++; continue; }
       const key = colKey(res.cx, res.cz);
-      if (world.pendingSave.has(key) || world.savedColumns.has(key)) { generateSync(res.cx, res.cz); continue; } // saved data wins
-      addGenerated(new Column(res.cx, res.cz, res.blocks, res.biomes));
+      try {
+        if (world.pendingSave.has(key) || world.savedColumns.has(key)) { generateSync(res.cx, res.cz); continue; } // saved data wins
+        addGenerated(new Column(res.cx, res.cz, res.blocks, res.biomes));
+      } catch (err) { columnFailed(res.cx, res.cz, err); }
     }
   }
 
@@ -621,9 +708,11 @@ export function createWorldSystem(game) {
         continue;
       }
       if (col.secVersion[s] !== version || col.state < COL_STATE.LIT || !col.meshStarted) { st.dropped++; col.dirtyMask |= bit; continue; }
-      applyMesh(col, s, res.mesh);
-      st.workerMeshes++;
-      checkMeshed(col);
+      try {
+        applyMesh(col, s, res.mesh);
+        st.workerMeshes++;
+        checkMeshed(col);
+      } catch (err) { columnFailed(col.cx, col.cz, err); }
     }
   }
   function checkMeshed(col) {
@@ -634,13 +723,15 @@ export function createWorldSystem(game) {
     for (const col of columns.values()) {
       if (!col.urgentMask) continue;
       if (col.state < COL_STATE.LIT || !col.meshStarted) { col.urgentMask = 0; continue; }
-      for (let s = 0; s < SECTIONS_PER_COLUMN; s++) {
-        if (!(col.urgentMask & (1 << s))) continue;
-        if ((col.nonEmptyMask | col.meshedMask) & (1 << s)) { meshSectionSync(col, s); st.urgentMeshes++; }
-        else { col.dirtyMask &= ~(1 << s); col.urgentMask &= ~(1 << s); }
-      }
-      col.urgentMask = 0;
-      checkMeshed(col);
+      try {
+        for (let s = 0; s < SECTIONS_PER_COLUMN; s++) {
+          if (!(col.urgentMask & (1 << s))) continue;
+          if ((col.nonEmptyMask | col.meshedMask) & (1 << s)) { meshSectionSync(col, s); st.urgentMeshes++; }
+          else { col.dirtyMask &= ~(1 << s); col.urgentMask &= ~(1 << s); }
+        }
+        col.urgentMask = 0;
+        checkMeshed(col);
+      } catch (err) { col.urgentMask = 0; columnFailed(col.cx, col.cz, err); }
     }
   }
 
@@ -679,20 +770,24 @@ export function createWorldSystem(game) {
       const o = order[i];
       const d2 = o[2];
       const cx = pcx + o[0], cz = pcz + o[1];
-      const col = colAt(cx, cz);
-      if (col === null) { requestColumn(cx, cz); continue; }
-      if (col.state === COL_STATE.GENERATED) {
-        if (d2 <= lightR2 && neighboursAtLeast(col, COL_STATE.GENERATED)) lightNow(col);
-        else continue;
-      }
-      if (d2 > meshR2) continue;
-      if (col.state === COL_STATE.LIT) {
-        if (!col.meshStarted && !neighboursAtLeast(col, COL_STATE.LIT)) continue;
-        processDirty(col, budgetEnd);
-        checkMeshed(col);
-      } else if (col.state === COL_STATE.MESHED && col.dirtyMask) {
-        processDirty(col, budgetEnd);
-      }
+      if (backingOff(cx, cz)) continue;
+      // one column's failure must never stop the others (ROB-1): each column's step is isolated
+      try {
+        const col = colAt(cx, cz);
+        if (col === null) { requestColumn(cx, cz); continue; }
+        if (col.state === COL_STATE.GENERATED) {
+          if (d2 <= lightR2 && neighboursAtLeast(col, COL_STATE.GENERATED)) lightNow(col);
+          else continue;
+        }
+        if (d2 > meshR2) continue;
+        if (col.state === COL_STATE.LIT) {
+          if (!col.meshStarted && !neighboursAtLeast(col, COL_STATE.LIT)) continue;
+          processDirty(col, budgetEnd);
+          checkMeshed(col);
+        } else if (col.state === COL_STATE.MESHED && col.dirtyMask) {
+          processDirty(col, budgetEnd);
+        }
+      } catch (err) { columnFailed(cx, cz, err); }
     }
   }
   /** Drop meshes of columns that left the mesh radius (+1 hysteresis): bounds draw calls and geometries. */
@@ -726,6 +821,7 @@ export function createWorldSystem(game) {
       world.savedColumns.set(key, compactRecord(rec));
       if (col.saveDirty) world.pendingSave.set(key, rec);
     }
+    if (failed.size) failed.delete(nk(col.cx, col.cz));
     if (game.renderer) game.renderer.removeColumnMeshes(col.cx, col.cz);
     col.meshedMask = 0;
     columns.delete(key);

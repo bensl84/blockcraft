@@ -4,6 +4,38 @@ Branch `lane/corec` · worktree `C:\Users\BSLeo\AppData\Roaming\Claude\scratch-w
 
 <!-- newest first: date · what changed · commands run + results (copy the PASS/FAIL lines) · remaining · blockers · spec conflicts -->
 
+## 2026-10-04 · Fixer round 1: ROB-1 (one damaged column record broke the whole world)
+
+### What changed
+- `src/world/world.js`: a saved column record that does not decode (garbage, truncated, empty bytes, a wrong-size
+  `blocks` array) no longer throws out of `restore()` / `exportColumn()` / `markColumnSaved()`. It is moved out of
+  `savedColumns` / `pendingSave` into the new **`world.corruptColumns`** map (`colKey -> {record, error, at}`, kept
+  as found, first copy wins), reported once (`console.warn` + new event **`world:columnCorrupt {cx, cz, error}`**),
+  and the column is generated from the seed instead (`fresh: false`, `modified: false`, so an unedited regenerated
+  column is never saved over the stored record). Malformed `blockEntities` entries are filtered out.
+- Fault isolation: every per-column step of streaming (restore/generate, light, mesh, worker generate/mesh results,
+  urgent remesh) runs in its own try/catch. A column that throws is reported once via `game.reportError`
+  (`world column cx,cz`), backs off (1 s x failures, max 10 s), and after 3 failures stops counting in
+  `unmeshedWithin()` so it cannot hold the kid flight cap. `world.frame` never throws because of one column.
+- Tests: two unit tests in `test/corec.test.mjs` (damaged records set aside + regenerated; a throwing column is
+  reported once and never stops streaming); smoke scenario `corec-damaged-save` (garbage spawn column + good
+  neighbour + truncated far column, real browser).
+
+### Commands and results
+- Judge repro `node .tmp/judge-robust/corrupt.mjs` (copied from the main checkout): before `FAIL garbage-column /
+  truncated-column / empty-column` (bounced to the title, `decodeColumn: bad magic`); after all three `PASS`
+  (state playing, no errors, 1241-1347 unique colours). `nan-player` still FAILs there: player position, not CORE-C.
+- `node .tmp/judge-robust/corrupt-far.mjs`: before `world.frame: decodeColumn: truncated x934`, unmeshed 12; after
+  `{"colState":3,"errs":[],"unmeshed":0}`, page errors 0; screenshot shows no void.
+- `npm run test:unit`: 233 pass, 0 fail. `node tools/smoke.mjs --tag corec`: `{"PASS":161,"SKIP":5}` (skips need
+  `--touch`), including `PASS corec-damaged-save {"near":{"corrupt":["5,-5"],"gold":72,"spawnLoaded":true},"far":{"corrupt":["5,-5","17,-5"],"state":3,"errors":0}}`.
+
+### Remaining / for other lanes
+- MENUS (not CORE-C files): ROB-1 also asks that a `startWorld` failure shows a friendly picture message with a
+  "restore backup" path instead of silently reopening the title (`src/ui/menus.js` `startFailed`). Column damage no
+  longer reaches that path, but other failures still would. MENUS could also surface `world:columnCorrupt`.
+- LEAD: SPEC §5.3.2 could document `world.corruptColumns` and `world:columnCorrupt` (additive CORE-C API).
+
 ## 2026-10-03 · CORE-C world, lighting, mesher, workers (P0 + P1 shapes/liquids)
 
 ### What changed
