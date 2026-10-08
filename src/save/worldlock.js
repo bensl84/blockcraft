@@ -3,8 +3,9 @@
 //
 // Web Locks: navigator.locks.request('blockcraft-world-<id>', {ifAvailable: true}) held for the life of the open
 // world. The browser drops the lock by itself when the tab closes or crashes. Without Web Locks a BroadcastChannel
-// ping asks the other windows "is anyone playing <id>?" and waits PING_MS for an answer. Without either, every
-// claim succeeds (the old behaviour).
+// probe arbitrates simultaneous claims by nonce, then waits PING_MS for replies. This fallback is best-effort:
+// suspended tabs / delivery beyond the probe window cannot provide the atomic guarantee of Web Locks.
+// Without either API, every claim succeeds (the old behaviour).
 
 export const LOCK_PREFIX = 'blockcraft-world-';
 export const PING_MS = 250;
@@ -20,6 +21,8 @@ export function createWorldLock(env = {}) {
   let releaseFn = null;         // resolves the Web Locks callback promise (drops the lock)
   let pending = null;           // {id, promise} of a claim in progress
   let channel = null;
+  let contender = null;        // current BroadcastChannel probe {id, nonce, busy}
+  let cancelProbe = null;
   let gen = 0;                  // bumped by release(): a claim that resolves after it does not keep the lock
 
   function ensureChannel() {
@@ -28,7 +31,15 @@ export function createWorldLock(env = {}) {
       channel = new BC('blockcraft-worlds');
       channel.onmessage = (e) => {
         const m = e && e.data;
-        if (m && m.q === 'open?' && m.id && m.id === heldId) { try { channel.postMessage({ a: 'open', id: m.id, nonce: m.nonce }); } catch { /* ignore */ } }
+        if (!m || m.q !== 'open?' || !m.id) return;
+        let busy = m.id === heldId;
+        if (contender && contender.id === m.id) {
+          // A held owner always wins. Pending peers use the same ordering; equal
+          // nonces conservatively reject both claims rather than allowing two writers.
+          if (typeof m.nonce !== 'string' || contender.nonce <= m.nonce) busy = true;
+          if (typeof m.nonce !== 'string' || m.nonce <= contender.nonce) contender.busy = true;
+        }
+        if (busy) { try { channel.postMessage({ a: 'open', id: m.id, nonce: m.nonce }); } catch { /* ignore */ } }
       };
     } catch { channel = null; }
     return channel;
@@ -47,8 +58,8 @@ export function createWorldLock(env = {}) {
           done(true);
           return new Promise((r) => { releaseFn = r; });
         });
-        if (p && p.catch) p.catch(() => done(true));
-      } catch { done(true); /* Web Locks refused (opaque origin): behave as before */ }
+        if (p && p.catch) p.catch(() => done(false));
+      } catch { done(false); /* A failed lock request is not proof of ownership. */ }
     });
   }
 
@@ -57,16 +68,24 @@ export function createWorldLock(env = {}) {
     if (!ch) { heldId = id; return Promise.resolve(true); }
     const g = gen;
     return new Promise((resolve) => {
-      const nonce = Math.random().toString(36).slice(2);
-      let busy = false;
-      const listener = (e) => { const m = e && e.data; if (m && m.a === 'open' && m.id === id && m.nonce === nonce) busy = true; };
-      ch.addEventListener('message', listener);
-      try { ch.postMessage({ q: 'open?', id, nonce }); } catch { /* ignore */ }
-      setTimeout(() => {
+      const nonce = globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+      const probe = { id, nonce, busy: false };
+      contender = probe;
+      const listener = (e) => { const m = e && e.data; if (m && m.a === 'open' && m.id === id && m.nonce === nonce) probe.busy = true; };
+      let timer;
+      const finish = (ok) => {
+        clearTimeout(timer);
         ch.removeEventListener('message', listener);
-        if (!busy && g === gen) heldId = id;
-        resolve(!busy);
-      }, PING_MS);
+        if (contender === probe) contender = null;
+        if (cancelProbe === cancel) cancelProbe = null;
+        if (ok) heldId = id;
+        resolve(ok);
+      };
+      const cancel = () => finish(false);
+      cancelProbe = cancel;
+      ch.addEventListener('message', listener);
+      timer = setTimeout(() => finish(!probe.busy && g === gen), PING_MS);
+      try { ch.postMessage({ q: 'open?', id, nonce }); } catch { finish(false); }
     });
   }
 
@@ -79,7 +98,11 @@ export function createWorldLock(env = {}) {
       if (heldId === id) return Promise.resolve(true);
       if (pending && pending.id === id) return pending.promise;
       lock.release();
-      const promise = (locks ? claimWithLocks(id) : claimWithChannel(id)).finally(() => { if (pending && pending.promise === promise) pending = null; });
+      const g = gen;
+      const promise = (locks ? claimWithLocks(id) : claimWithChannel(id)).then((ok) => {
+        if (pending && pending.promise === promise) pending = null;
+        return ok && g === gen;
+      });
       pending = { id, promise };
       if (!locks) ensureChannel();
       return promise;
@@ -87,6 +110,8 @@ export function createWorldLock(env = {}) {
     /** Let other windows open the world again. */
     release() {
       gen++;
+      pending = null;
+      if (cancelProbe) cancelProbe();
       heldId = null;
       if (releaseFn) { const r = releaseFn; releaseFn = null; r(); }
     },
