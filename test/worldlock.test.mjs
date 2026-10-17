@@ -109,6 +109,20 @@ test('no-API fallback preserves compatibility but release before settlement canc
   assert.equal(peer.heldId, 'world');
 });
 
+test('duplicate pending and already-held claims reject success after release', async () => {
+  const peer = createWorldLock({ locks: null, BroadcastChannel: null });
+  const first = peer.claim('world');
+  const duplicate = peer.claim('world');
+  assert.equal(duplicate, first);
+  peer.release();
+  assert.deepEqual(await Promise.all([first, duplicate]), [false, false]);
+  assert.equal(await peer.claim('world'), true);
+  const held = peer.claim('world');
+  peer.release();
+  assert.equal(await held, false);
+  assert.equal(peer.heldId, null);
+});
+
 test('equal contention nonces fail closed, and different worlds remain independent', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   t.mock.method(globalThis.crypto, 'randomUUID', () => 'collision');

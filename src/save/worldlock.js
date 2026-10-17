@@ -95,8 +95,11 @@ export function createWorldLock(env = {}) {
     /** Claim world id for this window. Resolves false when another window has it open. */
     claim(id) {
       if (!id) return Promise.resolve(true);
-      if (heldId === id) return Promise.resolve(true);
       if (pending && pending.id === id) return pending.promise;
+      if (heldId === id) {
+        const g = gen;
+        return Promise.resolve().then(() => g === gen && heldId === id);
+      }
       lock.release();
       const g = gen;
       const promise = (locks ? claimWithLocks(id) : claimWithChannel(id)).then((ok) => {
